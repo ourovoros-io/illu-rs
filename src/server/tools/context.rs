@@ -1,4 +1,4 @@
-use crate::db::Database;
+use crate::db::{Database, StoredSymbol};
 use std::fmt::Write;
 
 pub fn handle_context(
@@ -13,113 +13,128 @@ pub fn handle_context(
     let mut output = String::new();
 
     for sym in &symbols {
-        let _ = writeln!(output, "## {} ({})\n", sym.name, sym.kind);
+        render_symbol_header(&mut output, sym);
+        render_symbol_details(&mut output, sym);
+        render_trait_info(db, &mut output, sym)?;
+        render_callees(db, &mut output, sym)?;
+    }
 
-        // Doc comment
-        if let Some(doc) = &sym.doc_comment {
-            for line in doc.lines() {
-                let _ = writeln!(output, "> {line}");
+    render_related_docs(db, &mut output, symbol_name)?;
+
+    Ok(output)
+}
+
+fn render_symbol_header(output: &mut String, sym: &StoredSymbol) {
+    let _ = writeln!(output, "## {} ({})\n", sym.name, sym.kind);
+
+    if let Some(doc) = &sym.doc_comment {
+        for line in doc.lines() {
+            let _ = writeln!(output, "> {line}");
+        }
+        let _ = writeln!(output);
+    }
+
+    let _ = writeln!(
+        output,
+        "- **File:** {}:{}-{}",
+        sym.file_path, sym.line_start, sym.line_end
+    );
+    let _ = writeln!(output, "- **Visibility:** {}", sym.visibility);
+    let _ = writeln!(output, "- **Signature:** `{}`", sym.signature);
+    let _ = writeln!(output);
+}
+
+fn render_symbol_details(output: &mut String, sym: &StoredSymbol) {
+    if let Some(details) = &sym.details {
+        let _ = writeln!(output, "### Fields/Variants\n");
+        let _ = writeln!(output, "```rust\n{details}\n```\n");
+    }
+
+    if let Some(body) = &sym.body {
+        let _ = writeln!(output, "### Source\n");
+        let _ = writeln!(output, "```rust\n{body}\n```\n");
+    }
+}
+
+fn render_trait_info(
+    db: &Database,
+    output: &mut String,
+    sym: &StoredSymbol,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if sym.kind == "struct" || sym.kind == "enum" {
+        let impls = db.get_trait_impls_for_type(&sym.name)?;
+        if !impls.is_empty() {
+            let _ = writeln!(output, "### Trait Implementations\n");
+            for ti in &impls {
+                let _ = writeln!(
+                    output,
+                    "- **{}** ({}:{}-{})",
+                    ti.trait_name, ti.file_path,
+                    ti.line_start, ti.line_end
+                );
             }
             let _ = writeln!(output);
         }
+    }
 
-        // File/visibility/signature
-        let _ = writeln!(
-            output,
-            "- **File:** {}:{}-{}",
-            sym.file_path, sym.line_start, sym.line_end
-        );
-        let _ = writeln!(output, "- **Visibility:** {}", sym.visibility);
-        let _ = writeln!(output, "- **Signature:** `{}`", sym.signature);
-        let _ = writeln!(output);
-
-        // Details (fields/variants)
-        if let Some(details) = &sym.details {
-            let _ = writeln!(output, "### Fields/Variants\n");
-            let _ = writeln!(output, "```rust\n{details}\n```\n");
-        }
-
-        // Source body
-        if let Some(body) = &sym.body {
-            let _ = writeln!(output, "### Source\n");
-            let _ = writeln!(output, "```rust\n{body}\n```\n");
-        }
-
-        // Trait implementations (for structs and enums)
-        if sym.kind == "struct" || sym.kind == "enum" {
-            let impls = db.get_trait_impls_for_type(&sym.name)?;
-            if !impls.is_empty() {
-                let _ = writeln!(output, "### Trait Implementations\n");
-                for ti in &impls {
-                    let _ = writeln!(
-                        output,
-                        "- **{}** ({}:{}-{})",
-                        ti.trait_name, ti.file_path,
-                        ti.line_start, ti.line_end
-                    );
-                }
-                let _ = writeln!(output);
+    if sym.kind == "trait" {
+        let implementors = db.get_trait_impls_for_trait(&sym.name)?;
+        if !implementors.is_empty() {
+            let _ = writeln!(output, "### Implemented By\n");
+            for ti in &implementors {
+                let _ = writeln!(
+                    output,
+                    "- **{}** ({}:{}-{})",
+                    ti.type_name, ti.file_path,
+                    ti.line_start, ti.line_end
+                );
             }
-        }
-
-        // Trait implementors (for traits)
-        if sym.kind == "trait" {
-            let implementors = db.get_trait_impls_for_trait(&sym.name)?;
-            if !implementors.is_empty() {
-                let _ = writeln!(output, "### Implemented By\n");
-                for ti in &implementors {
-                    let _ = writeln!(
-                        output,
-                        "- **{}** ({}:{}-{})",
-                        ti.type_name, ti.file_path,
-                        ti.line_start, ti.line_end
-                    );
-                }
-                let _ = writeln!(output);
-            }
-        }
-
-        // Callees
-        let callees = db.get_callees(&sym.name)?;
-        if !callees.is_empty() {
-            let _ = writeln!(output, "### Callees\n");
-
-            let calls: Vec<_> = callees
-                .iter()
-                .filter(|c| c.ref_kind == "call")
-                .collect();
-            let type_refs: Vec<_> = callees
-                .iter()
-                .filter(|c| c.ref_kind != "call")
-                .collect();
-
-            if !calls.is_empty() {
-                let _ = writeln!(output, "**Calls:**");
-                for c in &calls {
-                    let _ = writeln!(
-                        output,
-                        "- {} ({})",
-                        c.name, c.file_path
-                    );
-                }
-                let _ = writeln!(output);
-            }
-
-            if !type_refs.is_empty() {
-                let _ = writeln!(output, "**Uses types:**");
-                for c in &type_refs {
-                    let _ = writeln!(
-                        output,
-                        "- {} ({})",
-                        c.name, c.file_path
-                    );
-                }
-                let _ = writeln!(output);
-            }
+            let _ = writeln!(output);
         }
     }
 
-    // Related documentation
+    Ok(())
+}
+
+fn render_callees(
+    db: &Database,
+    output: &mut String,
+    sym: &StoredSymbol,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let callees = db.get_callees(&sym.name)?;
+    if callees.is_empty() {
+        return Ok(());
+    }
+
+    let _ = writeln!(output, "### Callees\n");
+
+    let calls: Vec<_> = callees.iter().filter(|c| c.ref_kind == "call").collect();
+    let type_refs: Vec<_> = callees.iter().filter(|c| c.ref_kind != "call").collect();
+
+    if !calls.is_empty() {
+        let _ = writeln!(output, "**Calls:**");
+        for c in &calls {
+            let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+        }
+        let _ = writeln!(output);
+    }
+
+    if !type_refs.is_empty() {
+        let _ = writeln!(output, "**Uses types:**");
+        for c in &type_refs {
+            let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+        }
+        let _ = writeln!(output);
+    }
+
+    Ok(())
+}
+
+fn render_related_docs(
+    db: &Database,
+    output: &mut String,
+    symbol_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let docs = db.search_docs(symbol_name)?;
     if !docs.is_empty() {
         output.push_str("## Related Documentation\n\n");
@@ -136,8 +151,7 @@ pub fn handle_context(
             );
         }
     }
-
-    Ok(output)
+    Ok(())
 }
 
 #[cfg(test)]

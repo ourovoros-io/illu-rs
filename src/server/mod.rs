@@ -88,6 +88,11 @@ struct DocsParams {
     topic: Option<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct OverviewParams {
+    path: String,
+}
+
 #[tool_router]
 impl IlluServer {
     #[tool(
@@ -161,6 +166,25 @@ impl IlluServer {
             .lock()
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         let result = tools::docs::handle_docs(&db, &params.dependency, params.topic.as_deref())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(
+        name = "overview",
+        description = "List public symbols under a file path prefix, grouped by file. Shows name, kind, signature, and first line of doc comment."
+    )]
+    async fn overview(
+        &self,
+        Parameters(params): Parameters<OverviewParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.refresh().await?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let result = tools::overview::handle_overview(&db, &params.path)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(result)]))

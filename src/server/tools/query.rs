@@ -43,10 +43,10 @@ fn format_symbols(
                 "- **{}** ({}) at {}:{}-{}\n  `{}`",
                 sym.name, sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
             );
-            if let Some(doc) = &sym.doc_comment {
-                if let Some(first_line) = doc.lines().next() {
-                    let _ = writeln!(output, "  *{first_line}*");
-                }
+            if let Some(doc) = &sym.doc_comment
+                && let Some(first_line) = doc.lines().next()
+            {
+                let _ = writeln!(output, "  *{first_line}*");
             }
         }
         output.push('\n');
