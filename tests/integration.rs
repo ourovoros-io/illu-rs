@@ -160,3 +160,149 @@ fn test_skill_file_generated() {
     assert!(content.contains("serde"));
     assert!(content.contains("query"));
 }
+
+fn setup_workspace_db() -> (tempfile::TempDir, Database) {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"
+[workspace]
+members = ["shared", "app"]
+
+[workspace.dependencies]
+serde = "1.0"
+"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        r#"
+[[package]]
+name = "serde"
+version = "1.0.210"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+
+[[package]]
+name = "app"
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    // shared crate
+    let shared_dir = dir.path().join("shared");
+    std::fs::create_dir_all(shared_dir.join("src")).unwrap();
+    std::fs::write(
+        shared_dir.join("Cargo.toml"),
+        r#"
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2021"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        shared_dir.join("src").join("lib.rs"),
+        r"
+pub struct SharedConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+pub fn default_config() -> SharedConfig {
+    SharedConfig { host: String::new(), port: 8080 }
+}
+",
+    )
+    .unwrap();
+
+    // app crate depending on shared
+    let app_dir = dir.path().join("app");
+    std::fs::create_dir_all(app_dir.join("src")).unwrap();
+    std::fs::write(
+        app_dir.join("Cargo.toml"),
+        r#"
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+shared = { path = "../shared" }
+serde = { workspace = true }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        app_dir.join("src").join("main.rs"),
+        r"
+pub fn run() -> SharedConfig {
+    default_config()
+}
+",
+    )
+    .unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+        skip_doc_fetch: true,
+    };
+    index_repo(&db, &config).unwrap();
+
+    (dir, db)
+}
+
+#[test]
+fn test_workspace_query_across_crates() {
+    let (_dir, db) = setup_workspace_db();
+    let result = query::handle_query(&db, "SharedConfig", Some("symbols")).unwrap();
+    assert!(
+        result.contains("SharedConfig"),
+        "query should find SharedConfig from shared crate"
+    );
+}
+
+#[test]
+fn test_workspace_impact_crate_summary() {
+    let (_dir, db) = setup_workspace_db();
+    let result = impact::handle_impact(&db, "SharedConfig").unwrap();
+    assert!(
+        result.contains("Affected Crates"),
+        "impact should show crate-level summary"
+    );
+    assert!(
+        result.contains("shared"),
+        "impact should show defining crate"
+    );
+    assert!(result.contains("app"), "impact should show dependent crate");
+}
+
+#[test]
+fn test_workspace_context_shows_file_path() {
+    let (_dir, db) = setup_workspace_db();
+    let result = context::handle_context(&db, "SharedConfig").unwrap();
+    assert!(
+        result.contains("shared/src/lib.rs"),
+        "context should show crate-relative path"
+    );
+}
+
+#[test]
+fn test_workspace_skill_file() {
+    let (dir, _db) = setup_workspace_db();
+    let skill_path = dir.path().join(".claude").join("skills").join("illu-rs.md");
+    assert!(skill_path.exists(), "skill file should exist for workspace");
+    let content = std::fs::read_to_string(&skill_path).unwrap();
+    assert!(
+        content.contains("serde"),
+        "skill file should list serde dep"
+    );
+}
