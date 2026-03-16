@@ -14,6 +14,23 @@ pub fn handle_impact(
     let mut output = String::new();
     let _ = writeln!(output, "## Impact Analysis: {symbol_name}\n");
 
+    // Crate-level summary (only for workspace projects with >1 crate)
+    let crate_count = db.get_crate_count()?;
+    if crate_count > 1 {
+        let first_sym = &symbols[0];
+        if let Ok(Some(defining_crate)) = db.get_crate_for_file(&first_sym.file_path) {
+            let _ = writeln!(output, "### Affected Crates\n");
+            let _ = writeln!(output, "- **{}** (defined here)", defining_crate.name);
+
+            if let Ok(dep_crates) = db.get_transitive_crate_dependents(defining_crate.id) {
+                for c in &dep_crates {
+                    let _ = writeln!(output, "- **{}**", c.name);
+                }
+            }
+            output.push('\n');
+        }
+    }
+
     // Find direct references using symbol_refs
     let mut stmt = db.conn.prepare(
         "WITH RECURSIVE deps(id, name, file_path, depth) AS (
@@ -142,5 +159,70 @@ mod tests {
 
         let result = handle_impact(&db, "base_fn").unwrap();
         assert!(result.contains("caller_fn"));
+    }
+
+    #[test]
+    fn test_impact_shows_affected_crates() {
+        let db = Database::open_in_memory().unwrap();
+
+        let shared_id = db.insert_crate("shared", "shared", false).unwrap();
+        let app_id = db.insert_crate("app", "app", false).unwrap();
+        db.insert_crate_dep(app_id, shared_id).unwrap();
+
+        let shared_file = db
+            .insert_file_with_crate("shared/src/lib.rs", "h1", shared_id)
+            .unwrap();
+        let app_file = db
+            .insert_file_with_crate("app/src/main.rs", "h2", app_id)
+            .unwrap();
+
+        store_symbols(
+            &db,
+            shared_file,
+            &[Symbol {
+                name: "SharedType".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "shared/src/lib.rs".into(),
+                line_start: 1,
+                line_end: 3,
+                signature: "pub struct SharedType".into(),
+            }],
+        )
+        .unwrap();
+
+        store_symbols(
+            &db,
+            app_file,
+            &[Symbol {
+                name: "use_it".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "app/src/main.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn use_it()".into(),
+            }],
+        )
+        .unwrap();
+
+        let shared_sym_id = db
+            .get_symbol_id("SharedType", "shared/src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let app_sym_id = db
+            .get_symbol_id("use_it", "app/src/main.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref")
+            .unwrap();
+
+        let result = handle_impact(&db, "SharedType").unwrap();
+        assert!(
+            result.contains("Affected Crates"),
+            "should have crate summary"
+        );
+        assert!(result.contains("shared"), "should mention shared crate");
+        assert!(result.contains("app"), "should mention app crate");
     }
 }
