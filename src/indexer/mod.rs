@@ -2,6 +2,7 @@ pub mod dependencies;
 pub mod docs;
 pub mod parser;
 pub mod store;
+pub mod workspace;
 
 use crate::db::Database;
 use std::collections::hash_map::DefaultHasher;
