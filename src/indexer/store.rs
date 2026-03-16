@@ -29,12 +29,12 @@ pub fn store_symbols(db: &Database, file_id: i64, symbols: &[Symbol]) -> rusqlit
           line_start, line_end, signature, \
           doc_comment, body, details) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
-                 NULL, NULL, NULL)",
+                 ?8, ?9, ?10)",
     )?;
     let mut fts_stmt = db.conn.prepare(
         "INSERT INTO symbols_fts \
          (rowid, name, signature, doc_comment) \
-         VALUES (?1, ?2, ?3, NULL)",
+         VALUES (?1, ?2, ?3, ?4)",
     )?;
     for sym in symbols {
         let line_start = i64::try_from(sym.line_start).unwrap_or(i64::MAX);
@@ -47,9 +47,37 @@ pub fn store_symbols(db: &Database, file_id: i64, symbols: &[Symbol]) -> rusqlit
             line_start,
             line_end,
             sym.signature,
+            sym.doc_comment,
+            sym.body,
+            sym.details,
         ])?;
         let rowid = db.conn.last_insert_rowid();
-        fts_stmt.execute(params![rowid, sym.name, sym.signature])?;
+        let doc_for_fts = sym.doc_comment.as_deref().unwrap_or("");
+        fts_stmt.execute(params![rowid, sym.name, sym.signature, doc_for_fts])?;
+    }
+    Ok(())
+}
+
+pub fn store_trait_impls(
+    db: &Database,
+    file_id: i64,
+    trait_impls: &[crate::indexer::parser::TraitImpl],
+) -> rusqlite::Result<()> {
+    let mut stmt = db.conn.prepare(
+        "INSERT OR IGNORE INTO trait_impls \
+         (type_name, trait_name, file_id, line_start, line_end) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for ti in trait_impls {
+        let line_start = i64::try_from(ti.line_start).unwrap_or(i64::MAX);
+        let line_end = i64::try_from(ti.line_end).unwrap_or(i64::MAX);
+        stmt.execute(params![
+            ti.type_name,
+            ti.trait_name,
+            file_id,
+            line_start,
+            line_end
+        ])?;
     }
     Ok(())
 }
@@ -150,5 +178,70 @@ mod tests {
             .unwrap();
         let docs = db.get_docs_for_dependency("tokio").unwrap();
         assert_eq!(docs.len(), 2);
+    }
+
+    #[test]
+    fn test_store_symbols_with_new_fields() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "abc123").unwrap();
+        let symbols = vec![Symbol {
+            name: "Config".into(),
+            kind: SymbolKind::Struct,
+            visibility: Visibility::Public,
+            file_path: "src/lib.rs".into(),
+            line_start: 5,
+            line_end: 15,
+            signature: "pub struct Config".into(),
+            doc_comment: Some("Configuration for the app.".into()),
+            body: Some("pub struct Config { pub port: u16 }".into()),
+            details: Some("fields: port: u16".into()),
+        }];
+        store_symbols(&db, file_id, &symbols).unwrap();
+
+        let results = db.search_symbols("Config").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Config");
+
+        // Verify doc_comment is searchable via FTS
+        let doc_results = db.search_symbols("Configuration").unwrap();
+        assert_eq!(doc_results.len(), 1);
+        assert_eq!(doc_results[0].name, "Config");
+    }
+
+    #[test]
+    fn test_store_and_query_trait_impls() {
+        use crate::indexer::parser::TraitImpl;
+
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "abc123").unwrap();
+        let impls = vec![
+            TraitImpl {
+                type_name: "Config".into(),
+                trait_name: "Display".into(),
+                file_path: "src/lib.rs".into(),
+                line_start: 20,
+                line_end: 30,
+            },
+            TraitImpl {
+                type_name: "Config".into(),
+                trait_name: "Debug".into(),
+                file_path: "src/lib.rs".into(),
+                line_start: 32,
+                line_end: 40,
+            },
+        ];
+        store_trait_impls(&db, file_id, &impls).unwrap();
+
+        let stored = db.get_trait_impls_for_type("Config").unwrap();
+        assert_eq!(stored.len(), 2);
+
+        let trait_names: Vec<&str> =
+            stored.iter().map(|i| i.trait_name.as_str()).collect();
+        assert!(trait_names.contains(&"Display"));
+        assert!(trait_names.contains(&"Debug"));
+
+        let by_trait = db.get_trait_impls_for_trait("Display").unwrap();
+        assert_eq!(by_trait.len(), 1);
+        assert_eq!(by_trait[0].type_name, "Config");
     }
 }
