@@ -28,9 +28,7 @@ pub fn docs_rs_url(name: &str, version: &str) -> String {
 
 #[must_use]
 pub fn github_readme_url(repo_url: &str, version: &str) -> String {
-    let repo_url = repo_url
-        .trim_end_matches('/')
-        .trim_end_matches(".git");
+    let repo_url = repo_url.trim_end_matches('/').trim_end_matches(".git");
     let (owner, repo) = repo_url
         .rsplit_once("github.com/")
         .map_or(repo_url, |(_, path)| path)
@@ -44,18 +42,13 @@ pub fn github_readme_url(repo_url: &str, version: &str) -> String {
 
 #[must_use]
 pub fn parse_github_url(url: &str) -> Option<(String, String)> {
-    let url = url
-        .trim_end_matches('/')
-        .trim_end_matches(".git");
+    let url = url.trim_end_matches('/').trim_end_matches(".git");
     let path = url.rsplit_once("github.com/")?.1;
     let (owner, repo) = path.split_once('/')?;
     Some((owner.to_string(), repo.to_string()))
 }
 
-pub async fn fetch_docs_rs(
-    name: &str,
-    version: &str,
-) -> Result<Option<String>, reqwest::Error> {
+pub async fn fetch_docs_rs(name: &str, version: &str) -> Result<Option<String>, reqwest::Error> {
     let url = docs_rs_url(name, version);
     let client = reqwest::Client::builder()
         .user_agent("illu-rs/0.1.0")
@@ -80,8 +73,7 @@ pub async fn fetch_github_readme(
         .user_agent("illu-rs/0.1.0")
         .build()?;
 
-    let tag_patterns =
-        [format!("v{version}"), version.to_string()];
+    let tag_patterns = [format!("v{version}"), version.to_string()];
     for tag in &tag_patterns {
         let url = github_readme_url(repo_url, tag);
         let resp = client.get(&url).send().await?;
@@ -137,10 +129,7 @@ mod tests {
 
     #[test]
     fn test_build_github_readme_url() {
-        let url = github_readme_url(
-            "https://github.com/serde-rs/serde",
-            "v1.0.210",
-        );
+        let url = github_readme_url("https://github.com/serde-rs/serde", "v1.0.210");
         assert_eq!(
             url,
             "https://raw.githubusercontent.com/\
@@ -150,37 +139,28 @@ mod tests {
 
     #[test]
     fn test_parse_github_repo_url() {
-        let (owner, repo) =
-            parse_github_url("https://github.com/serde-rs/serde")
-                .unwrap();
+        let (owner, repo) = parse_github_url("https://github.com/serde-rs/serde").unwrap();
         assert_eq!(owner, "serde-rs");
         assert_eq!(repo, "serde");
     }
 
     #[test]
     fn test_parse_github_url_with_trailing_slash() {
-        let (owner, repo) = parse_github_url(
-            "https://github.com/tokio-rs/tokio/",
-        )
-        .unwrap();
+        let (owner, repo) = parse_github_url("https://github.com/tokio-rs/tokio/").unwrap();
         assert_eq!(owner, "tokio-rs");
         assert_eq!(repo, "tokio");
     }
 
     #[test]
     fn test_parse_github_url_with_git_suffix() {
-        let (owner, repo) = parse_github_url(
-            "https://github.com/serde-rs/serde.git",
-        )
-        .unwrap();
+        let (owner, repo) = parse_github_url("https://github.com/serde-rs/serde.git").unwrap();
         assert_eq!(owner, "serde-rs");
         assert_eq!(repo, "serde");
     }
 
     #[test]
     fn test_extract_text_from_html() {
-        let html =
-            "<html><body><h1>Hello</h1><p>World</p></body></html>";
+        let html = "<html><body><h1>Hello</h1><p>World</p></body></html>";
         let text = extract_text_from_html(html);
         assert!(text.contains("Hello"));
         assert!(text.contains("World"));
@@ -189,8 +169,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "hits network"]
     async fn test_fetch_docs_rs_content() {
-        let content =
-            fetch_docs_rs("serde", "1.0.210").await.unwrap();
+        let content = fetch_docs_rs("serde", "1.0.210").await.unwrap();
         assert!(content.is_some());
         let text = content.unwrap();
         assert!(!text.is_empty());
@@ -199,12 +178,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "hits network"]
     async fn test_fetch_github_readme() {
-        let content = fetch_github_readme(
-            "https://github.com/serde-rs/serde",
-            "1.0.210",
-        )
-        .await
-        .unwrap();
+        let content = fetch_github_readme("https://github.com/serde-rs/serde", "1.0.210")
+            .await
+            .unwrap();
         assert!(content.is_some());
     }
 }

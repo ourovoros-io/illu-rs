@@ -8,16 +8,11 @@ pub fn handle_impact(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = db.search_symbols(symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!(
-            "No symbol found matching '{symbol_name}'."
-        ));
+        return Ok(format!("No symbol found matching '{symbol_name}'."));
     }
 
     let mut output = String::new();
-    let _ = writeln!(
-        output,
-        "## Impact Analysis: {symbol_name}\n"
-    );
+    let _ = writeln!(output, "## Impact Analysis: {symbol_name}\n");
 
     // Find direct references using symbol_refs
     let mut stmt = db.conn.prepare(
@@ -51,10 +46,7 @@ pub fn handle_impact(
 
         if depth != current_depth {
             current_depth = depth;
-            let _ = writeln!(
-                output,
-                "### Depth {depth}\n"
-            );
+            let _ = writeln!(output, "### Depth {depth}\n");
         }
         let _ = writeln!(output, "- **{name}** ({file_path})");
     }
@@ -80,16 +72,14 @@ mod tests {
     #[test]
     fn test_impact_no_symbol() {
         let db = Database::open_in_memory().unwrap();
-        let result =
-            handle_impact(&db, "nonexistent").unwrap();
+        let result = handle_impact(&db, "nonexistent").unwrap();
         assert!(result.contains("No symbol found"));
     }
 
     #[test]
     fn test_impact_no_dependents() {
         let db = Database::open_in_memory().unwrap();
-        let file_id =
-            db.insert_file("src/lib.rs", "hash").unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
         store_symbols(
             &db,
             file_id,
@@ -105,8 +95,7 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            handle_impact(&db, "lonely_fn").unwrap();
+        let result = handle_impact(&db, "lonely_fn").unwrap();
         assert!(result.contains("Impact Analysis"));
         assert!(result.contains("No dependents found"));
     }
@@ -114,8 +103,7 @@ mod tests {
     #[test]
     fn test_impact_with_refs() {
         let db = Database::open_in_memory().unwrap();
-        let file_id =
-            db.insert_file("src/lib.rs", "hash").unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
         store_symbols(
             &db,
             file_id,
@@ -152,8 +140,7 @@ mod tests {
             )
             .unwrap();
 
-        let result =
-            handle_impact(&db, "base_fn").unwrap();
+        let result = handle_impact(&db, "base_fn").unwrap();
         assert!(result.contains("caller_fn"));
     }
 }

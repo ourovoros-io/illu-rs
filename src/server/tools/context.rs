@@ -7,9 +7,7 @@ pub fn handle_context(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = db.search_symbols(symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!(
-            "No symbol found matching '{symbol_name}'."
-        ));
+        return Ok(format!("No symbol found matching '{symbol_name}'."));
     }
 
     let mut output = String::new();
@@ -22,16 +20,8 @@ pub fn handle_context(
             "- **File:** {}:{}-{}",
             sym.file_path, sym.line_start, sym.line_end
         );
-        let _ = writeln!(
-            output,
-            "- **Visibility:** {}",
-            sym.visibility
-        );
-        let _ = writeln!(
-            output,
-            "- **Signature:** `{}`",
-            sym.signature
-        );
+        let _ = writeln!(output, "- **Visibility:** {}", sym.visibility);
+        let _ = writeln!(output, "- **Signature:** `{}`", sym.signature);
         let _ = writeln!(output);
     }
 
@@ -66,8 +56,7 @@ mod tests {
     #[test]
     fn test_context_found() {
         let db = Database::open_in_memory().unwrap();
-        let file_id =
-            db.insert_file("src/lib.rs", "hash").unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
         store_symbols(
             &db,
             file_id,
@@ -78,14 +67,12 @@ mod tests {
                 file_path: "src/lib.rs".into(),
                 line_start: 1,
                 line_end: 10,
-                signature: "pub fn parse_config(path: &Path) -> Config"
-                    .into(),
+                signature: "pub fn parse_config(path: &Path) -> Config".into(),
             }],
         )
         .unwrap();
 
-        let result =
-            handle_context(&db, "parse_config").unwrap();
+        let result = handle_context(&db, "parse_config").unwrap();
         assert!(result.contains("parse_config"));
         assert!(result.contains("src/lib.rs"));
         assert!(result.contains("public"));
@@ -94,16 +81,14 @@ mod tests {
     #[test]
     fn test_context_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result =
-            handle_context(&db, "nonexistent").unwrap();
+        let result = handle_context(&db, "nonexistent").unwrap();
         assert!(result.contains("No symbol found"));
     }
 
     #[test]
     fn test_context_with_docs() {
         let db = Database::open_in_memory().unwrap();
-        let file_id =
-            db.insert_file("src/lib.rs", "hash").unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
         store_symbols(
             &db,
             file_id,
@@ -119,18 +104,11 @@ mod tests {
         )
         .unwrap();
 
-        let dep_id = db
-            .insert_dependency("serde", "1.0", true, None)
+        let dep_id = db.insert_dependency("serde", "1.0", true, None).unwrap();
+        db.store_doc(dep_id, "docs.rs", "serialize and deserialize data")
             .unwrap();
-        db.store_doc(
-            dep_id,
-            "docs.rs",
-            "serialize and deserialize data",
-        )
-        .unwrap();
 
-        let result =
-            handle_context(&db, "serialize").unwrap();
+        let result = handle_context(&db, "serialize").unwrap();
         assert!(result.contains("serialize"));
         assert!(result.contains("Related Documentation"));
     }

@@ -18,9 +18,7 @@ pub fn handle_query(
             format_docs(db, query, &mut output)?;
         }
         other => {
-            return Err(
-                format!("Unknown scope: {other}").into()
-            );
+            return Err(format!("Unknown scope: {other}").into());
         }
     }
 
@@ -43,12 +41,7 @@ fn format_symbols(
             let _ = writeln!(
                 output,
                 "- **{}** ({}) at {}:{}-{}\n  `{}`",
-                sym.name,
-                sym.kind,
-                sym.file_path,
-                sym.line_start,
-                sym.line_end,
-                sym.signature,
+                sym.name, sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
             );
         }
         output.push('\n');
@@ -73,10 +66,7 @@ fn format_docs(
             let _ = writeln!(
                 output,
                 "- **{} {}** ({})\n  {}",
-                doc.dependency_name,
-                doc.version,
-                doc.source,
-                snippet,
+                doc.dependency_name, doc.version, doc.source, snippet,
             );
         }
         output.push('\n');
@@ -90,10 +80,7 @@ fn format_files(
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let symbols = db.search_symbols(query)?;
-    let mut files: Vec<&str> = symbols
-        .iter()
-        .map(|s| s.file_path.as_str())
-        .collect();
+    let mut files: Vec<&str> = symbols.iter().map(|s| s.file_path.as_str()).collect();
     files.sort_unstable();
     files.dedup();
 
@@ -117,8 +104,7 @@ mod tests {
     #[test]
     fn test_query_symbols() {
         let db = Database::open_in_memory().unwrap();
-        let file_id =
-            db.insert_file("src/lib.rs", "hash").unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
         store_symbols(
             &db,
             file_id,
@@ -129,14 +115,12 @@ mod tests {
                 file_path: "src/lib.rs".into(),
                 line_start: 1,
                 line_end: 10,
-                signature: "pub fn parse_config() -> Config"
-                    .into(),
+                signature: "pub fn parse_config() -> Config".into(),
             }],
         )
         .unwrap();
 
-        let result =
-            handle_query(&db, "parse", Some("symbols")).unwrap();
+        let result = handle_query(&db, "parse", Some("symbols")).unwrap();
         assert!(!result.is_empty());
         assert!(result.contains("parse_config"));
     }
@@ -144,30 +128,18 @@ mod tests {
     #[test]
     fn test_query_docs() {
         let db = Database::open_in_memory().unwrap();
-        let dep_id = db
-            .insert_dependency("serde", "1.0", true, None)
+        let dep_id = db.insert_dependency("serde", "1.0", true, None).unwrap();
+        db.store_doc(dep_id, "docs.rs", "Serde serialization framework")
             .unwrap();
-        db.store_doc(
-            dep_id,
-            "docs.rs",
-            "Serde serialization framework",
-        )
-        .unwrap();
 
-        let result = handle_query(
-            &db,
-            "serialization",
-            Some("docs"),
-        )
-        .unwrap();
+        let result = handle_query(&db, "serialization", Some("docs")).unwrap();
         assert!(result.contains("serialization"));
     }
 
     #[test]
     fn test_query_all() {
         let db = Database::open_in_memory().unwrap();
-        let file_id =
-            db.insert_file("src/lib.rs", "hash").unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
         store_symbols(
             &db,
             file_id,
@@ -183,16 +155,14 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            handle_query(&db, "serialize", None).unwrap();
+        let result = handle_query(&db, "serialize", None).unwrap();
         assert!(result.contains("serialize"));
     }
 
     #[test]
     fn test_query_no_results() {
         let db = Database::open_in_memory().unwrap();
-        let result =
-            handle_query(&db, "nonexistent", None).unwrap();
+        let result = handle_query(&db, "nonexistent", None).unwrap();
         assert_eq!(result, "No results found.");
     }
 }

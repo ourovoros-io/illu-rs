@@ -9,15 +9,12 @@ use std::path::PathBuf;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env(),
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     let repo_path = match std::env::args().nth(1) {
         Some(arg) => PathBuf::from(arg),
-        None => std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from(".")),
+        None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
     };
 
     let db_dir = repo_path.join(".illu");

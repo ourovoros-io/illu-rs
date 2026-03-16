@@ -22,10 +22,7 @@ pub fn handle_docs(
         }
 
         let mut output = String::new();
-        let _ = writeln!(
-            output,
-            "## {dep_name} — {topic}\n"
-        );
+        let _ = writeln!(output, "## {dep_name} — {topic}\n");
         for doc in &filtered {
             let _ = writeln!(
                 output,
@@ -39,24 +36,16 @@ pub fn handle_docs(
     // No topic — return all docs for this dependency
     let docs = db.get_docs_for_dependency(dep_name)?;
     if docs.is_empty() {
-        return Ok(format!(
-            "No documentation found for '{dep_name}'."
-        ));
+        return Ok(format!("No documentation found for '{dep_name}'."));
     }
 
     let mut output = String::new();
-    let _ = writeln!(
-        output,
-        "## Documentation: {dep_name}\n"
-    );
+    let _ = writeln!(output, "## Documentation: {dep_name}\n");
     for doc in &docs {
         let _ = writeln!(
             output,
             "### {} v{} ({})\n\n{}\n",
-            doc.dependency_name,
-            doc.version,
-            doc.source,
-            doc.content
+            doc.dependency_name, doc.version, doc.source, doc.content
         );
     }
     Ok(output)
@@ -80,8 +69,7 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            handle_docs(&db, "serde", None).unwrap();
+        let result = handle_docs(&db, "serde", None).unwrap();
         assert!(result.contains("serde"));
         assert!(result.contains("serialization"));
     }
@@ -92,45 +80,27 @@ mod tests {
         let dep_id = db
             .insert_dependency("serde", "1.0.210", true, None)
             .unwrap();
-        db.store_doc(
-            dep_id,
-            "docs.rs",
-            "Serde serialization and deserialization",
-        )
-        .unwrap();
+        db.store_doc(dep_id, "docs.rs", "Serde serialization and deserialization")
+            .unwrap();
 
-        let result = handle_docs(
-            &db,
-            "serde",
-            Some("serialization"),
-        )
-        .unwrap();
+        let result = handle_docs(&db, "serde", Some("serialization")).unwrap();
         assert!(result.contains("serialization"));
     }
 
     #[test]
     fn test_docs_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result =
-            handle_docs(&db, "nonexistent", None).unwrap();
+        let result = handle_docs(&db, "nonexistent", None).unwrap();
         assert!(result.contains("No documentation found"));
     }
 
     #[test]
     fn test_docs_topic_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let dep_id = db
-            .insert_dependency("serde", "1.0", true, None)
-            .unwrap();
-        db.store_doc(dep_id, "docs.rs", "Serde framework")
-            .unwrap();
+        let dep_id = db.insert_dependency("serde", "1.0", true, None).unwrap();
+        db.store_doc(dep_id, "docs.rs", "Serde framework").unwrap();
 
-        let result = handle_docs(
-            &db,
-            "serde",
-            Some("graphql"),
-        )
-        .unwrap();
+        let result = handle_docs(&db, "serde", Some("graphql")).unwrap();
         assert!(result.contains("No documentation found"));
     }
 }

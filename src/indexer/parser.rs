@@ -55,18 +55,13 @@ pub struct Symbol {
     pub signature: String,
 }
 
-pub fn parse_rust_source(
-    source: &str,
-    file_path: &str,
-) -> Result<Vec<Symbol>, String> {
+pub fn parse_rust_source(source: &str, file_path: &str) -> Result<Vec<Symbol>, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_rust::LANGUAGE.into())
         .map_err(|e| format!("Failed to set language: {e}"))?;
 
-    let tree = parser
-        .parse(source, None)
-        .ok_or("Failed to parse source")?;
+    let tree = parser.parse(source, None).ok_or("Failed to parse source")?;
 
     let root = tree.root_node();
     let mut symbols = Vec::new();
@@ -74,49 +69,29 @@ pub fn parse_rust_source(
     Ok(symbols)
 }
 
-fn extract_symbols(
-    node: &Node,
-    source: &str,
-    file_path: &str,
-    symbols: &mut Vec<Symbol>,
-) {
+fn extract_symbols(node: &Node, source: &str, file_path: &str, symbols: &mut Vec<Symbol>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
             "function_item" => {
-                if let Some(sym) =
-                    extract_function(&child, source, file_path)
-                {
+                if let Some(sym) = extract_function(&child, source, file_path) {
                     symbols.push(sym);
                 }
             }
             "struct_item" => {
-                if let Some(sym) = extract_named_item(
-                    &child,
-                    source,
-                    file_path,
-                    SymbolKind::Struct,
-                ) {
+                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Struct)
+                {
                     symbols.push(sym);
                 }
             }
             "enum_item" => {
-                if let Some(sym) = extract_named_item(
-                    &child,
-                    source,
-                    file_path,
-                    SymbolKind::Enum,
-                ) {
+                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Enum) {
                     symbols.push(sym);
                 }
             }
             "trait_item" => {
-                if let Some(sym) = extract_named_item(
-                    &child,
-                    source,
-                    file_path,
-                    SymbolKind::Trait,
-                ) {
+                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Trait)
+                {
                     symbols.push(sym);
                 }
             }
@@ -133,9 +108,7 @@ fn extract_symbols(
                     line_end: child.end_position().row + 1,
                     signature: sig,
                 });
-                extract_symbols(
-                    &child, source, file_path, symbols,
-                );
+                extract_symbols(&child, source, file_path, symbols);
             }
             "use_declaration" => {
                 let text = node_text(&child, source);
@@ -150,30 +123,19 @@ fn extract_symbols(
                 });
             }
             "mod_item" => {
-                if let Some(sym) = extract_named_item(
-                    &child,
-                    source,
-                    file_path,
-                    SymbolKind::Mod,
-                ) {
+                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Mod) {
                     symbols.push(sym);
                 }
             }
             "declaration_list" => {
-                extract_symbols(
-                    &child, source, file_path, symbols,
-                );
+                extract_symbols(&child, source, file_path, symbols);
             }
             _ => {}
         }
     }
 }
 
-fn extract_function(
-    node: &Node,
-    source: &str,
-    file_path: &str,
-) -> Option<Symbol> {
+fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
     let name = find_child_by_kind(node, "identifier")?;
     let name_text = node_text(&name, source);
     let vis = get_visibility(node, source);
@@ -216,17 +178,12 @@ fn extract_named_item(
 fn extract_impl_type(node: &Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     node.children(&mut cursor)
-        .find(|child| {
-            child.kind() == "type_identifier"
-                || child.kind() == "generic_type"
-        })
+        .find(|child| child.kind() == "type_identifier" || child.kind() == "generic_type")
         .map(|child| node_text(&child, source))
 }
 
 fn get_visibility(node: &Node, source: &str) -> Visibility {
-    let Some(vis_node) =
-        find_child_by_kind(node, "visibility_modifier")
-    else {
+    let Some(vis_node) = find_child_by_kind(node, "visibility_modifier") else {
         return Visibility::Private;
     };
     let text = node_text(&vis_node, source);
@@ -237,12 +194,10 @@ fn get_visibility(node: &Node, source: &str) -> Visibility {
     }
 }
 
-fn find_child_by_kind<'a>(
-    node: &'a Node,
-    kind: &str,
-) -> Option<Node<'a>> {
+fn find_child_by_kind<'a>(node: &'a Node, kind: &str) -> Option<Node<'a>> {
     let mut cursor = node.walk();
-    node.children(&mut cursor).find(|child| child.kind() == kind)
+    node.children(&mut cursor)
+        .find(|child| child.kind() == kind)
 }
 
 fn node_text(node: &Node, source: &str) -> String {
@@ -251,11 +206,7 @@ fn node_text(node: &Node, source: &str) -> String {
 
 fn get_first_line(node: &Node, source: &str) -> String {
     let text = node_text(node, source);
-    text.lines()
-        .next()
-        .unwrap_or(&text)
-        .trim()
-        .to_string()
+    text.lines().next().unwrap_or(&text).trim().to_string()
 }
 
 #[cfg(test)]
@@ -270,8 +221,7 @@ pub fn hello(name: &str) -> String {
     format!("Hello, {name}")
 }
 "#;
-        let symbols =
-            parse_rust_source(source, "src/lib.rs").unwrap();
+        let symbols = parse_rust_source(source, "src/lib.rs").unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "hello");
         assert_eq!(symbols[0].kind, SymbolKind::Function);
@@ -291,17 +241,13 @@ impl Config {
     }
 }
 ";
-        let symbols =
-            parse_rust_source(source, "src/config.rs").unwrap();
+        let symbols = parse_rust_source(source, "src/config.rs").unwrap();
         let struct_sym = symbols
             .iter()
-            .find(|s| {
-                s.name == "Config" && s.kind == SymbolKind::Struct
-            })
+            .find(|s| s.name == "Config" && s.kind == SymbolKind::Struct)
             .unwrap();
         assert_eq!(struct_sym.kind, SymbolKind::Struct);
-        let method =
-            symbols.iter().find(|s| s.name == "new").unwrap();
+        let method = symbols.iter().find(|s| s.name == "new").unwrap();
         assert_eq!(method.kind, SymbolKind::Function);
     }
 
@@ -311,8 +257,7 @@ impl Config {
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 ";
-        let symbols =
-            parse_rust_source(source, "src/lib.rs").unwrap();
+        let symbols = parse_rust_source(source, "src/lib.rs").unwrap();
         let uses: Vec<_> = symbols
             .iter()
             .filter(|s| s.kind == SymbolKind::Use)
@@ -326,14 +271,17 @@ use serde::{Serialize, Deserialize};
 pub enum Color { Red, Green, Blue }
 pub trait Drawable { fn draw(&self); }
 ";
-        let symbols =
-            parse_rust_source(source, "src/lib.rs").unwrap();
-        assert!(symbols.iter().any(
-            |s| s.name == "Color" && s.kind == SymbolKind::Enum
-        ));
-        assert!(symbols.iter().any(
-            |s| s.name == "Drawable" && s.kind == SymbolKind::Trait
-        ));
+        let symbols = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Color" && s.kind == SymbolKind::Enum)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Drawable" && s.kind == SymbolKind::Trait)
+        );
     }
 
     #[test]
@@ -341,8 +289,7 @@ pub trait Drawable { fn draw(&self); }
         let source = r"
 fn private_helper() {}
 ";
-        let symbols =
-            parse_rust_source(source, "src/lib.rs").unwrap();
+        let symbols = parse_rust_source(source, "src/lib.rs").unwrap();
         assert_eq!(symbols[0].visibility, Visibility::Private);
     }
 }

@@ -41,9 +41,7 @@ struct LockPackage {
     source: Option<String>,
 }
 
-pub fn parse_cargo_toml(
-    content: &str,
-) -> Result<Vec<DirectDep>, toml::de::Error> {
+pub fn parse_cargo_toml(content: &str) -> Result<Vec<DirectDep>, toml::de::Error> {
     let parsed: CargoToml = toml::from_str(content)?;
     let Some(deps) = parsed.dependencies else {
         return Ok(vec![]);
@@ -84,9 +82,7 @@ pub fn parse_cargo_toml(
     Ok(result)
 }
 
-pub fn parse_cargo_lock(
-    content: &str,
-) -> Result<Vec<LockedDep>, toml::de::Error> {
+pub fn parse_cargo_lock(content: &str) -> Result<Vec<LockedDep>, toml::de::Error> {
     let parsed: CargoLock = toml::from_str(content)?;
     let Some(packages) = parsed.package else {
         return Ok(vec![]);
@@ -103,10 +99,7 @@ pub fn parse_cargo_lock(
 }
 
 #[must_use]
-pub fn resolve_dependencies(
-    direct: &[DirectDep],
-    locked: &[LockedDep],
-) -> Vec<ResolvedDep> {
+pub fn resolve_dependencies(direct: &[DirectDep], locked: &[LockedDep]) -> Vec<ResolvedDep> {
     let direct_names: HashMap<&str, &DirectDep> =
         direct.iter().map(|d| (d.name.as_str(), d)).collect();
 

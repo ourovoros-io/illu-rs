@@ -3,15 +3,10 @@ pub mod tools;
 use crate::db::Database;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{
-    CallToolResult, Content, ServerCapabilities, ServerInfo,
-};
+use rmcp::model::{CallToolResult, Content, ServerCapabilities, ServerInfo};
 use rmcp::schemars;
+use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
-use rmcp::{
-    ErrorData as McpError, ServerHandler, tool, tool_handler,
-    tool_router,
-};
 use serde::Deserialize;
 use std::sync::Mutex;
 
@@ -63,15 +58,12 @@ impl IlluServer {
         &self,
         Parameters(params): Parameters<QueryParams>,
     ) -> Result<CallToolResult, McpError> {
-        let db = self.db.lock().map_err(|e| {
-            McpError::internal_error(e.to_string(), None)
-        })?;
-        let result = tools::query::handle_query(
-            &db,
-            &params.query,
-            params.scope.as_deref(),
-        )
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let result = tools::query::handle_query(&db, &params.query, params.scope.as_deref())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
@@ -84,14 +76,12 @@ impl IlluServer {
         &self,
         Parameters(params): Parameters<ContextParams>,
     ) -> Result<CallToolResult, McpError> {
-        let db = self.db.lock().map_err(|e| {
-            McpError::internal_error(e.to_string(), None)
-        })?;
-        let result = tools::context::handle_context(
-            &db,
-            &params.symbol_name,
-        )
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let result = tools::context::handle_context(&db, &params.symbol_name)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
@@ -104,14 +94,12 @@ impl IlluServer {
         &self,
         Parameters(params): Parameters<ImpactParams>,
     ) -> Result<CallToolResult, McpError> {
-        let db = self.db.lock().map_err(|e| {
-            McpError::internal_error(e.to_string(), None)
-        })?;
-        let result = tools::impact::handle_impact(
-            &db,
-            &params.symbol_name,
-        )
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let result = tools::impact::handle_impact(&db, &params.symbol_name)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
@@ -124,15 +112,12 @@ impl IlluServer {
         &self,
         Parameters(params): Parameters<DocsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let db = self.db.lock().map_err(|e| {
-            McpError::internal_error(e.to_string(), None)
-        })?;
-        let result = tools::docs::handle_docs(
-            &db,
-            &params.dependency,
-            params.topic.as_deref(),
-        )
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let db = self
+            .db
+            .lock()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let result = tools::docs::handle_docs(&db, &params.dependency, params.topic.as_deref())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
@@ -148,9 +133,7 @@ impl ServerHandler for IlluServer {
                  'impact' for change analysis, 'docs' for dependency docs."
                     .into(),
             ),
-            capabilities: ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
     }

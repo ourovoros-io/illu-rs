@@ -3,10 +3,7 @@ use crate::indexer::dependencies::ResolvedDep;
 use crate::indexer::parser::Symbol;
 use rusqlite::params;
 
-pub fn store_dependencies(
-    db: &Database,
-    deps: &[ResolvedDep],
-) -> rusqlite::Result<()> {
+pub fn store_dependencies(db: &Database, deps: &[ResolvedDep]) -> rusqlite::Result<()> {
     let mut stmt = db.conn.prepare(
         "INSERT INTO dependencies \
          (name, version, is_direct, repository_url, features) \
@@ -25,11 +22,7 @@ pub fn store_dependencies(
     Ok(())
 }
 
-pub fn store_symbols(
-    db: &Database,
-    file_id: i64,
-    symbols: &[Symbol],
-) -> rusqlite::Result<()> {
+pub fn store_symbols(db: &Database, file_id: i64, symbols: &[Symbol]) -> rusqlite::Result<()> {
     let mut sym_stmt = db.conn.prepare(
         "INSERT INTO symbols \
          (file_id, name, kind, visibility, \
@@ -41,10 +34,8 @@ pub fn store_symbols(
          VALUES (?1, ?2, ?3)",
     )?;
     for sym in symbols {
-        let line_start = i64::try_from(sym.line_start)
-            .unwrap_or(i64::MAX);
-        let line_end = i64::try_from(sym.line_end)
-            .unwrap_or(i64::MAX);
+        let line_start = i64::try_from(sym.line_start).unwrap_or(i64::MAX);
+        let line_end = i64::try_from(sym.line_end).unwrap_or(i64::MAX);
         sym_stmt.execute(params![
             file_id,
             sym.name,
@@ -74,9 +65,7 @@ mod tests {
             name: "serde".into(),
             version: "1.0.210".into(),
             is_direct: true,
-            repository_url: Some(
-                "https://github.com/serde-rs/serde".into(),
-            ),
+            repository_url: Some("https://github.com/serde-rs/serde".into()),
             features: vec!["derive".into()],
         }];
         store_dependencies(&db, &deps).unwrap();
@@ -125,8 +114,7 @@ mod tests {
             file_path: "src/lib.rs".into(),
             line_start: 10,
             line_end: 25,
-            signature: "pub fn parse_config(path: &Path) -> Result<Config>"
-                .into(),
+            signature: "pub fn parse_config(path: &Path) -> Result<Config>".into(),
         }];
         store_symbols(&db, file_id, &symbols).unwrap();
         let results = db.search_symbols("parse").unwrap();
@@ -137,15 +125,11 @@ mod tests {
     #[test]
     fn test_store_and_search_docs() {
         let db = Database::open_in_memory().unwrap();
-        let dep_id =
-            db.insert_dependency("serde", "1.0.210", true, None)
-                .unwrap();
-        db.store_doc(
-            dep_id,
-            "docs.rs",
-            "Serde is a serialization framework",
-        )
-        .unwrap();
+        let dep_id = db
+            .insert_dependency("serde", "1.0.210", true, None)
+            .unwrap();
+        db.store_doc(dep_id, "docs.rs", "Serde is a serialization framework")
+            .unwrap();
         let results = db.search_docs("serialization").unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].content.contains("serialization"));
@@ -154,9 +138,7 @@ mod tests {
     #[test]
     fn test_get_docs_for_dependency() {
         let db = Database::open_in_memory().unwrap();
-        let dep_id =
-            db.insert_dependency("tokio", "1.0.0", true, None)
-                .unwrap();
+        let dep_id = db.insert_dependency("tokio", "1.0.0", true, None).unwrap();
         db.store_doc(dep_id, "docs.rs", "Async runtime").unwrap();
         db.store_doc(dep_id, "github_readme", "Tokio README")
             .unwrap();

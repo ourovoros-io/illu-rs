@@ -13,24 +13,18 @@ pub struct IndexConfig {
     pub skip_doc_fetch: bool,
 }
 
-pub fn index_repo(
-    db: &Database,
-    config: &IndexConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
     // Phase 1: Parse dependencies
     let cargo_toml_path = config.repo_path.join("Cargo.toml");
     let cargo_toml = std::fs::read_to_string(&cargo_toml_path)?;
     let direct = dependencies::parse_cargo_toml(&cargo_toml)?;
 
-    let locked = match std::fs::read_to_string(
-        config.repo_path.join("Cargo.lock"),
-    ) {
+    let locked = match std::fs::read_to_string(config.repo_path.join("Cargo.lock")) {
         Ok(lock) => dependencies::parse_cargo_lock(&lock)?,
         Err(_) => vec![],
     };
 
-    let resolved =
-        dependencies::resolve_dependencies(&direct, &locked);
+    let resolved = dependencies::resolve_dependencies(&direct, &locked);
     store::store_dependencies(db, &resolved)?;
 
     // Phase 2: Parse source files
@@ -50,12 +44,8 @@ pub fn index_repo(
                     .to_string();
                 let hash = content_hash(&source);
                 let file_id = db.insert_file(&relative, &hash)?;
-                let symbols = parser::parse_rust_source(
-                    &source, &relative,
-                )
-                .map_err(|e| -> Box<dyn std::error::Error> {
-                    e.into()
-                })?;
+                let symbols = parser::parse_rust_source(&source, &relative)
+                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
                 store::store_symbols(db, file_id, &symbols)?;
             }
         }
@@ -66,26 +56,17 @@ pub fn index_repo(
 
     // Phase 4: Generate Claude skill file
     let direct_deps = db.get_direct_dependencies()?;
-    let dep_names: Vec<String> =
-        direct_deps.iter().map(|d| d.name.clone()).collect();
+    let dep_names: Vec<String> = direct_deps.iter().map(|d| d.name.clone()).collect();
     let skill_content = generate_claude_skill(&dep_names);
-    let skill_dir =
-        config.repo_path.join(".claude").join("skills");
+    let skill_dir = config.repo_path.join(".claude").join("skills");
     std::fs::create_dir_all(&skill_dir)?;
-    std::fs::write(
-        skill_dir.join("illu-rs.md"),
-        &skill_content,
-    )?;
+    std::fs::write(skill_dir.join("illu-rs.md"), &skill_content)?;
     tracing::info!("Wrote Claude skill to .claude/skills/illu-rs.md");
 
     // Phase 5: Update metadata
     let commit_hash =
-        get_current_commit_hash(&config.repo_path)
-            .unwrap_or_else(|_| "unknown".to_string());
-    db.set_metadata(
-        &config.repo_path.display().to_string(),
-        &commit_hash,
-    )?;
+        get_current_commit_hash(&config.repo_path).unwrap_or_else(|_| "unknown".to_string());
+    db.set_metadata(&config.repo_path.display().to_string(), &commit_hash)?;
 
     Ok(())
 }
@@ -93,9 +74,7 @@ pub fn index_repo(
 /// Generate a Claude skill markdown file listing available
 /// MCP tools and the project's direct dependencies.
 #[must_use]
-pub fn generate_claude_skill(
-    direct_dep_names: &[String],
-) -> String {
+pub fn generate_claude_skill(direct_dep_names: &[String]) -> String {
     use std::fmt::Write;
 
     let mut out = String::new();
@@ -153,9 +132,7 @@ fn get_current_commit_hash(
         .current_dir(repo_path)
         .output()?;
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_string())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
         Err("git rev-parse HEAD failed".into())
     }
@@ -214,10 +191,7 @@ pub fn hello() -> &'static str { "hello" }
 
     #[test]
     fn test_generate_skill_content() {
-        let deps = vec![
-            "serde".to_string(),
-            "tokio".to_string(),
-        ];
+        let deps = vec!["serde".to_string(), "tokio".to_string()];
         let skill = generate_claude_skill(&deps);
         assert!(skill.contains("serde"));
         assert!(skill.contains("tokio"));

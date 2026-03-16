@@ -76,11 +76,7 @@ impl Database {
         )
     }
 
-    pub fn set_metadata(
-        &self,
-        repo_path: &str,
-        commit_hash: &str,
-    ) -> SqlResult<()> {
+    pub fn set_metadata(&self, repo_path: &str, commit_hash: &str) -> SqlResult<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO metadata (repo_path, commit_hash)
              VALUES (?1, ?2)",
@@ -89,25 +85,18 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_commit_hash(
-        &self,
-        repo_path: &str,
-    ) -> SqlResult<Option<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT commit_hash FROM metadata WHERE repo_path = ?1",
-        )?;
-        let mut rows = stmt.query_map(params![repo_path], |row| {
-            row.get(0)
-        })?;
+    pub fn get_commit_hash(&self, repo_path: &str) -> SqlResult<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT commit_hash FROM metadata WHERE repo_path = ?1")?;
+        let mut rows = stmt.query_map(params![repo_path], |row| row.get(0))?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
             None => Ok(None),
         }
     }
 
-    pub fn get_direct_dependencies(
-        &self,
-    ) -> SqlResult<Vec<StoredDep>> {
+    pub fn get_direct_dependencies(&self) -> SqlResult<Vec<StoredDep>> {
         let mut stmt = self.conn.prepare(
             "SELECT name, version, is_direct, repository_url, features \
              FROM dependencies WHERE is_direct = 1",
@@ -126,11 +115,18 @@ impl Database {
         Ok(deps)
     }
 
-    pub fn insert_file(
-        &self,
-        path: &str,
-        content_hash: &str,
-    ) -> SqlResult<i64> {
+    pub fn get_dependency_id(&self, name: &str) -> SqlResult<Option<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM dependencies WHERE name = ?1")?;
+        let mut rows = stmt.query(params![name])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn insert_file(&self, path: &str, content_hash: &str) -> SqlResult<i64> {
         self.conn.execute(
             "INSERT OR REPLACE INTO files (path, content_hash) \
              VALUES (?1, ?2)",
@@ -139,10 +135,7 @@ impl Database {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn search_symbols(
-        &self,
-        query: &str,
-    ) -> SqlResult<Vec<StoredSymbol>> {
+    pub fn search_symbols(&self, query: &str) -> SqlResult<Vec<StoredSymbol>> {
         let fts_query = format!("{query}*");
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
@@ -168,10 +161,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_dependency_by_name(
-        &self,
-        name: &str,
-    ) -> SqlResult<Option<StoredDep>> {
+    pub fn get_dependency_by_name(&self, name: &str) -> SqlResult<Option<StoredDep>> {
         let mut stmt = self.conn.prepare(
             "SELECT name, version, is_direct, repository_url, features \
              FROM dependencies WHERE name = ?1",
@@ -205,12 +195,7 @@ impl Database {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn store_doc(
-        &self,
-        dep_id: i64,
-        source: &str,
-        content: &str,
-    ) -> SqlResult<()> {
+    pub fn store_doc(&self, dep_id: i64, source: &str, content: &str) -> SqlResult<()> {
         self.conn.execute(
             "INSERT INTO docs (dependency_id, source, content) \
              VALUES (?1, ?2, ?3)",
@@ -225,10 +210,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn search_docs(
-        &self,
-        query: &str,
-    ) -> SqlResult<Vec<DocResult>> {
+    pub fn search_docs(&self, query: &str) -> SqlResult<Vec<DocResult>> {
         let fts_query = format!("{query}*");
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version \
@@ -250,10 +232,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_docs_for_dependency(
-        &self,
-        name: &str,
-    ) -> SqlResult<Vec<DocResult>> {
+    pub fn get_docs_for_dependency(&self, name: &str) -> SqlResult<Vec<DocResult>> {
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version \
              FROM docs d \
