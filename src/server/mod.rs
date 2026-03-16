@@ -197,8 +197,10 @@ impl ServerHandler for IlluServer {
         ServerInfo {
             instructions: Some(
                 "illu-rs: Code intelligence server for Rust projects. \
-                 Use 'query' to search, 'context' for symbol details, \
-                 'impact' for change analysis, 'docs' for dependency docs."
+                 Use 'query' to search, 'context' for symbol details \
+                 (includes source body, doc comments, struct fields, \
+                 trait impls, and callees), 'impact' for change analysis, \
+                 'docs' for dependency docs, 'overview' for structural maps."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),

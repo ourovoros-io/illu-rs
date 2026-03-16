@@ -138,7 +138,8 @@ fn render_related_docs(
         output.push_str("## Related Documentation\n\n");
         for doc in &docs {
             let snippet = if doc.content.len() > 300 {
-                format!("{}...", &doc.content[..300])
+                let end = doc.content.floor_char_boundary(300);
+                format!("{}...", &doc.content[..end])
             } else {
                 doc.content.clone()
             };

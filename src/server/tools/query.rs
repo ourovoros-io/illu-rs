@@ -64,7 +64,8 @@ fn format_docs(
         output.push_str("## Documentation\n\n");
         for doc in &docs {
             let snippet = if doc.content.len() > 200 {
-                format!("{}...", &doc.content[..200])
+                let end = doc.content.floor_char_boundary(200);
+                format!("{}...", &doc.content[..end])
             } else {
                 doc.content.clone()
             };
