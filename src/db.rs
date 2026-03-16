@@ -104,6 +104,57 @@ impl Database {
             None => Ok(None),
         }
     }
+
+    pub fn get_direct_dependencies(
+        &self,
+    ) -> SqlResult<Vec<StoredDep>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT name, version, is_direct, repository_url, features \
+             FROM dependencies WHERE is_direct = 1",
+        )?;
+        let mut deps = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            deps.push(StoredDep {
+                name: row.get(0)?,
+                version: row.get(1)?,
+                is_direct: row.get(2)?,
+                repository_url: row.get(3)?,
+                features: row.get(4)?,
+            });
+        }
+        Ok(deps)
+    }
+
+    pub fn get_dependency_by_name(
+        &self,
+        name: &str,
+    ) -> SqlResult<Option<StoredDep>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT name, version, is_direct, repository_url, features \
+             FROM dependencies WHERE name = ?1",
+        )?;
+        let mut rows = stmt.query(params![name])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(StoredDep {
+                name: row.get(0)?,
+                version: row.get(1)?,
+                is_direct: row.get(2)?,
+                repository_url: row.get(3)?,
+                features: row.get(4)?,
+            })),
+            None => Ok(None),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct StoredDep {
+    pub name: String,
+    pub version: String,
+    pub is_direct: bool,
+    pub repository_url: Option<String>,
+    pub features: Option<String>,
 }
 
 #[cfg(test)]
