@@ -355,7 +355,8 @@ pub fn generate_claude_skill(direct_dep_names: &[String]) -> String {
     let _ = writeln!(
         out,
         "- **context** — Get full context for a symbol: \
-         definition, signature, file location, related docs."
+         doc comments, definition, source body, struct fields, \
+         trait implementations, and callees."
     );
     let _ = writeln!(
         out,
@@ -365,7 +366,12 @@ pub fn generate_claude_skill(direct_dep_names: &[String]) -> String {
     let _ = writeln!(
         out,
         "- **docs** — Get documentation for a dependency, \
-         optionally filtered by topic.\n"
+         optionally filtered by topic."
+    );
+    let _ = writeln!(
+        out,
+        "- **overview** — Get a structural overview of all \
+         public symbols under a file path prefix.\n"
     );
     let _ = writeln!(out, "## Direct Dependencies\n");
 
@@ -460,6 +466,7 @@ pub fn hello() -> &'static str { "hello" }
         assert!(skill.contains("context"));
         assert!(skill.contains("query"));
         assert!(skill.contains("impact"));
+        assert!(skill.contains("overview"));
     }
 
     #[test]
