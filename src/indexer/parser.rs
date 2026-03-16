@@ -53,9 +53,15 @@ pub struct Symbol {
     pub line_start: usize,
     pub line_end: usize,
     pub signature: String,
+    pub doc_comment: Option<String>,
+    pub body: Option<String>,
+    pub details: Option<String>,
 }
 
-pub fn parse_rust_source(source: &str, file_path: &str) -> Result<Vec<Symbol>, String> {
+pub fn parse_rust_source(
+    source: &str,
+    file_path: &str,
+) -> Result<(Vec<Symbol>, Vec<TraitImpl>), String> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_rust::LANGUAGE.into())
@@ -65,11 +71,55 @@ pub fn parse_rust_source(source: &str, file_path: &str) -> Result<Vec<Symbol>, S
 
     let root = tree.root_node();
     let mut symbols = Vec::new();
-    extract_symbols(&root, source, file_path, &mut symbols);
-    Ok(symbols)
+    let mut trait_impls = Vec::new();
+    extract_symbols(&root, source, file_path, &mut symbols, &mut trait_impls);
+    Ok((symbols, trait_impls))
 }
 
-fn extract_symbols(node: &Node, source: &str, file_path: &str, symbols: &mut Vec<Symbol>) {
+fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    let mut sibling = node.prev_sibling();
+    while let Some(sib) = sibling {
+        match sib.kind() {
+            "line_comment" => {
+                let text = node_text(&sib, source);
+                if let Some(stripped) = text.strip_prefix("///") {
+                    let stripped = stripped.strip_prefix(' ').unwrap_or(stripped);
+                    lines.push(stripped.trim_end().to_string());
+                } else {
+                    break;
+                }
+            }
+            "block_comment" => {
+                let text = node_text(&sib, source);
+                if let Some(inner) = text.strip_prefix("/**") {
+                    let inner = inner.strip_suffix("*/").unwrap_or(inner);
+                    lines.push(inner.trim().to_string());
+                } else {
+                    break;
+                }
+            }
+            "attribute_item" => {
+                // Skip attributes like #[derive(...)]
+            }
+            _ => break,
+        }
+        sibling = sib.prev_sibling();
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    lines.reverse();
+    Some(lines.join("\n"))
+}
+
+fn extract_symbols(
+    node: &Node,
+    source: &str,
+    file_path: &str,
+    symbols: &mut Vec<Symbol>,
+    trait_impls: &mut Vec<TraitImpl>,
+) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -107,8 +157,11 @@ fn extract_symbols(node: &Node, source: &str, file_path: &str, symbols: &mut Vec
                     line_start: child.start_position().row + 1,
                     line_end: child.end_position().row + 1,
                     signature: sig,
+                    doc_comment: None,
+                    body: None,
+                    details: None,
                 });
-                extract_symbols(&child, source, file_path, symbols);
+                extract_symbols(&child, source, file_path, symbols, trait_impls);
             }
             "use_declaration" => {
                 let text = node_text(&child, source);
@@ -120,6 +173,9 @@ fn extract_symbols(node: &Node, source: &str, file_path: &str, symbols: &mut Vec
                     line_start: child.start_position().row + 1,
                     line_end: child.end_position().row + 1,
                     signature: text,
+                    doc_comment: None,
+                    body: None,
+                    details: None,
                 });
             }
             "mod_item" => {
@@ -128,7 +184,7 @@ fn extract_symbols(node: &Node, source: &str, file_path: &str, symbols: &mut Vec
                 }
             }
             "declaration_list" => {
-                extract_symbols(&child, source, file_path, symbols);
+                extract_symbols(&child, source, file_path, symbols, trait_impls);
             }
             _ => {}
         }
@@ -149,6 +205,9 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
         line_start: node.start_position().row + 1,
         line_end: node.end_position().row + 1,
         signature: sig,
+        doc_comment: extract_doc_comment(node, source),
+        body: None,
+        details: None,
     })
 }
 
@@ -172,6 +231,9 @@ fn extract_named_item(
         line_start: node.start_position().row + 1,
         line_end: node.end_position().row + 1,
         signature: sig,
+        doc_comment: extract_doc_comment(node, source),
+        body: None,
+        details: None,
     })
 }
 
@@ -228,6 +290,15 @@ pub enum RefKind {
     TypeRef,
     /// Function/method call
     Call,
+}
+
+#[derive(Debug, Clone)]
+pub struct TraitImpl {
+    pub type_name: String,
+    pub trait_name: String,
+    pub file_path: String,
+    pub line_start: usize,
+    pub line_end: usize,
 }
 
 impl std::fmt::Display for RefKind {
@@ -342,7 +413,7 @@ pub fn hello(name: &str) -> String {
     format!("Hello, {name}")
 }
 "#;
-        let symbols = parse_rust_source(source, "src/lib.rs").unwrap();
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "hello");
         assert_eq!(symbols[0].kind, SymbolKind::Function);
@@ -362,7 +433,7 @@ impl Config {
     }
 }
 ";
-        let symbols = parse_rust_source(source, "src/config.rs").unwrap();
+        let (symbols, _) = parse_rust_source(source, "src/config.rs").unwrap();
         let struct_sym = symbols
             .iter()
             .find(|s| s.name == "Config" && s.kind == SymbolKind::Struct)
@@ -378,7 +449,7 @@ impl Config {
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 ";
-        let symbols = parse_rust_source(source, "src/lib.rs").unwrap();
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
         let uses: Vec<_> = symbols
             .iter()
             .filter(|s| s.kind == SymbolKind::Use)
@@ -392,7 +463,7 @@ use serde::{Serialize, Deserialize};
 pub enum Color { Red, Green, Blue }
 pub trait Drawable { fn draw(&self); }
 ";
-        let symbols = parse_rust_source(source, "src/lib.rs").unwrap();
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
         assert!(
             symbols
                 .iter()
@@ -410,7 +481,7 @@ pub trait Drawable { fn draw(&self); }
         let source = r"
 fn private_helper() {}
 ";
-        let symbols = parse_rust_source(source, "src/lib.rs").unwrap();
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
         assert_eq!(symbols[0].visibility, Visibility::Private);
     }
 
@@ -461,5 +532,34 @@ pub fn standalone() -> i32 { 42 }
             ["standalone"].iter().map(|s| (*s).to_string()).collect();
         let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
         assert!(refs.is_empty(), "should not create self-references");
+    }
+
+    #[test]
+    fn test_extract_doc_comments() {
+        let source = r#"
+/// First line of docs
+/// Second line of docs
+pub fn documented() {}
+
+pub fn undocumented() {}
+
+/// Doc comment here
+#[derive(Debug)]
+pub struct Annotated;
+"#;
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+
+        let documented = symbols.iter().find(|s| s.name == "documented").unwrap();
+        let doc = documented.doc_comment.as_deref().unwrap();
+        assert!(doc.contains("First line of docs"));
+        assert!(doc.contains("Second line of docs"));
+        assert_eq!(doc.lines().count(), 2);
+
+        let undocumented = symbols.iter().find(|s| s.name == "undocumented").unwrap();
+        assert!(undocumented.doc_comment.is_none());
+
+        let annotated = symbols.iter().find(|s| s.name == "Annotated").unwrap();
+        let doc = annotated.doc_comment.as_deref().unwrap();
+        assert!(doc.contains("Doc comment here"));
     }
 }

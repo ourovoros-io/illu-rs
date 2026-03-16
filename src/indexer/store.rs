@@ -118,6 +118,9 @@ mod tests {
             line_start: 10,
             line_end: 25,
             signature: "pub fn parse_config(path: &Path) -> Result<Config>".into(),
+            doc_comment: None,
+            body: None,
+            details: None,
         }];
         store_symbols(&db, file_id, &symbols).unwrap();
         let results = db.search_symbols("parse").unwrap();

@@ -108,6 +108,9 @@ mod tests {
                 line_start: 1,
                 line_end: 5,
                 signature: "pub fn lonely_fn()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
             }],
         )
         .unwrap();
@@ -133,6 +136,9 @@ mod tests {
                     line_start: 1,
                     line_end: 5,
                     signature: "pub fn base_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
                 },
                 Symbol {
                     name: "caller_fn".into(),
@@ -142,6 +148,9 @@ mod tests {
                     line_start: 7,
                     line_end: 10,
                     signature: "pub fn caller_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
                 },
             ],
         )
@@ -187,6 +196,9 @@ mod tests {
                 line_start: 1,
                 line_end: 3,
                 signature: "pub struct SharedType".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
             }],
         )
         .unwrap();
@@ -202,6 +214,9 @@ mod tests {
                 line_start: 1,
                 line_end: 5,
                 signature: "pub fn use_it()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
             }],
         )
         .unwrap();

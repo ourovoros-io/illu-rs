@@ -68,6 +68,9 @@ mod tests {
                 line_start: 1,
                 line_end: 10,
                 signature: "pub fn parse_config(path: &Path) -> Config".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
             }],
         )
         .unwrap();
@@ -100,6 +103,9 @@ mod tests {
                 line_start: 1,
                 line_end: 5,
                 signature: "pub fn serialize()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
             }],
         )
         .unwrap();

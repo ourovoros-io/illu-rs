@@ -117,7 +117,7 @@ pub fn refresh_index(
         } else {
             db.insert_file(relative, &hash)?
         };
-        let symbols = parser::parse_rust_source(source, relative)
+        let (symbols, _trait_impls) = parser::parse_rust_source(source, relative)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         store::store_symbols(db, file_id, &symbols)?;
     }
@@ -250,7 +250,7 @@ fn index_crate_sources(
                 .to_string();
             let hash = content_hash(&source);
             let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
-            let symbols = parser::parse_rust_source(&source, &relative)
+            let (symbols, _trait_impls) = parser::parse_rust_source(&source, &relative)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             store::store_symbols(db, file_id, &symbols)?;
         }
