@@ -126,6 +126,48 @@ impl Database {
         Ok(deps)
     }
 
+    pub fn insert_file(
+        &self,
+        path: &str,
+        content_hash: &str,
+    ) -> SqlResult<i64> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO files (path, content_hash) \
+             VALUES (?1, ?2)",
+            params![path, content_hash],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn search_symbols(
+        &self,
+        query: &str,
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        let fts_query = format!("{query}*");
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature \
+             FROM symbols_fts fts \
+             JOIN symbols s ON s.id = fts.rowid \
+             JOIN files f ON f.id = s.file_id \
+             WHERE symbols_fts MATCH ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![fts_query])?;
+        while let Some(row) = rows.next()? {
+            results.push(StoredSymbol {
+                name: row.get(0)?,
+                kind: row.get(1)?,
+                visibility: row.get(2)?,
+                file_path: row.get(3)?,
+                line_start: row.get(4)?,
+                line_end: row.get(5)?,
+                signature: row.get(6)?,
+            });
+        }
+        Ok(results)
+    }
+
     pub fn get_dependency_by_name(
         &self,
         name: &str,
@@ -155,6 +197,17 @@ pub struct StoredDep {
     pub is_direct: bool,
     pub repository_url: Option<String>,
     pub features: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct StoredSymbol {
+    pub name: String,
+    pub kind: String,
+    pub visibility: String,
+    pub file_path: String,
+    pub line_start: i64,
+    pub line_end: i64,
+    pub signature: String,
 }
 
 #[cfg(test)]

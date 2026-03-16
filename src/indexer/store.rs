@@ -1,5 +1,6 @@
 use crate::db::Database;
 use crate::indexer::dependencies::ResolvedDep;
+use crate::indexer::parser::Symbol;
 use rusqlite::params;
 
 pub fn store_dependencies(
@@ -24,11 +25,47 @@ pub fn store_dependencies(
     Ok(())
 }
 
+pub fn store_symbols(
+    db: &Database,
+    file_id: i64,
+    symbols: &[Symbol],
+) -> rusqlite::Result<()> {
+    let mut sym_stmt = db.conn.prepare(
+        "INSERT INTO symbols \
+         (file_id, name, kind, visibility, \
+          line_start, line_end, signature) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )?;
+    let mut fts_stmt = db.conn.prepare(
+        "INSERT INTO symbols_fts (rowid, name, signature) \
+         VALUES (?1, ?2, ?3)",
+    )?;
+    for sym in symbols {
+        let line_start = i64::try_from(sym.line_start)
+            .unwrap_or(i64::MAX);
+        let line_end = i64::try_from(sym.line_end)
+            .unwrap_or(i64::MAX);
+        sym_stmt.execute(params![
+            file_id,
+            sym.name,
+            sym.kind.to_string(),
+            sym.visibility.to_string(),
+            line_start,
+            line_end,
+            sym.signature,
+        ])?;
+        let rowid = db.conn.last_insert_rowid();
+        fts_stmt.execute(params![rowid, sym.name, sym.signature])?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
     use crate::indexer::dependencies::ResolvedDep;
+    use crate::indexer::parser::{SymbolKind, Visibility};
 
     #[test]
     fn test_store_and_retrieve_dependencies() {
@@ -75,5 +112,25 @@ mod tests {
 
         let missing = db.get_dependency_by_name("nonexistent").unwrap();
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_store_and_search_symbols() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "abc123").unwrap();
+        let symbols = vec![Symbol {
+            name: "parse_config".into(),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            file_path: "src/lib.rs".into(),
+            line_start: 10,
+            line_end: 25,
+            signature: "pub fn parse_config(path: &Path) -> Result<Config>"
+                .into(),
+        }];
+        store_symbols(&db, file_id, &symbols).unwrap();
+        let results = db.search_symbols("parse").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "parse_config");
     }
 }
