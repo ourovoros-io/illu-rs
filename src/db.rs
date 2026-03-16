@@ -29,7 +29,8 @@ impl Database {
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY,
                 path TEXT NOT NULL UNIQUE,
-                content_hash TEXT NOT NULL
+                content_hash TEXT NOT NULL,
+                crate_id INTEGER REFERENCES crates(id)
             );
 
             CREATE TABLE IF NOT EXISTS symbols (
@@ -66,6 +67,19 @@ impl Database {
                 content TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS crates (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                path TEXT NOT NULL,
+                is_workspace_root INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS crate_deps (
+                source_crate_id INTEGER NOT NULL REFERENCES crates(id),
+                target_crate_id INTEGER NOT NULL REFERENCES crates(id),
+                PRIMARY KEY (source_crate_id, target_crate_id)
+            );
+
             CREATE VIRTUAL TABLE IF NOT EXISTS symbols_fts USING fts5(
                 name, signature, content=symbols, content_rowid=id
             );
@@ -84,6 +98,8 @@ impl Database {
              DELETE FROM symbol_refs;
              DELETE FROM symbols;
              DELETE FROM files;
+             DELETE FROM crate_deps;
+             DELETE FROM crates;
              DELETE FROM dependencies;
              DELETE FROM metadata;",
         )
@@ -177,6 +193,126 @@ impl Database {
             params![source_id, target_id, kind],
         )?;
         Ok(())
+    }
+
+    pub fn insert_crate(&self, name: &str, path: &str, is_workspace_root: bool) -> SqlResult<i64> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO crates (name, path, is_workspace_root) \
+             VALUES (?1, ?2, ?3)",
+            params![name, path, is_workspace_root],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_crate_by_name(&self, name: &str) -> SqlResult<Option<StoredCrate>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, path, is_workspace_root FROM crates WHERE name = ?1")?;
+        let mut rows = stmt.query(params![name])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(StoredCrate {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                path: row.get(2)?,
+                is_workspace_root: row.get(3)?,
+            })),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_crate_count(&self) -> SqlResult<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM crates", [], |row| row.get(0))
+    }
+
+    pub fn insert_crate_dep(&self, source_crate_id: i64, target_crate_id: i64) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO crate_deps (source_crate_id, target_crate_id) \
+             VALUES (?1, ?2)",
+            params![source_crate_id, target_crate_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_crate_dependents(&self, crate_id: i64) -> SqlResult<Vec<StoredCrate>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.name, c.path, c.is_workspace_root \
+             FROM crate_deps cd \
+             JOIN crates c ON c.id = cd.source_crate_id \
+             WHERE cd.target_crate_id = ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![crate_id])?;
+        while let Some(row) = rows.next()? {
+            results.push(StoredCrate {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                path: row.get(2)?,
+                is_workspace_root: row.get(3)?,
+            });
+        }
+        Ok(results)
+    }
+
+    pub fn get_transitive_crate_dependents(&self, crate_id: i64) -> SqlResult<Vec<StoredCrate>> {
+        let mut stmt = self.conn.prepare(
+            "WITH RECURSIVE deps(id, name, path, is_workspace_root, depth) AS (
+                SELECT id, name, path, is_workspace_root, 0
+                FROM crates WHERE id = ?1
+              UNION
+                SELECT c.id, c.name, c.path, c.is_workspace_root, deps.depth + 1
+                FROM deps
+                JOIN crate_deps cd ON cd.target_crate_id = deps.id
+                JOIN crates c ON c.id = cd.source_crate_id
+                WHERE deps.depth < 10
+            )
+            SELECT DISTINCT id, name, path, is_workspace_root
+            FROM deps WHERE id != ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![crate_id])?;
+        while let Some(row) = rows.next()? {
+            results.push(StoredCrate {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                path: row.get(2)?,
+                is_workspace_root: row.get(3)?,
+            });
+        }
+        Ok(results)
+    }
+
+    pub fn insert_file_with_crate(
+        &self,
+        path: &str,
+        content_hash: &str,
+        crate_id: i64,
+    ) -> SqlResult<i64> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO files (path, content_hash, crate_id) \
+             VALUES (?1, ?2, ?3)",
+            params![path, content_hash, crate_id],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_crate_for_file(&self, file_path: &str) -> SqlResult<Option<StoredCrate>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.name, c.path, c.is_workspace_root \
+             FROM files f \
+             JOIN crates c ON c.id = f.crate_id \
+             WHERE f.path = ?1",
+        )?;
+        let mut rows = stmt.query(params![file_path])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(StoredCrate {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                path: row.get(2)?,
+                is_workspace_root: row.get(3)?,
+            })),
+            None => Ok(None),
+        }
     }
 
     pub fn get_dependency_id(&self, name: &str) -> SqlResult<Option<i64>> {
@@ -318,6 +454,14 @@ impl Database {
 }
 
 #[derive(Debug)]
+pub struct StoredCrate {
+    pub id: i64,
+    pub name: String,
+    pub path: String,
+    pub is_workspace_root: bool,
+}
+
+#[derive(Debug)]
 pub struct DocResult {
     pub content: String,
     pub source: String,
@@ -371,6 +515,8 @@ mod tests {
         assert!(tables.contains(&"symbol_refs".to_string()));
         assert!(tables.contains(&"dependencies".to_string()));
         assert!(tables.contains(&"docs".to_string()));
+        assert!(tables.contains(&"crates".to_string()));
+        assert!(tables.contains(&"crate_deps".to_string()));
     }
 
     #[test]
@@ -390,6 +536,56 @@ mod tests {
 
         assert!(tables.contains(&"symbols_fts".to_string()));
         assert!(tables.contains(&"docs_fts".to_string()));
+    }
+
+    #[test]
+    fn test_insert_and_get_crate() {
+        let db = Database::open_in_memory().unwrap();
+        let id = db
+            .insert_crate("hcfs-server", "hcfs-server", false)
+            .unwrap();
+        assert!(id > 0);
+        let c = db.get_crate_by_name("hcfs-server").unwrap().unwrap();
+        assert_eq!(c.name, "hcfs-server");
+        assert_eq!(c.path, "hcfs-server");
+    }
+
+    #[test]
+    fn test_insert_crate_dep() {
+        let db = Database::open_in_memory().unwrap();
+        let shared = db.insert_crate("shared", "shared", false).unwrap();
+        let server = db.insert_crate("server", "server", false).unwrap();
+        db.insert_crate_dep(server, shared).unwrap();
+        let deps = db.get_crate_dependents(shared).unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "server");
+    }
+
+    #[test]
+    fn test_transitive_crate_dependents() {
+        let db = Database::open_in_memory().unwrap();
+        let shared = db.insert_crate("shared", "shared", false).unwrap();
+        let client = db.insert_crate("client", "client", false).unwrap();
+        let cli = db.insert_crate("cli", "cli", false).unwrap();
+        db.insert_crate_dep(client, shared).unwrap();
+        db.insert_crate_dep(cli, client).unwrap();
+        let deps = db.get_transitive_crate_dependents(shared).unwrap();
+        assert_eq!(deps.len(), 2);
+        let names: Vec<&str> = deps.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"client"));
+        assert!(names.contains(&"cli"));
+    }
+
+    #[test]
+    fn test_insert_file_with_crate() {
+        let db = Database::open_in_memory().unwrap();
+        let crate_id = db.insert_crate("mylib", "mylib", false).unwrap();
+        let file_id = db
+            .insert_file_with_crate("mylib/src/lib.rs", "hash", crate_id)
+            .unwrap();
+        assert!(file_id > 0);
+        let c = db.get_crate_for_file("mylib/src/lib.rs").unwrap().unwrap();
+        assert_eq!(c.name, "mylib");
     }
 
     #[test]
