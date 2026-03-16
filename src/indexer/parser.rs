@@ -113,18 +113,14 @@ fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
     Some(lines.join("\n"))
 }
 
-fn extract_body(node: &Node, source: &str) -> Option<String> {
+fn extract_body(node: &Node, source: &str) -> String {
     let text = &source[node.start_byte()..node.end_byte()];
     let line_count = text.lines().count();
     if line_count > 100 {
-        let truncated: String = text
-            .lines()
-            .take(100)
-            .collect::<Vec<_>>()
-            .join("\n");
-        Some(format!("{truncated}\n// ... truncated"))
+        let truncated: String = text.lines().take(100).collect::<Vec<_>>().join("\n");
+        format!("{truncated}\n// ... truncated")
     } else {
-        Some(text.to_string())
+        text.to_string()
     }
 }
 
@@ -164,6 +160,9 @@ fn extract_symbols(
                 let type_name = extract_impl_type(&child, source);
                 let vis = get_visibility(&child, source);
                 let sig = get_first_line(&child, source);
+                if let Some(ti) = extract_trait_impl_info(&child, source, file_path) {
+                    trait_impls.push(ti);
+                }
                 symbols.push(Symbol {
                     name: type_name.clone().unwrap_or_default(),
                     kind: SymbolKind::Impl,
@@ -173,7 +172,7 @@ fn extract_symbols(
                     line_end: child.end_position().row + 1,
                     signature: sig,
                     doc_comment: None,
-                    body: extract_body(&child, source),
+                    body: Some(extract_body(&child, source)),
                     details: None,
                 });
                 extract_symbols(&child, source, file_path, symbols, trait_impls);
@@ -221,7 +220,7 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
         line_end: node.end_position().row + 1,
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
-        body: extract_body(node, source),
+        body: Some(extract_body(node, source)),
         details: None,
     })
 }
@@ -305,7 +304,7 @@ fn extract_named_item(
         line_end: node.end_position().row + 1,
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
-        body: extract_body(node, source),
+        body: Some(extract_body(node, source)),
         details,
     })
 }
@@ -315,6 +314,42 @@ fn extract_impl_type(node: &Node, source: &str) -> Option<String> {
     node.children(&mut cursor)
         .find(|child| child.kind() == "type_identifier" || child.kind() == "generic_type")
         .map(|child| node_text(&child, source))
+}
+
+fn is_type_node(kind: &str) -> bool {
+    kind == "type_identifier" || kind == "scoped_type_identifier" || kind == "generic_type"
+}
+
+fn extract_type_name(node: &Node, source: &str) -> String {
+    if node.kind() == "generic_type"
+        && let Some(base) = find_child_by_kind(node, "type_identifier")
+    {
+        return node_text(&base, source);
+    }
+    node_text(node, source)
+}
+
+fn extract_trait_impl_info(node: &Node, source: &str, file_path: &str) -> Option<TraitImpl> {
+    let mut cursor = node.walk();
+    let children: Vec<_> = node.children(&mut cursor).collect();
+
+    let for_pos = children.iter().position(|c| c.kind() == "for")?;
+
+    let trait_node = children[..for_pos]
+        .iter()
+        .rfind(|c| is_type_node(c.kind()))?;
+
+    let type_node = children[for_pos + 1..]
+        .iter()
+        .find(|c| is_type_node(c.kind()))?;
+
+    Some(TraitImpl {
+        trait_name: extract_type_name(trait_node, source),
+        type_name: extract_type_name(type_node, source),
+        file_path: file_path.to_string(),
+        line_start: node.start_position().row + 1,
+        line_end: node.end_position().row + 1,
+    })
 }
 
 fn get_visibility(node: &Node, source: &str) -> Visibility {
@@ -609,7 +644,7 @@ pub fn standalone() -> i32 { 42 }
 
     #[test]
     fn test_extract_doc_comments() {
-        let source = r#"
+        let source = r"
 /// First line of docs
 /// Second line of docs
 pub fn documented() {}
@@ -619,7 +654,7 @@ pub fn undocumented() {}
 /// Doc comment here
 #[derive(Debug)]
 pub struct Annotated;
-"#;
+";
         let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
 
         let documented = symbols.iter().find(|s| s.name == "documented").unwrap();
@@ -652,9 +687,10 @@ pub fn greet(name: &str) -> String {
 
     #[test]
     fn test_body_truncation() {
+        use std::fmt::Write;
         let mut source = String::from("pub fn long_fn() {\n");
         for i in 0..110 {
-            source.push_str(&format!("    let x{i} = {i};\n"));
+            let _ = writeln!(source, "    let x{i} = {i};");
         }
         source.push_str("}\n");
 
@@ -721,5 +757,62 @@ pub struct Empty;
         let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
         let sym = symbols.iter().find(|s| s.name == "Empty").unwrap();
         assert!(sym.details.is_none());
+    }
+
+    #[test]
+    fn test_extract_trait_impl() {
+        let source = r"
+pub trait Drawable {
+    fn draw(&self);
+}
+
+pub struct Circle;
+
+impl Drawable for Circle {
+    fn draw(&self) {}
+}
+";
+        let (_, trait_impls) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert_eq!(trait_impls.len(), 1);
+        assert_eq!(trait_impls[0].trait_name, "Drawable");
+        assert_eq!(trait_impls[0].type_name, "Circle");
+        assert_eq!(trait_impls[0].file_path, "src/lib.rs");
+    }
+
+    #[test]
+    fn test_inherent_impl_not_trait_impl() {
+        let source = r"
+pub struct Foo;
+
+impl Foo {
+    pub fn new() -> Self { Self }
+}
+";
+        let (_, trait_impls) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(trait_impls.is_empty());
+    }
+
+    #[test]
+    fn test_generic_trait_impl() {
+        let source = r#"
+use std::fmt;
+
+pub struct MyType;
+
+impl fmt::Display for MyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MyType")
+    }
+}
+"#;
+        let (_, trait_impls) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert_eq!(trait_impls.len(), 1);
+        assert_eq!(trait_impls[0].type_name, "MyType");
+        // scoped_type_identifier gives full path
+        assert!(
+            trait_impls[0].trait_name.contains("Display"),
+            "trait_name was: {}",
+            trait_impls[0].trait_name
+        );
     }
 }
