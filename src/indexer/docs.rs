@@ -87,19 +87,125 @@ pub async fn fetch_github_readme(
     Ok(None)
 }
 
+pub struct PendingDoc {
+    pub dep_id: i64,
+    pub name: String,
+    pub version: String,
+}
+
+/// Determine which dependencies need docs fetched (sync, needs DB).
+pub fn pending_docs(
+    db: &crate::db::Database,
+) -> Result<Vec<PendingDoc>, Box<dyn std::error::Error>> {
+    let deps = db.get_direct_dependencies()?;
+    let mut pending = Vec::new();
+
+    for dep in &deps {
+        let existing = db.get_docs_for_dependency(&dep.name)?;
+        if !existing.is_empty() {
+            continue;
+        }
+        let Some(dep_id) = db.get_dependency_id(&dep.name)? else {
+            continue;
+        };
+        pending.push(PendingDoc {
+            dep_id,
+            name: dep.name.clone(),
+            version: dep.version.clone(),
+        });
+    }
+    Ok(pending)
+}
+
+pub struct FetchedDoc {
+    pub dep_id: i64,
+    pub content: String,
+}
+
+/// Fetch docs over the network (async, no DB needed).
+pub async fn fetch_docs(pending: &[PendingDoc]) -> Vec<FetchedDoc> {
+    let mut results = Vec::new();
+    for doc in pending {
+        tracing::info!("Fetching docs for {} {}", doc.name, doc.version);
+        if let Ok(Some(content)) = fetch_docs_rs(&doc.name, &doc.version).await {
+            let truncated = if content.len() > 8000 {
+                format!("{}...", &content[..8000])
+            } else {
+                content
+            };
+            results.push(FetchedDoc {
+                dep_id: doc.dep_id,
+                content: truncated,
+            });
+        }
+    }
+    tracing::info!("Fetched docs for {} dependencies", results.len());
+    results
+}
+
+/// Store fetched docs into DB (sync, needs DB).
+pub fn store_fetched_docs(
+    db: &crate::db::Database,
+    docs: &[FetchedDoc],
+) -> Result<usize, Box<dyn std::error::Error>> {
+    for doc in docs {
+        db.store_doc(doc.dep_id, "docs.rs", &doc.content)?;
+    }
+    Ok(docs.len())
+}
+
+/// Convenience: fetch all missing docs in one call (async, holds DB reference).
+pub async fn fetch_dependency_docs(
+    db: &crate::db::Database,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let pending = pending_docs(db)?;
+    if pending.is_empty() {
+        return Ok(0);
+    }
+    let fetched = fetch_docs(&pending).await;
+    store_fetched_docs(db, &fetched)
+}
+
 fn extract_text_from_html(html: &str) -> String {
+    // Strip script and style blocks first
+    let mut cleaned = html.to_string();
+    for tag in &["script", "style", "head"] {
+        let open = format!("<{tag}");
+        let close = format!("</{tag}>");
+        while let Some(start) = cleaned.find(&open) {
+            let Some(end) = cleaned[start..].find(&close) else {
+                break;
+            };
+            let end = start + end + close.len();
+            cleaned.replace_range(start..end, " ");
+        }
+    }
+
+    // Try to extract just the main content area
+    let content = if let Some(start) = cleaned.find("Expand description") {
+        &cleaned[start..]
+    } else if let Some(start) = cleaned.find("<main") {
+        &cleaned[start..]
+    } else {
+        &cleaned
+    };
+
+    // Strip remaining HTML tags
     let mut text = String::new();
     let mut in_tag = false;
-
-    for ch in html.chars() {
+    for ch in content.chars() {
         match ch {
             '<' => in_tag = true,
-            '>' => in_tag = false,
+            '>' => {
+                in_tag = false;
+                text.push(' ');
+            }
             _ if in_tag => {}
             _ => text.push(ch),
         }
     }
 
+    // Collapse whitespace
     let mut result = String::new();
     let mut last_was_space = false;
     for ch in text.chars() {
@@ -113,7 +219,17 @@ fn extract_text_from_html(html: &str) -> String {
             last_was_space = false;
         }
     }
-    result.trim().to_string()
+
+    // Decode common HTML entities
+    result
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]

@@ -337,6 +337,59 @@ impl Database {
         }
     }
 
+    pub fn get_file_hash(&self, path: &str) -> SqlResult<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT content_hash FROM files WHERE path = ?1")?;
+        let mut rows = stmt.query(params![path])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn delete_file_data(&self, path: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "DELETE FROM symbol_refs WHERE source_symbol_id IN \
+             (SELECT id FROM symbols WHERE file_id = \
+              (SELECT id FROM files WHERE path = ?1)) \
+             OR target_symbol_id IN \
+             (SELECT id FROM symbols WHERE file_id = \
+              (SELECT id FROM files WHERE path = ?1))",
+            params![path],
+        )?;
+        self.conn.execute(
+            "DELETE FROM symbols_fts WHERE rowid IN \
+             (SELECT id FROM symbols WHERE file_id = \
+              (SELECT id FROM files WHERE path = ?1))",
+            params![path],
+        )?;
+        self.conn.execute(
+            "DELETE FROM symbols WHERE file_id = \
+             (SELECT id FROM files WHERE path = ?1)",
+            params![path],
+        )?;
+        self.conn.execute(
+            "DELETE FROM files WHERE path = ?1",
+            params![path],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_all_files_with_hashes(
+        &self,
+    ) -> SqlResult<Vec<(String, String, Option<i64>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, content_hash, crate_id FROM files")?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        }
+        Ok(results)
+    }
+
     pub fn insert_file(&self, path: &str, content_hash: &str) -> SqlResult<i64> {
         self.conn.execute(
             "INSERT OR REPLACE INTO files (path, content_hash) \

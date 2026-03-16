@@ -9,6 +9,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
+#[derive(Clone)]
 pub struct IndexConfig {
     pub repo_path: PathBuf,
     pub skip_doc_fetch: bool,
@@ -31,6 +32,115 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std
     update_metadata(db, config)?;
 
     Ok(())
+}
+
+/// Incrementally re-index only files whose content has changed.
+/// If the DB is empty, does a full index first.
+/// Returns the number of files that were re-indexed.
+pub fn refresh_index(
+    db: &Database,
+    config: &IndexConfig,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let file_count: i64 = db
+        .conn
+        .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))?;
+    if file_count == 0 {
+        tracing::info!("Empty index — running full index");
+        index_repo(db, config)?;
+        let new_count: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))?;
+        return Ok(usize::try_from(new_count).unwrap_or(0));
+    }
+
+    let existing: std::collections::HashMap<String, (String, Option<i64>)> = db
+        .get_all_files_with_hashes()?
+        .into_iter()
+        .map(|(path, hash, crate_id)| (path, (hash, crate_id)))
+        .collect();
+
+    let mut dirty_files: Vec<(String, String, Option<i64>)> = Vec::new();
+
+    // Walk all .rs files in the repo
+    for entry in walkdir::WalkDir::new(&config.repo_path)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "rs") {
+            continue;
+        }
+        // Skip hidden dirs and target/
+        let relative = path
+            .strip_prefix(&config.repo_path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        if relative.starts_with("target/") || relative.starts_with('.') {
+            continue;
+        }
+
+        let source = std::fs::read_to_string(path)?;
+        let hash = content_hash(&source);
+
+        let needs_update = match existing.get(&relative) {
+            Some((old_hash, _)) => *old_hash != hash,
+            None => true,
+        };
+
+        if needs_update {
+            let crate_id = existing
+                .get(&relative)
+                .and_then(|(_, cid)| *cid);
+            dirty_files.push((relative, source, crate_id));
+        }
+    }
+
+    // Check for deleted files
+    for path in existing.keys() {
+        let full = config.repo_path.join(path);
+        if !full.exists() {
+            db.delete_file_data(path)?;
+        }
+    }
+
+    if dirty_files.is_empty() {
+        return Ok(0);
+    }
+
+    let count = dirty_files.len();
+    tracing::info!("{count} file(s) changed, re-indexing");
+
+    for (relative, source, crate_id) in &dirty_files {
+        db.delete_file_data(relative)?;
+        let hash = content_hash(source);
+        let file_id = if let Some(cid) = crate_id {
+            db.insert_file_with_crate(relative, &hash, *cid)?
+        } else {
+            db.insert_file(relative, &hash)?
+        };
+        let symbols = parser::parse_rust_source(source, relative)
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        store::store_symbols(db, file_id, &symbols)?;
+    }
+
+    // Rebuild refs for dirty files (need full symbol set)
+    let known_symbols = db.get_all_symbol_names()?;
+    if !known_symbols.is_empty() {
+        for (relative, source, _) in &dirty_files {
+            let refs = parser::extract_refs(source, relative, &known_symbols)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            for r in &refs {
+                let source_id = db.get_symbol_id(&r.source_name, &r.source_file)?;
+                let target_id = db.get_symbol_id_by_name(&r.target_name)?;
+                if let (Some(sid), Some(tid)) = (source_id, target_id) {
+                    db.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
+                }
+            }
+        }
+    }
+
+    Ok(count)
 }
 
 fn index_single_crate(
