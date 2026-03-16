@@ -87,7 +87,6 @@ impl std::fmt::Display for Config {
     let db = Database::open_in_memory().unwrap();
     let config = IndexConfig {
         repo_path: dir.path().to_path_buf(),
-        skip_doc_fetch: true,
     };
     index_repo(&db, &config).unwrap();
 
@@ -270,7 +269,6 @@ pub fn run() -> SharedConfig {
     let db = Database::open_in_memory().unwrap();
     let config = IndexConfig {
         repo_path: dir.path().to_path_buf(),
-        skip_doc_fetch: true,
     };
     index_repo(&db, &config).unwrap();
 

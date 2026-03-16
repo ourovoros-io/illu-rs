@@ -1,4 +1,5 @@
 use crate::db::{Database, StoredSymbol};
+use crate::indexer::parser::SymbolKind;
 use std::fmt::Write;
 
 pub fn handle_context(
@@ -61,7 +62,7 @@ fn render_trait_info(
     output: &mut String,
     sym: &StoredSymbol,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if sym.kind == "struct" || sym.kind == "enum" {
+    if sym.kind == SymbolKind::Struct || sym.kind == SymbolKind::Enum {
         let impls = db.get_trait_impls_for_type(&sym.name)?;
         if !impls.is_empty() {
             let _ = writeln!(output, "### Trait Implementations\n");
@@ -76,7 +77,7 @@ fn render_trait_info(
         }
     }
 
-    if sym.kind == "trait" {
+    if sym.kind == SymbolKind::Trait {
         let implementors = db.get_trait_impls_for_trait(&sym.name)?;
         if !implementors.is_empty() {
             let _ = writeln!(output, "### Implemented By\n");

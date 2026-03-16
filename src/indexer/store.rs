@@ -1,4 +1,4 @@
-use crate::db::Database;
+use crate::db::{Database, FileId};
 use crate::indexer::dependencies::ResolvedDep;
 use crate::indexer::parser::Symbol;
 use rusqlite::params;
@@ -22,7 +22,7 @@ pub fn store_dependencies(db: &Database, deps: &[ResolvedDep]) -> rusqlite::Resu
     Ok(())
 }
 
-pub fn store_symbols(db: &Database, file_id: i64, symbols: &[Symbol]) -> rusqlite::Result<()> {
+pub fn store_symbols(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusqlite::Result<()> {
     let mut sym_stmt = db.conn.prepare(
         "INSERT INTO symbols \
          (file_id, name, kind, visibility, \
@@ -60,7 +60,7 @@ pub fn store_symbols(db: &Database, file_id: i64, symbols: &[Symbol]) -> rusqlit
 
 pub fn store_trait_impls(
     db: &Database,
-    file_id: i64,
+    file_id: FileId,
     trait_impls: &[crate::indexer::parser::TraitImpl],
 ) -> rusqlite::Result<()> {
     let mut stmt = db.conn.prepare(

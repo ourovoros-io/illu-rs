@@ -5,14 +5,11 @@ pub mod store;
 pub mod workspace;
 
 use crate::db::Database;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct IndexConfig {
     pub repo_path: PathBuf,
-    pub skip_doc_fetch: bool,
 }
 
 pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -41,31 +38,31 @@ pub fn refresh_index(
     db: &Database,
     config: &IndexConfig,
 ) -> Result<usize, Box<dyn std::error::Error>> {
-    let file_count: i64 = db
-        .conn
-        .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))?;
+    let file_count = db.file_count()?;
     if file_count == 0 {
         tracing::info!("Empty index — running full index");
         index_repo(db, config)?;
-        let new_count: i64 = db
-            .conn
-            .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))?;
+        let new_count = db.file_count()?;
         return Ok(usize::try_from(new_count).unwrap_or(0));
     }
 
-    let existing: std::collections::HashMap<String, (String, Option<i64>)> = db
+    let existing: std::collections::HashMap<String, (String, Option<crate::db::CrateId>)> = db
         .get_all_files_with_hashes()?
         .into_iter()
-        .map(|(path, hash, crate_id)| (path, (hash, crate_id)))
+        .map(|f| (f.path, (f.content_hash, f.crate_id)))
         .collect();
 
-    let mut dirty_files: Vec<(String, String, Option<i64>)> = Vec::new();
+    let mut dirty_files: Vec<(String, String, Option<crate::db::CrateId>)> = Vec::new();
 
     // Walk all .rs files in the repo
-    for entry in walkdir::WalkDir::new(&config.repo_path)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
+    for result in walkdir::WalkDir::new(&config.repo_path) {
+        let entry = match result {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!("Skipping directory entry: {e}");
+                continue;
+            }
+        };
         let path = entry.path();
         if path.extension().is_none_or(|ext| ext != "rs") {
             continue;
@@ -170,7 +167,8 @@ fn index_workspace(
     let mut all_direct = Vec::new();
 
     // Register each member crate
-    let mut crate_ids: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut crate_ids: std::collections::HashMap<String, crate::db::CrateId> =
+        std::collections::HashMap::new();
 
     for member in &ws_info.members {
         let member_dir = config.repo_path.join(member);
@@ -232,15 +230,19 @@ fn index_crate_sources(
     db: &Database,
     config: &IndexConfig,
     src_dir: &std::path::Path,
-    crate_id: i64,
+    crate_id: crate::db::CrateId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !src_dir.exists() {
         return Ok(());
     }
-    for entry in walkdir::WalkDir::new(src_dir)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
+    for result in walkdir::WalkDir::new(src_dir) {
+        let entry = match result {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!("Skipping directory entry: {e}");
+                continue;
+            }
+        };
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "rs") {
             let source = std::fs::read_to_string(path)?;
@@ -274,8 +276,12 @@ fn extract_all_symbol_refs(
 
     for relative in &files {
         let full_path = config.repo_path.join(relative);
-        let Ok(source) = std::fs::read_to_string(&full_path) else {
-            continue;
+        let source = match std::fs::read_to_string(&full_path) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Cannot read {}: {e}", full_path.display());
+                continue;
+            }
         };
         let refs = parser::extract_refs(&source, relative, &known_symbols)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
@@ -298,7 +304,7 @@ fn generate_skill_file(
     config: &IndexConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let direct_deps = db.get_direct_dependencies()?;
-    let dep_names: Vec<String> = direct_deps.iter().map(|d| d.name.clone()).collect();
+    let dep_names: Vec<&str> = direct_deps.iter().map(|d| d.name.as_str()).collect();
     let skill_content = generate_claude_skill(&dep_names);
     let skill_dir = config.repo_path.join(".claude").join("skills");
     std::fs::create_dir_all(&skill_dir)?;
@@ -319,7 +325,8 @@ fn parse_cargo_lock(
 ) -> Result<Vec<dependencies::LockedDep>, Box<dyn std::error::Error>> {
     match std::fs::read_to_string(repo_path.join("Cargo.lock")) {
         Ok(lock) => Ok(dependencies::parse_cargo_lock(&lock)?),
-        Err(_) => Ok(vec![]),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -335,7 +342,7 @@ fn extract_package_name(cargo_toml: &str) -> Option<String> {
 /// Generate a Claude skill markdown file listing available
 /// MCP tools and the project's direct dependencies.
 #[must_use]
-pub fn generate_claude_skill(direct_dep_names: &[String]) -> String {
+pub(crate) fn generate_claude_skill(direct_dep_names: &[&str]) -> String {
     use std::fmt::Write;
 
     let mut out = String::new();
@@ -385,10 +392,15 @@ pub fn generate_claude_skill(direct_dep_names: &[String]) -> String {
     out
 }
 
+/// Stable FNV-1a hash — deterministic across Rust versions,
+/// unlike `DefaultHasher` whose algorithm may change.
 fn content_hash(content: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    content.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in content.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:x}")
 }
 
 fn get_current_commit_hash(
@@ -448,7 +460,6 @@ pub fn hello() -> &'static str { "hello" }
         let db = Database::open_in_memory().unwrap();
         let config = IndexConfig {
             repo_path: dir.path().to_path_buf(),
-            skip_doc_fetch: true,
         };
         index_repo(&db, &config).unwrap();
 
@@ -458,8 +469,7 @@ pub fn hello() -> &'static str { "hello" }
 
     #[test]
     fn test_generate_skill_content() {
-        let deps = vec!["serde".to_string(), "tokio".to_string()];
-        let skill = generate_claude_skill(&deps);
+        let skill = generate_claude_skill(&["serde", "tokio"]);
         assert!(skill.contains("serde"));
         assert!(skill.contains("tokio"));
         assert!(skill.contains("docs"));
@@ -493,7 +503,6 @@ edition = "2021"
         let db = Database::open_in_memory().unwrap();
         let config = IndexConfig {
             repo_path: dir.path().to_path_buf(),
-            skip_doc_fetch: true,
         };
         index_repo(&db, &config).unwrap();
         let symbols = db.search_symbols("anything").unwrap();
@@ -585,7 +594,6 @@ pub fn use_shared() -> SharedType {
         let db = Database::open_in_memory().unwrap();
         let config = IndexConfig {
             repo_path: dir.path().to_path_buf(),
-            skip_doc_fetch: true,
         };
         index_repo(&db, &config).unwrap();
 
@@ -609,5 +617,123 @@ pub fn use_shared() -> SharedType {
         // Cross-crate symbol ref exists
         let refs_result = db.search_symbols("SharedType").unwrap();
         assert!(!refs_result.is_empty());
+    }
+
+    #[test]
+    fn test_refresh_index_no_changes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(src_dir.join("lib.rs"), "pub fn hello() {}\n").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: dir.path().to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        // No changes — refresh should return 0
+        let refreshed = refresh_index(&db, &config).unwrap();
+        assert_eq!(refreshed, 0);
+    }
+
+    #[test]
+    fn test_refresh_index_detects_changed_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(src_dir.join("lib.rs"), "pub fn hello() {}\n").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: dir.path().to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        // Modify the file
+        std::fs::write(
+            src_dir.join("lib.rs"),
+            "pub fn hello() {}\npub fn world() {}\n",
+        )
+        .unwrap();
+
+        let refreshed = refresh_index(&db, &config).unwrap();
+        assert_eq!(refreshed, 1);
+
+        // New symbol should be indexed
+        let syms = db.search_symbols("world").unwrap();
+        assert_eq!(syms.len(), 1);
+    }
+
+    #[test]
+    fn test_refresh_index_detects_deleted_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(src_dir.join("lib.rs"), "pub fn keep() {}\n").unwrap();
+        std::fs::write(src_dir.join("extra.rs"), "pub fn gone() {}\n").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: dir.path().to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        // Verify extra.rs was indexed
+        let syms = db.search_symbols("gone").unwrap();
+        assert_eq!(syms.len(), 1);
+
+        // Delete extra.rs
+        std::fs::remove_file(src_dir.join("extra.rs")).unwrap();
+
+        let _ = refresh_index(&db, &config).unwrap();
+
+        // Deleted symbol should be gone
+        let syms = db.search_symbols("gone").unwrap();
+        assert!(syms.is_empty());
+
+        // Kept symbol still present
+        let syms = db.search_symbols("keep").unwrap();
+        assert_eq!(syms.len(), 1);
+    }
+
+    #[test]
+    fn test_refresh_index_on_empty_db() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(src_dir.join("lib.rs"), "pub fn fresh() {}\n").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: dir.path().to_path_buf(),
+        };
+
+        // refresh on empty DB should do a full index
+        let count = refresh_index(&db, &config).unwrap();
+        assert!(count > 0);
+
+        let syms = db.search_symbols("fresh").unwrap();
+        assert_eq!(syms.len(), 1);
     }
 }

@@ -1,4 +1,42 @@
+use crate::indexer::parser::{SymbolKind, Visibility};
+use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Connection, Result as SqlResult, params};
+
+macro_rules! newtype_id {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub struct $name(pub(crate) i64);
+
+        impl FromSql for $name {
+            fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+                i64::column_result(value).map(Self)
+            }
+        }
+
+        impl ToSql for $name {
+            fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+                self.0.to_sql()
+            }
+        }
+    };
+}
+
+newtype_id!(FileId);
+newtype_id!(SymbolId);
+newtype_id!(CrateId);
+newtype_id!(DepId);
+
+fn parse_kind(s: &str) -> rusqlite::Result<SymbolKind> {
+    s.parse().map_err(|e: String| {
+        rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, e.into())
+    })
+}
+
+fn parse_visibility(s: &str) -> rusqlite::Result<Visibility> {
+    s.parse().map_err(|e: String| {
+        rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, e.into())
+    })
+}
 
 pub struct Database {
     pub(crate) conn: Connection,
@@ -209,7 +247,7 @@ impl Database {
     }
 
     /// Look up a symbol's DB id by name and file path.
-    pub fn get_symbol_id(&self, name: &str, file_path: &str) -> SqlResult<Option<i64>> {
+    pub fn get_symbol_id(&self, name: &str, file_path: &str) -> SqlResult<Option<SymbolId>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.id FROM symbols s \
              JOIN files f ON f.id = s.file_id \
@@ -224,7 +262,7 @@ impl Database {
     }
 
     /// Look up any symbol's DB id by name (first match).
-    pub fn get_symbol_id_by_name(&self, name: &str) -> SqlResult<Option<i64>> {
+    pub fn get_symbol_id_by_name(&self, name: &str) -> SqlResult<Option<SymbolId>> {
         let mut stmt = self
             .conn
             .prepare("SELECT id FROM symbols WHERE name = ?1 LIMIT 1")?;
@@ -235,7 +273,12 @@ impl Database {
         }
     }
 
-    pub fn insert_symbol_ref(&self, source_id: i64, target_id: i64, kind: &str) -> SqlResult<()> {
+    pub fn insert_symbol_ref(
+        &self,
+        source_id: SymbolId,
+        target_id: SymbolId,
+        kind: &str,
+    ) -> SqlResult<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO symbol_refs \
              (source_symbol_id, target_symbol_id, kind) \
@@ -245,13 +288,18 @@ impl Database {
         Ok(())
     }
 
-    pub fn insert_crate(&self, name: &str, path: &str, is_workspace_root: bool) -> SqlResult<i64> {
+    pub fn insert_crate(
+        &self,
+        name: &str,
+        path: &str,
+        is_workspace_root: bool,
+    ) -> SqlResult<CrateId> {
         self.conn.execute(
             "INSERT OR REPLACE INTO crates (name, path, is_workspace_root) \
              VALUES (?1, ?2, ?3)",
             params![name, path, is_workspace_root],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(CrateId(self.conn.last_insert_rowid()))
     }
 
     pub fn get_crate_by_name(&self, name: &str) -> SqlResult<Option<StoredCrate>> {
@@ -275,7 +323,11 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM crates", [], |row| row.get(0))
     }
 
-    pub fn insert_crate_dep(&self, source_crate_id: i64, target_crate_id: i64) -> SqlResult<()> {
+    pub fn insert_crate_dep(
+        &self,
+        source_crate_id: CrateId,
+        target_crate_id: CrateId,
+    ) -> SqlResult<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO crate_deps (source_crate_id, target_crate_id) \
              VALUES (?1, ?2)",
@@ -284,7 +336,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_crate_dependents(&self, crate_id: i64) -> SqlResult<Vec<StoredCrate>> {
+    pub fn get_crate_dependents(&self, crate_id: CrateId) -> SqlResult<Vec<StoredCrate>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.id, c.name, c.path, c.is_workspace_root \
              FROM crate_deps cd \
@@ -304,7 +356,10 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_transitive_crate_dependents(&self, crate_id: i64) -> SqlResult<Vec<StoredCrate>> {
+    pub fn get_transitive_crate_dependents(
+        &self,
+        crate_id: CrateId,
+    ) -> SqlResult<Vec<StoredCrate>> {
         let mut stmt = self.conn.prepare(
             "WITH RECURSIVE deps(id, name, path, is_workspace_root, depth) AS (
                 SELECT id, name, path, is_workspace_root, 0
@@ -336,14 +391,14 @@ impl Database {
         &self,
         path: &str,
         content_hash: &str,
-        crate_id: i64,
-    ) -> SqlResult<i64> {
+        crate_id: CrateId,
+    ) -> SqlResult<FileId> {
         self.conn.execute(
             "INSERT OR REPLACE INTO files (path, content_hash, crate_id) \
              VALUES (?1, ?2, ?3)",
             params![path, content_hash, crate_id],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(FileId(self.conn.last_insert_rowid()))
     }
 
     pub fn get_crate_for_file(&self, file_path: &str) -> SqlResult<Option<StoredCrate>> {
@@ -365,7 +420,7 @@ impl Database {
         }
     }
 
-    pub fn get_dependency_id(&self, name: &str) -> SqlResult<Option<i64>> {
+    pub fn get_dependency_id(&self, name: &str) -> SqlResult<Option<DepId>> {
         let mut stmt = self
             .conn
             .prepare("SELECT id FROM dependencies WHERE name = ?1")?;
@@ -418,25 +473,65 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_all_files_with_hashes(&self) -> SqlResult<Vec<(String, String, Option<i64>)>> {
+    pub fn file_count(&self) -> SqlResult<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
+    }
+
+    pub fn impact_dependents(&self, symbol_name: &str) -> SqlResult<Vec<ImpactEntry>> {
+        let mut stmt = self.conn.prepare(
+            "WITH RECURSIVE deps(id, name, file_path, depth) AS (
+                SELECT s.id, s.name, f.path, 0
+                FROM symbols s
+                JOIN files f ON f.id = s.file_id
+                WHERE s.name = ?1
+              UNION
+                SELECT s2.id, s2.name, f2.path, deps.depth + 1
+                FROM deps
+                JOIN symbol_refs sr ON sr.target_symbol_id = deps.id
+                JOIN symbols s2 ON s2.id = sr.source_symbol_id
+                JOIN files f2 ON f2.id = s2.file_id
+                WHERE deps.depth < 5
+            )
+            SELECT DISTINCT name, file_path, depth FROM deps
+            WHERE depth > 0
+            ORDER BY depth, name",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![symbol_name])?;
+        while let Some(row) = rows.next()? {
+            results.push(ImpactEntry {
+                name: row.get(0)?,
+                file_path: row.get(1)?,
+                depth: row.get(2)?,
+            });
+        }
+        Ok(results)
+    }
+
+    pub fn get_all_files_with_hashes(&self) -> SqlResult<Vec<FileRecord>> {
         let mut stmt = self
             .conn
             .prepare("SELECT path, content_hash, crate_id FROM files")?;
         let mut results = Vec::new();
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+            results.push(FileRecord {
+                path: row.get(0)?,
+                content_hash: row.get(1)?,
+                crate_id: row.get(2)?,
+            });
         }
         Ok(results)
     }
 
-    pub fn insert_file(&self, path: &str, content_hash: &str) -> SqlResult<i64> {
+    pub fn insert_file(&self, path: &str, content_hash: &str) -> SqlResult<FileId> {
         self.conn.execute(
             "INSERT OR REPLACE INTO files (path, content_hash) \
              VALUES (?1, ?2)",
             params![path, content_hash],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(FileId(self.conn.last_insert_rowid()))
     }
 
     pub fn search_symbols(&self, query: &str) -> SqlResult<Vec<StoredSymbol>> {
@@ -455,8 +550,8 @@ impl Database {
         while let Some(row) = rows.next()? {
             results.push(StoredSymbol {
                 name: row.get(0)?,
-                kind: row.get(1)?,
-                visibility: row.get(2)?,
+                kind: parse_kind(&row.get::<_, String>(1)?)?,
+                visibility: parse_visibility(&row.get::<_, String>(2)?)?,
                 file_path: row.get(3)?,
                 line_start: row.get(4)?,
                 line_end: row.get(5)?,
@@ -493,17 +588,17 @@ impl Database {
         version: &str,
         is_direct: bool,
         repo_url: Option<&str>,
-    ) -> SqlResult<i64> {
+    ) -> SqlResult<DepId> {
         self.conn.execute(
             "INSERT INTO dependencies \
              (name, version, is_direct, repository_url, features) \
              VALUES (?1, ?2, ?3, ?4, '')",
             params![name, version, is_direct, repo_url],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        Ok(DepId(self.conn.last_insert_rowid()))
     }
 
-    pub fn store_doc(&self, dep_id: i64, source: &str, content: &str) -> SqlResult<()> {
+    pub fn store_doc(&self, dep_id: DepId, source: &str, content: &str) -> SqlResult<()> {
         self.conn.execute(
             "INSERT INTO docs (dependency_id, source, content) \
              VALUES (?1, ?2, ?3)",
@@ -544,7 +639,7 @@ impl Database {
         &self,
         type_name: &str,
         trait_name: &str,
-        file_id: i64,
+        file_id: FileId,
         line_start: i64,
         line_end: i64,
     ) -> SqlResult<()> {
@@ -618,8 +713,8 @@ impl Database {
         while let Some(row) = rows.next()? {
             results.push(StoredSymbol {
                 name: row.get(0)?,
-                kind: row.get(1)?,
-                visibility: row.get(2)?,
+                kind: parse_kind(&row.get::<_, String>(1)?)?,
+                visibility: parse_visibility(&row.get::<_, String>(2)?)?,
                 file_path: row.get(3)?,
                 line_start: row.get(4)?,
                 line_end: row.get(5)?,
@@ -675,15 +770,29 @@ impl Database {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct FileRecord {
+    pub path: String,
+    pub content_hash: String,
+    pub crate_id: Option<CrateId>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ImpactEntry {
+    pub name: String,
+    pub file_path: String,
+    pub depth: i64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct StoredCrate {
-    pub id: i64,
+    pub id: CrateId,
     pub name: String,
     pub path: String,
     pub is_workspace_root: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DocResult {
     pub content: String,
     pub source: String,
@@ -691,7 +800,7 @@ pub struct DocResult {
     pub version: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StoredDep {
     pub name: String,
     pub version: String,
@@ -700,11 +809,11 @@ pub struct StoredDep {
     pub features: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StoredSymbol {
     pub name: String,
-    pub kind: String,
-    pub visibility: String,
+    pub kind: SymbolKind,
+    pub visibility: Visibility,
     pub file_path: String,
     pub line_start: i64,
     pub line_end: i64,
@@ -714,7 +823,7 @@ pub struct StoredSymbol {
     pub details: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StoredTraitImpl {
     pub type_name: String,
     pub trait_name: String,
@@ -723,7 +832,7 @@ pub struct StoredTraitImpl {
     pub line_end: i64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CalleeInfo {
     pub name: String,
     pub kind: String,
@@ -786,7 +895,7 @@ mod tests {
         let id = db
             .insert_crate("hcfs-server", "hcfs-server", false)
             .unwrap();
-        assert!(id > 0);
+        assert!(id.0 > 0);
         let c = db.get_crate_by_name("hcfs-server").unwrap().unwrap();
         assert_eq!(c.name, "hcfs-server");
         assert_eq!(c.path, "hcfs-server");
@@ -825,7 +934,7 @@ mod tests {
         let file_id = db
             .insert_file_with_crate("mylib/src/lib.rs", "hash", crate_id)
             .unwrap();
-        assert!(file_id > 0);
+        assert!(file_id.0 > 0);
         let c = db.get_crate_for_file("mylib/src/lib.rs").unwrap().unwrap();
         assert_eq!(c.name, "mylib");
     }
@@ -1108,7 +1217,7 @@ mod tests {
                 params![file_id],
             )
             .unwrap();
-        let caller_id = db.conn.last_insert_rowid();
+        let caller_id = SymbolId(db.conn.last_insert_rowid());
         db.conn
             .execute(
                 "INSERT INTO symbols \
@@ -1119,7 +1228,7 @@ mod tests {
                 params![file_id],
             )
             .unwrap();
-        let callee_a_id = db.conn.last_insert_rowid();
+        let callee_a_id = SymbolId(db.conn.last_insert_rowid());
         db.conn
             .execute(
                 "INSERT INTO symbols \
@@ -1130,7 +1239,7 @@ mod tests {
                 params![file_id],
             )
             .unwrap();
-        let callee_b_id = db.conn.last_insert_rowid();
+        let callee_b_id = SymbolId(db.conn.last_insert_rowid());
         // Insert refs
         db.insert_symbol_ref(caller_id, callee_a_id, "call")
             .unwrap();
@@ -1146,5 +1255,63 @@ mod tests {
         assert_eq!(call_ref.ref_kind, "call");
         let type_ref = callees.iter().find(|c| c.name == "callee_b").unwrap();
         assert_eq!(type_ref.ref_kind, "type_ref");
+    }
+
+    #[test]
+    fn test_delete_file_data() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        // Add a symbol, trait impl, and FTS entry
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'Foo', 'struct', 'public', 1, 5, 'pub struct Foo')",
+                params![file_id],
+            )
+            .unwrap();
+        let sym_id = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts (rowid, name, signature, doc_comment) \
+                 VALUES (?1, 'Foo', 'pub struct Foo', '')",
+                params![sym_id],
+            )
+            .unwrap();
+        db.insert_trait_impl("Foo", "Display", file_id, 10, 20)
+            .unwrap();
+
+        // Add a second file with a ref pointing at the first file's symbol
+        let file2 = db.insert_file("src/main.rs", "hash2").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'main', 'function', 'public', 1, 10, 'fn main()')",
+                params![file2],
+            )
+            .unwrap();
+        let main_id = SymbolId(db.conn.last_insert_rowid());
+        db.insert_symbol_ref(main_id, sym_id, "type_ref").unwrap();
+
+        // Delete first file's data
+        db.delete_file_data("src/lib.rs").unwrap();
+
+        // Verify: file gone
+        assert!(db.get_file_hash("src/lib.rs").unwrap().is_none());
+        // Verify: symbol gone
+        let syms = db.search_symbols("Foo").unwrap();
+        assert!(syms.is_empty());
+        // Verify: trait impl gone
+        let impls = db.get_trait_impls_for_type("Foo").unwrap();
+        assert!(impls.is_empty());
+        // Verify: ref to deleted symbol gone
+        let callees = db.get_callees("main").unwrap();
+        assert!(callees.is_empty());
+        // Verify: second file still intact
+        assert!(db.get_file_hash("src/main.rs").unwrap().is_some());
     }
 }

@@ -26,6 +26,22 @@ impl std::fmt::Display for SymbolKind {
     }
 }
 
+impl std::str::FromStr for SymbolKind {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "function" => Ok(Self::Function),
+            "struct" => Ok(Self::Struct),
+            "enum" => Ok(Self::Enum),
+            "trait" => Ok(Self::Trait),
+            "impl" => Ok(Self::Impl),
+            "use" => Ok(Self::Use),
+            "mod" => Ok(Self::Mod),
+            other => Err(format!("unknown symbol kind: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Visibility {
     Public,
@@ -44,7 +60,19 @@ impl std::fmt::Display for Visibility {
     }
 }
 
-#[derive(Debug, Clone)]
+impl std::str::FromStr for Visibility {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "public" => Ok(Self::Public),
+            "pub(crate)" => Ok(Self::PublicCrate),
+            "private" => Ok(Self::Private),
+            other => Err(format!("unknown visibility: {other}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub name: String,
     pub kind: SymbolKind,
@@ -400,7 +428,7 @@ pub enum RefKind {
     Call,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitImpl {
     pub type_name: String,
     pub trait_name: String,

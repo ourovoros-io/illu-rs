@@ -147,7 +147,6 @@ fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error
         let db = Database::open(&db_path)?;
         let config = IndexConfig {
             repo_path: repo_path.to_path_buf(),
-            skip_doc_fetch: true,
         };
         let refreshed = illu_rs::indexer::refresh_index(&db, &config)?;
         if refreshed > 0 {
@@ -168,7 +167,6 @@ fn ensure_indexed(repo_path: &Path) -> Result<Database, Box<dyn std::error::Erro
     tracing::info!("Indexing {}", repo_path.display());
     let config = IndexConfig {
         repo_path: repo_path.to_path_buf(),
-        skip_doc_fetch: true,
     };
     index_repo(&db, &config)?;
     tracing::info!("Indexing complete");
@@ -199,7 +197,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let config = IndexConfig {
                 repo_path: repo_path.clone(),
-                skip_doc_fetch: true,
             };
 
             let db_path = db_dir.join("index.db");

@@ -1,5 +1,4 @@
 use crate::db::Database;
-use rusqlite::params;
 use std::fmt::Write;
 
 pub fn handle_impact(
@@ -31,44 +30,18 @@ pub fn handle_impact(
         }
     }
 
-    // Find direct references using symbol_refs
-    let mut stmt = db.conn.prepare(
-        "WITH RECURSIVE deps(id, name, file_path, depth) AS (
-            SELECT s.id, s.name, f.path, 0
-            FROM symbols s
-            JOIN files f ON f.id = s.file_id
-            WHERE s.name = ?1
-          UNION
-            SELECT s2.id, s2.name, f2.path, deps.depth + 1
-            FROM deps
-            JOIN symbol_refs sr ON sr.target_symbol_id = deps.id
-            JOIN symbols s2 ON s2.id = sr.source_symbol_id
-            JOIN files f2 ON f2.id = s2.file_id
-            WHERE deps.depth < 5
-        )
-        SELECT DISTINCT name, file_path, depth FROM deps
-        WHERE depth > 0
-        ORDER BY depth, name",
-    )?;
+    let dependents = db.impact_dependents(symbol_name)?;
 
-    let mut has_deps = false;
-    let mut rows = stmt.query(params![symbol_name])?;
     let mut current_depth: i64 = -1;
-
-    while let Some(row) = rows.next()? {
-        has_deps = true;
-        let name: String = row.get(0)?;
-        let file_path: String = row.get(1)?;
-        let depth: i64 = row.get(2)?;
-
-        if depth != current_depth {
-            current_depth = depth;
-            let _ = writeln!(output, "### Depth {depth}\n");
+    for dep in &dependents {
+        if dep.depth != current_depth {
+            current_depth = dep.depth;
+            let _ = writeln!(output, "### Depth {}\n", dep.depth);
         }
-        let _ = writeln!(output, "- **{name}** ({file_path})");
+        let _ = writeln!(output, "- **{}** ({})", dep.name, dep.file_path);
     }
 
-    if !has_deps {
+    if dependents.is_empty() {
         output.push_str("No dependents found.\n");
         output.push_str(
             "Note: Symbol references are populated \

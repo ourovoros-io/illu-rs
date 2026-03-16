@@ -28,11 +28,6 @@ impl IlluServer {
         }
     }
 
-    #[must_use]
-    pub fn db_handle(&self) -> std::sync::Arc<Mutex<Database>> {
-        std::sync::Arc::clone(&self.db)
-    }
-
     async fn refresh(&self) -> Result<(), McpError> {
         // Phase 1 (sync): re-index changed files, collect pending docs
         let pending_docs = {

@@ -88,7 +88,7 @@ pub async fn fetch_github_readme(
 }
 
 pub struct PendingDoc {
-    pub dep_id: i64,
+    pub dep_id: crate::db::DepId,
     pub name: String,
     pub version: String,
 }
@@ -118,7 +118,7 @@ pub fn pending_docs(
 }
 
 pub struct FetchedDoc {
-    pub dep_id: i64,
+    pub dep_id: crate::db::DepId,
     pub content: String,
 }
 
@@ -127,16 +127,22 @@ pub async fn fetch_docs(pending: &[PendingDoc]) -> Vec<FetchedDoc> {
     let mut results = Vec::new();
     for doc in pending {
         tracing::info!("Fetching docs for {} {}", doc.name, doc.version);
-        if let Ok(Some(content)) = fetch_docs_rs(&doc.name, &doc.version).await {
-            let truncated = if content.len() > 8000 {
-                format!("{}...", &content[..8000])
-            } else {
-                content
-            };
-            results.push(FetchedDoc {
-                dep_id: doc.dep_id,
-                content: truncated,
-            });
+        match fetch_docs_rs(&doc.name, &doc.version).await {
+            Err(e) => {
+                tracing::warn!("Failed to fetch docs for {} {}: {e}", doc.name, doc.version);
+            }
+            Ok(Some(content)) => {
+                let truncated = if content.len() > 8000 {
+                    format!("{}...", &content[..8000])
+                } else {
+                    content
+                };
+                results.push(FetchedDoc {
+                    dep_id: doc.dep_id,
+                    content: truncated,
+                });
+            }
+            Ok(None) => {}
         }
     }
     tracing::info!("Fetched docs for {} dependencies", results.len());
