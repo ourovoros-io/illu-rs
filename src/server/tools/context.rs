@@ -107,8 +107,9 @@ fn render_callees(
 
     let _ = writeln!(output, "### Callees\n");
 
-    let calls: Vec<_> = callees.iter().filter(|c| c.ref_kind == "call").collect();
-    let type_refs: Vec<_> = callees.iter().filter(|c| c.ref_kind != "call").collect();
+    let call_kind = crate::indexer::parser::RefKind::Call.to_string();
+    let calls: Vec<_> = callees.iter().filter(|c| c.ref_kind == call_kind).collect();
+    let type_refs: Vec<_> = callees.iter().filter(|c| c.ref_kind != call_kind).collect();
 
     if !calls.is_empty() {
         let _ = writeln!(output, "**Calls:**");
@@ -138,16 +139,11 @@ fn render_related_docs(
     if !docs.is_empty() {
         output.push_str("## Related Documentation\n\n");
         for doc in &docs {
-            let snippet = if doc.content.len() > 300 {
-                let end = doc.content.floor_char_boundary(300);
-                format!("{}...", &doc.content[..end])
-            } else {
-                doc.content.clone()
-            };
+            let snippet = super::truncate_snippet(&doc.content, 300);
             let _ = writeln!(
                 output,
                 "- **{} {}**: {}",
-                doc.dependency_name, doc.version, snippet
+                doc.dependency_name, doc.version, &snippet
             );
         }
     }

@@ -11,7 +11,6 @@ pub struct WorkspaceInfo {
 #[derive(Debug)]
 pub struct PathDep {
     pub name: String,
-    pub path: String,
 }
 
 /// Parse a root `Cargo.toml` to detect whether it defines a workspace.
@@ -50,6 +49,26 @@ pub fn parse_workspace_toml(content: &str) -> Result<WorkspaceInfo, toml::de::Er
     })
 }
 
+/// Iterate over all `(name, value)` pairs from dependencies,
+/// dev-dependencies, and build-dependencies tables.
+fn iter_dep_entries(parsed: &toml::Value) -> Vec<(&String, &toml::Value)> {
+    let tables = [
+        parsed.get("dependencies"),
+        parsed.get("dev-dependencies"),
+        parsed.get("build-dependencies"),
+    ];
+    let mut entries = Vec::new();
+    for table in tables.into_iter().flatten() {
+        let Some(deps) = table.as_table() else {
+            continue;
+        };
+        for (name, value) in deps {
+            entries.push((name, value));
+        }
+    }
+    entries
+}
+
 /// Resolve a member crate's dependencies, substituting `workspace = true`
 /// entries with definitions from the workspace root.
 pub fn resolve_member_deps(
@@ -62,35 +81,24 @@ pub fn resolve_member_deps(
         ws_deps.iter().map(|d| (d.name.as_str(), d)).collect();
 
     let mut result = Vec::new();
-    let dep_tables = [
-        parsed.get("dependencies"),
-        parsed.get("dev-dependencies"),
-        parsed.get("build-dependencies"),
-    ];
-
-    for table in dep_tables.into_iter().flatten() {
-        let Some(deps) = table.as_table() else {
+    for (name, value) in iter_dep_entries(&parsed) {
+        if get_path_value(value).is_some() {
             continue;
-        };
-        for (name, value) in deps {
-            if is_path_dep(value) {
-                continue;
-            }
-
-            if is_workspace_dep(value) {
-                if let Some(ws_dep) = ws_lookup.get(name.as_str()) {
-                    result.push((*ws_dep).clone());
-                }
-                continue;
-            }
-
-            let (version_req, features) = extract_version_features(value);
-            result.push(DirectDep {
-                name: name.clone(),
-                version_req,
-                features,
-            });
         }
+
+        if is_workspace_dep(value) {
+            if let Some(ws_dep) = ws_lookup.get(name.as_str()) {
+                result.push((*ws_dep).clone());
+            }
+            continue;
+        }
+
+        let (version_req, features) = extract_version_features(value);
+        result.push(DirectDep {
+            name: name.clone(),
+            version_req,
+            features,
+        });
     }
 
     Ok(result)
@@ -102,23 +110,9 @@ pub fn extract_path_deps(member_toml: &str) -> Result<Vec<PathDep>, toml::de::Er
     let parsed: toml::Value = toml::from_str(member_toml)?;
 
     let mut result = Vec::new();
-    let dep_tables = [
-        parsed.get("dependencies"),
-        parsed.get("dev-dependencies"),
-        parsed.get("build-dependencies"),
-    ];
-
-    for table in dep_tables.into_iter().flatten() {
-        let Some(deps) = table.as_table() else {
-            continue;
-        };
-        for (name, value) in deps {
-            if let Some(path) = get_path_value(value) {
-                result.push(PathDep {
-                    name: name.clone(),
-                    path,
-                });
-            }
+    for (name, value) in iter_dep_entries(&parsed) {
+        if get_path_value(value).is_some() {
+            result.push(PathDep { name: name.clone() });
         }
     }
 
@@ -133,10 +127,6 @@ fn is_workspace_dep(value: &toml::Value) -> bool {
         .unwrap_or(false)
 }
 
-fn is_path_dep(value: &toml::Value) -> bool {
-    value.as_table().and_then(|t| t.get("path")).is_some()
-}
-
 fn get_path_value(value: &toml::Value) -> Option<String> {
     value
         .as_table()
@@ -145,7 +135,7 @@ fn get_path_value(value: &toml::Value) -> Option<String> {
         .map(String::from)
 }
 
-fn extract_version_features(value: &toml::Value) -> (String, Vec<String>) {
+pub(crate) fn extract_version_features(value: &toml::Value) -> (String, Vec<String>) {
     match value {
         toml::Value::String(v) => (v.clone(), vec![]),
         toml::Value::Table(t) => {
@@ -275,7 +265,6 @@ serde = { workspace = true }
         let path_deps = extract_path_deps(member_toml).unwrap();
         assert_eq!(path_deps.len(), 1);
         assert_eq!(path_deps[0].name, "hcfs-shared");
-        assert_eq!(path_deps[0].path, "../hcfs-shared");
     }
 
     #[test]

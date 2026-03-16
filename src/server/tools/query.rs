@@ -63,16 +63,11 @@ fn format_docs(
     if !docs.is_empty() {
         output.push_str("## Documentation\n\n");
         for doc in &docs {
-            let snippet = if doc.content.len() > 200 {
-                let end = doc.content.floor_char_boundary(200);
-                format!("{}...", &doc.content[..end])
-            } else {
-                doc.content.clone()
-            };
+            let snippet = super::truncate_snippet(&doc.content, 200);
             let _ = writeln!(
                 output,
                 "- **{} {}** ({})\n  {}",
-                doc.dependency_name, doc.version, doc.source, snippet,
+                doc.dependency_name, doc.version, doc.source, &snippet,
             );
         }
         output.push('\n');

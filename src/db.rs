@@ -38,6 +38,48 @@ fn parse_visibility(s: &str) -> rusqlite::Result<Visibility> {
     })
 }
 
+fn row_to_stored_symbol(row: &rusqlite::Row) -> SqlResult<StoredSymbol> {
+    Ok(StoredSymbol {
+        name: row.get(0)?,
+        kind: parse_kind(&row.get::<_, String>(1)?)?,
+        visibility: parse_visibility(&row.get::<_, String>(2)?)?,
+        file_path: row.get(3)?,
+        line_start: row.get(4)?,
+        line_end: row.get(5)?,
+        signature: row.get(6)?,
+        doc_comment: row.get(7)?,
+        body: row.get(8)?,
+        details: row.get(9)?,
+    })
+}
+
+fn row_to_stored_crate(row: &rusqlite::Row) -> SqlResult<StoredCrate> {
+    Ok(StoredCrate {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        path: row.get(2)?,
+    })
+}
+
+fn row_to_stored_trait_impl(row: &rusqlite::Row) -> SqlResult<StoredTraitImpl> {
+    Ok(StoredTraitImpl {
+        type_name: row.get(0)?,
+        trait_name: row.get(1)?,
+        file_path: row.get(2)?,
+        line_start: row.get(3)?,
+        line_end: row.get(4)?,
+    })
+}
+
+fn row_to_doc_result(row: &rusqlite::Row) -> SqlResult<DocResult> {
+    Ok(DocResult {
+        content: row.get(0)?,
+        source: row.get(1)?,
+        dependency_name: row.get(2)?,
+        version: row.get(3)?,
+    })
+}
+
 pub struct Database {
     pub(crate) conn: Connection,
 }
@@ -138,7 +180,14 @@ impl Database {
 
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
                 content, content=docs, content_rowid=id
-            );",
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_symbols_name
+                ON symbols(name);
+            CREATE INDEX IF NOT EXISTS idx_symbol_refs_target
+                ON symbol_refs(target_symbol_id);
+            CREATE INDEX IF NOT EXISTS idx_symbol_refs_source
+                ON symbol_refs(source_symbol_id);",
         )?;
         self.migrate_fts_schema()
     }
@@ -288,16 +337,11 @@ impl Database {
         Ok(())
     }
 
-    pub fn insert_crate(
-        &self,
-        name: &str,
-        path: &str,
-        is_workspace_root: bool,
-    ) -> SqlResult<CrateId> {
+    pub fn insert_crate(&self, name: &str, path: &str) -> SqlResult<CrateId> {
         self.conn.execute(
             "INSERT OR REPLACE INTO crates (name, path, is_workspace_root) \
-             VALUES (?1, ?2, ?3)",
-            params![name, path, is_workspace_root],
+             VALUES (?1, ?2, 0)",
+            params![name, path],
         )?;
         Ok(CrateId(self.conn.last_insert_rowid()))
     }
@@ -305,15 +349,10 @@ impl Database {
     pub fn get_crate_by_name(&self, name: &str) -> SqlResult<Option<StoredCrate>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, name, path, is_workspace_root FROM crates WHERE name = ?1")?;
+            .prepare("SELECT id, name, path FROM crates WHERE name = ?1")?;
         let mut rows = stmt.query(params![name])?;
         match rows.next()? {
-            Some(row) => Ok(Some(StoredCrate {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                path: row.get(2)?,
-                is_workspace_root: row.get(3)?,
-            })),
+            Some(row) => Ok(Some(row_to_stored_crate(row)?)),
             None => Ok(None),
         }
     }
@@ -338,7 +377,7 @@ impl Database {
 
     pub fn get_crate_dependents(&self, crate_id: CrateId) -> SqlResult<Vec<StoredCrate>> {
         let mut stmt = self.conn.prepare(
-            "SELECT c.id, c.name, c.path, c.is_workspace_root \
+            "SELECT c.id, c.name, c.path \
              FROM crate_deps cd \
              JOIN crates c ON c.id = cd.source_crate_id \
              WHERE cd.target_crate_id = ?1",
@@ -346,12 +385,7 @@ impl Database {
         let mut results = Vec::new();
         let mut rows = stmt.query(params![crate_id])?;
         while let Some(row) = rows.next()? {
-            results.push(StoredCrate {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                path: row.get(2)?,
-                is_workspace_root: row.get(3)?,
-            });
+            results.push(row_to_stored_crate(row)?);
         }
         Ok(results)
     }
@@ -361,28 +395,23 @@ impl Database {
         crate_id: CrateId,
     ) -> SqlResult<Vec<StoredCrate>> {
         let mut stmt = self.conn.prepare(
-            "WITH RECURSIVE deps(id, name, path, is_workspace_root, depth) AS (
-                SELECT id, name, path, is_workspace_root, 0
+            "WITH RECURSIVE deps(id, name, path, depth) AS (
+                SELECT id, name, path, 0
                 FROM crates WHERE id = ?1
               UNION
-                SELECT c.id, c.name, c.path, c.is_workspace_root, deps.depth + 1
+                SELECT c.id, c.name, c.path, deps.depth + 1
                 FROM deps
                 JOIN crate_deps cd ON cd.target_crate_id = deps.id
                 JOIN crates c ON c.id = cd.source_crate_id
                 WHERE deps.depth < 10
             )
-            SELECT DISTINCT id, name, path, is_workspace_root
+            SELECT DISTINCT id, name, path
             FROM deps WHERE id != ?1",
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![crate_id])?;
         while let Some(row) = rows.next()? {
-            results.push(StoredCrate {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                path: row.get(2)?,
-                is_workspace_root: row.get(3)?,
-            });
+            results.push(row_to_stored_crate(row)?);
         }
         Ok(results)
     }
@@ -403,19 +432,14 @@ impl Database {
 
     pub fn get_crate_for_file(&self, file_path: &str) -> SqlResult<Option<StoredCrate>> {
         let mut stmt = self.conn.prepare(
-            "SELECT c.id, c.name, c.path, c.is_workspace_root \
+            "SELECT c.id, c.name, c.path \
              FROM files f \
              JOIN crates c ON c.id = f.crate_id \
              WHERE f.path = ?1",
         )?;
         let mut rows = stmt.query(params![file_path])?;
         match rows.next()? {
-            Some(row) => Ok(Some(StoredCrate {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                path: row.get(2)?,
-                is_workspace_root: row.get(3)?,
-            })),
+            Some(row) => Ok(Some(row_to_stored_crate(row)?)),
             None => Ok(None),
         }
     }
@@ -548,18 +572,7 @@ impl Database {
         let mut results = Vec::new();
         let mut rows = stmt.query(params![fts_query])?;
         while let Some(row) = rows.next()? {
-            results.push(StoredSymbol {
-                name: row.get(0)?,
-                kind: parse_kind(&row.get::<_, String>(1)?)?,
-                visibility: parse_visibility(&row.get::<_, String>(2)?)?,
-                file_path: row.get(3)?,
-                line_start: row.get(4)?,
-                line_end: row.get(5)?,
-                signature: row.get(6)?,
-                doc_comment: row.get(7)?,
-                body: row.get(8)?,
-                details: row.get(9)?,
-            });
+            results.push(row_to_stored_symbol(row)?);
         }
         Ok(results)
     }
@@ -625,12 +638,7 @@ impl Database {
         let mut results = Vec::new();
         let mut rows = stmt.query(params![fts_query])?;
         while let Some(row) = rows.next()? {
-            results.push(DocResult {
-                content: row.get(0)?,
-                source: row.get(1)?,
-                dependency_name: row.get(2)?,
-                version: row.get(3)?,
-            });
+            results.push(row_to_doc_result(row)?);
         }
         Ok(results)
     }
@@ -653,45 +661,26 @@ impl Database {
     }
 
     pub fn get_trait_impls_for_type(&self, type_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT ti.type_name, ti.trait_name, f.path, \
-                    ti.line_start, ti.line_end \
-             FROM trait_impls ti \
-             JOIN files f ON f.id = ti.file_id \
-             WHERE ti.type_name = ?1",
-        )?;
-        let mut results = Vec::new();
-        let mut rows = stmt.query(params![type_name])?;
-        while let Some(row) = rows.next()? {
-            results.push(StoredTraitImpl {
-                type_name: row.get(0)?,
-                trait_name: row.get(1)?,
-                file_path: row.get(2)?,
-                line_start: row.get(3)?,
-                line_end: row.get(4)?,
-            });
-        }
-        Ok(results)
+        self.query_trait_impls("ti.type_name", type_name)
     }
 
     pub fn get_trait_impls_for_trait(&self, trait_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
-        let mut stmt = self.conn.prepare(
+        self.query_trait_impls("ti.trait_name", trait_name)
+    }
+
+    fn query_trait_impls(&self, column: &str, value: &str) -> SqlResult<Vec<StoredTraitImpl>> {
+        let sql = format!(
             "SELECT ti.type_name, ti.trait_name, f.path, \
                     ti.line_start, ti.line_end \
              FROM trait_impls ti \
              JOIN files f ON f.id = ti.file_id \
-             WHERE ti.trait_name = ?1",
-        )?;
+             WHERE {column} = ?1"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![trait_name])?;
+        let mut rows = stmt.query(params![value])?;
         while let Some(row) = rows.next()? {
-            results.push(StoredTraitImpl {
-                type_name: row.get(0)?,
-                trait_name: row.get(1)?,
-                file_path: row.get(2)?,
-                line_start: row.get(3)?,
-                line_end: row.get(4)?,
-            });
+            results.push(row_to_stored_trait_impl(row)?);
         }
         Ok(results)
     }
@@ -711,18 +700,7 @@ impl Database {
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern])?;
         while let Some(row) = rows.next()? {
-            results.push(StoredSymbol {
-                name: row.get(0)?,
-                kind: parse_kind(&row.get::<_, String>(1)?)?,
-                visibility: parse_visibility(&row.get::<_, String>(2)?)?,
-                file_path: row.get(3)?,
-                line_start: row.get(4)?,
-                line_end: row.get(5)?,
-                signature: row.get(6)?,
-                doc_comment: row.get(7)?,
-                body: row.get(8)?,
-                details: row.get(9)?,
-            });
+            results.push(row_to_stored_symbol(row)?);
         }
         Ok(results)
     }
@@ -759,14 +737,23 @@ impl Database {
         let mut results = Vec::new();
         let mut rows = stmt.query(params![name])?;
         while let Some(row) = rows.next()? {
-            results.push(DocResult {
-                content: row.get(0)?,
-                source: row.get(1)?,
-                dependency_name: row.get(2)?,
-                version: row.get(3)?,
-            });
+            results.push(row_to_doc_result(row)?);
         }
         Ok(results)
+    }
+
+    /// Insert symbol references from parsed refs, looking up IDs by name.
+    pub fn store_symbol_refs(&self, refs: &[crate::indexer::parser::SymbolRef]) -> SqlResult<u64> {
+        let mut count = 0;
+        for r in refs {
+            let source_id = self.get_symbol_id(&r.source_name, &r.source_file)?;
+            let target_id = self.get_symbol_id_by_name(&r.target_name)?;
+            if let (Some(sid), Some(tid)) = (source_id, target_id) {
+                self.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 }
 
@@ -789,7 +776,6 @@ pub struct StoredCrate {
     pub id: CrateId,
     pub name: String,
     pub path: String,
-    pub is_workspace_root: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -892,9 +878,7 @@ mod tests {
     #[test]
     fn test_insert_and_get_crate() {
         let db = Database::open_in_memory().unwrap();
-        let id = db
-            .insert_crate("hcfs-server", "hcfs-server", false)
-            .unwrap();
+        let id = db.insert_crate("hcfs-server", "hcfs-server").unwrap();
         assert!(id.0 > 0);
         let c = db.get_crate_by_name("hcfs-server").unwrap().unwrap();
         assert_eq!(c.name, "hcfs-server");
@@ -904,8 +888,8 @@ mod tests {
     #[test]
     fn test_insert_crate_dep() {
         let db = Database::open_in_memory().unwrap();
-        let shared = db.insert_crate("shared", "shared", false).unwrap();
-        let server = db.insert_crate("server", "server", false).unwrap();
+        let shared = db.insert_crate("shared", "shared").unwrap();
+        let server = db.insert_crate("server", "server").unwrap();
         db.insert_crate_dep(server, shared).unwrap();
         let deps = db.get_crate_dependents(shared).unwrap();
         assert_eq!(deps.len(), 1);
@@ -915,9 +899,9 @@ mod tests {
     #[test]
     fn test_transitive_crate_dependents() {
         let db = Database::open_in_memory().unwrap();
-        let shared = db.insert_crate("shared", "shared", false).unwrap();
-        let client = db.insert_crate("client", "client", false).unwrap();
-        let cli = db.insert_crate("cli", "cli", false).unwrap();
+        let shared = db.insert_crate("shared", "shared").unwrap();
+        let client = db.insert_crate("client", "client").unwrap();
+        let cli = db.insert_crate("cli", "cli").unwrap();
         db.insert_crate_dep(client, shared).unwrap();
         db.insert_crate_dep(cli, client).unwrap();
         let deps = db.get_transitive_crate_dependents(shared).unwrap();
@@ -930,7 +914,7 @@ mod tests {
     #[test]
     fn test_insert_file_with_crate() {
         let db = Database::open_in_memory().unwrap();
-        let crate_id = db.insert_crate("mylib", "mylib", false).unwrap();
+        let crate_id = db.insert_crate("mylib", "mylib").unwrap();
         let file_id = db
             .insert_file_with_crate("mylib/src/lib.rs", "hash", crate_id)
             .unwrap();

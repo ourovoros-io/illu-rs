@@ -130,14 +130,12 @@ mod tests {
         .unwrap();
 
         // Create a reference from caller_fn -> base_fn
-        db.conn
-            .execute(
-                "INSERT INTO symbol_refs \
-                 (source_symbol_id, target_symbol_id, kind) \
-                 VALUES (2, 1, 'call')",
-                [],
-            )
+        let base_id = db.get_symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
+        let caller_id = db
+            .get_symbol_id("caller_fn", "src/lib.rs")
+            .unwrap()
             .unwrap();
+        db.insert_symbol_ref(caller_id, base_id, "call").unwrap();
 
         let result = handle_impact(&db, "base_fn").unwrap();
         assert!(result.contains("caller_fn"));
@@ -147,8 +145,8 @@ mod tests {
     fn test_impact_shows_affected_crates() {
         let db = Database::open_in_memory().unwrap();
 
-        let shared_id = db.insert_crate("shared", "shared", false).unwrap();
-        let app_id = db.insert_crate("app", "app", false).unwrap();
+        let shared_id = db.insert_crate("shared", "shared").unwrap();
+        let app_id = db.insert_crate("app", "app").unwrap();
         db.insert_crate_dep(app_id, shared_id).unwrap();
 
         let shared_file = db

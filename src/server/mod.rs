@@ -9,7 +9,7 @@ use rmcp::schemars;
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 #[derive(Clone)]
 pub struct IlluServer {
@@ -28,17 +28,18 @@ impl IlluServer {
         }
     }
 
+    fn lock_db(&self) -> Result<MutexGuard<'_, Database>, McpError> {
+        self.db
+            .lock()
+            .map_err(|e| McpError::internal_error(e.to_string(), None))
+    }
+
     async fn refresh(&self) -> Result<(), McpError> {
         // Phase 1 (sync): re-index changed files, collect pending docs
         let pending_docs = {
-            let db = self
-                .db
-                .lock()
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-            crate::indexer::refresh_index(&db, &self.config)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-            crate::indexer::docs::pending_docs(&db)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            let db = self.lock_db()?;
+            crate::indexer::refresh_index(&db, &self.config).map_err(to_mcp_err)?;
+            crate::indexer::docs::pending_docs(&db).map_err(to_mcp_err)?
         }; // lock dropped
 
         if pending_docs.is_empty() {
@@ -50,12 +51,8 @@ impl IlluServer {
 
         // Phase 3 (sync): store fetched docs — re-acquire lock
         if !fetched.is_empty() {
-            let db = self
-                .db
-                .lock()
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-            crate::indexer::docs::store_fetched_docs(&db, &fetched)
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let db = self.lock_db()?;
+            crate::indexer::docs::store_fetched_docs(&db, &fetched).map_err(to_mcp_err)?;
         }
         Ok(())
     }
@@ -88,6 +85,14 @@ struct OverviewParams {
     path: String,
 }
 
+fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
+    McpError::internal_error(e.to_string(), None)
+}
+
+fn text_result(text: String) -> CallToolResult {
+    CallToolResult::success(vec![Content::text(text)])
+}
+
 #[tool_router]
 impl IlluServer {
     #[tool(
@@ -99,14 +104,10 @@ impl IlluServer {
         Parameters(params): Parameters<QueryParams>,
     ) -> Result<CallToolResult, McpError> {
         self.refresh().await?;
-        let db = self
-            .db
-            .lock()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let db = self.lock_db()?;
         let result = tools::query::handle_query(&db, &params.query, params.scope.as_deref())
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(result)]))
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
     }
 
     #[tool(
@@ -118,14 +119,10 @@ impl IlluServer {
         Parameters(params): Parameters<ContextParams>,
     ) -> Result<CallToolResult, McpError> {
         self.refresh().await?;
-        let db = self
-            .db
-            .lock()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let result = tools::context::handle_context(&db, &params.symbol_name)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(result)]))
+        let db = self.lock_db()?;
+        let result =
+            tools::context::handle_context(&db, &params.symbol_name).map_err(to_mcp_err)?;
+        Ok(text_result(result))
     }
 
     #[tool(
@@ -137,14 +134,9 @@ impl IlluServer {
         Parameters(params): Parameters<ImpactParams>,
     ) -> Result<CallToolResult, McpError> {
         self.refresh().await?;
-        let db = self
-            .db
-            .lock()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let result = tools::impact::handle_impact(&db, &params.symbol_name)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(result)]))
+        let db = self.lock_db()?;
+        let result = tools::impact::handle_impact(&db, &params.symbol_name).map_err(to_mcp_err)?;
+        Ok(text_result(result))
     }
 
     #[tool(
@@ -156,14 +148,10 @@ impl IlluServer {
         Parameters(params): Parameters<DocsParams>,
     ) -> Result<CallToolResult, McpError> {
         self.refresh().await?;
-        let db = self
-            .db
-            .lock()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let db = self.lock_db()?;
         let result = tools::docs::handle_docs(&db, &params.dependency, params.topic.as_deref())
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(result)]))
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
     }
 
     #[tool(
@@ -175,14 +163,9 @@ impl IlluServer {
         Parameters(params): Parameters<OverviewParams>,
     ) -> Result<CallToolResult, McpError> {
         self.refresh().await?;
-        let db = self
-            .db
-            .lock()
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let result = tools::overview::handle_overview(&db, &params.path)
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(result)]))
+        let db = self.lock_db()?;
+        let result = tools::overview::handle_overview(&db, &params.path).map_err(to_mcp_err)?;
+        Ok(text_result(result))
     }
 }
 

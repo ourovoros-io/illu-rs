@@ -4,6 +4,17 @@ use crate::indexer::parser::Symbol;
 use rusqlite::params;
 
 pub fn store_dependencies(db: &Database, deps: &[ResolvedDep]) -> rusqlite::Result<()> {
+    db.conn.execute_batch("BEGIN")?;
+    let result = store_dependencies_inner(db, deps);
+    if result.is_ok() {
+        db.conn.execute_batch("COMMIT")?;
+    } else {
+        let _ = db.conn.execute_batch("ROLLBACK");
+    }
+    result
+}
+
+fn store_dependencies_inner(db: &Database, deps: &[ResolvedDep]) -> rusqlite::Result<()> {
     let mut stmt = db.conn.prepare(
         "INSERT INTO dependencies \
          (name, version, is_direct, repository_url, features) \
@@ -23,6 +34,17 @@ pub fn store_dependencies(db: &Database, deps: &[ResolvedDep]) -> rusqlite::Resu
 }
 
 pub fn store_symbols(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusqlite::Result<()> {
+    db.conn.execute_batch("BEGIN")?;
+    let result = store_symbols_inner(db, file_id, symbols);
+    if result.is_ok() {
+        db.conn.execute_batch("COMMIT")?;
+    } else {
+        let _ = db.conn.execute_batch("ROLLBACK");
+    }
+    result
+}
+
+fn store_symbols_inner(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusqlite::Result<()> {
     let mut sym_stmt = db.conn.prepare(
         "INSERT INTO symbols \
          (file_id, name, kind, visibility, \
@@ -59,6 +81,24 @@ pub fn store_symbols(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusq
 }
 
 pub fn store_trait_impls(
+    db: &Database,
+    file_id: FileId,
+    trait_impls: &[crate::indexer::parser::TraitImpl],
+) -> rusqlite::Result<()> {
+    if trait_impls.is_empty() {
+        return Ok(());
+    }
+    db.conn.execute_batch("BEGIN")?;
+    let result = store_trait_impls_inner(db, file_id, trait_impls);
+    if result.is_ok() {
+        db.conn.execute_batch("COMMIT")?;
+    } else {
+        let _ = db.conn.execute_batch("ROLLBACK");
+    }
+    result
+}
+
+fn store_trait_impls_inner(
     db: &Database,
     file_id: FileId,
     trait_impls: &[crate::indexer::parser::TraitImpl],

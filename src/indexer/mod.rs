@@ -52,7 +52,7 @@ pub fn refresh_index(
         .map(|f| (f.path, (f.content_hash, f.crate_id)))
         .collect();
 
-    let mut dirty_files: Vec<(String, String, Option<crate::db::CrateId>)> = Vec::new();
+    let mut dirty_files: Vec<(String, String, String, Option<crate::db::CrateId>)> = Vec::new();
 
     // Walk all .rs files in the repo
     for result in walkdir::WalkDir::new(&config.repo_path) {
@@ -87,7 +87,7 @@ pub fn refresh_index(
 
         if needs_update {
             let crate_id = existing.get(&relative).and_then(|(_, cid)| *cid);
-            dirty_files.push((relative, source, crate_id));
+            dirty_files.push((relative, source, hash, crate_id));
         }
     }
 
@@ -106,13 +106,12 @@ pub fn refresh_index(
     let count = dirty_files.len();
     tracing::info!("{count} file(s) changed, re-indexing");
 
-    for (relative, source, crate_id) in &dirty_files {
+    for (relative, source, hash, crate_id) in &dirty_files {
         db.delete_file_data(relative)?;
-        let hash = content_hash(source);
         let file_id = if let Some(cid) = crate_id {
-            db.insert_file_with_crate(relative, &hash, *cid)?
+            db.insert_file_with_crate(relative, hash, *cid)?
         } else {
-            db.insert_file(relative, &hash)?
+            db.insert_file(relative, hash)?
         };
         let (symbols, trait_impls) = parser::parse_rust_source(source, relative)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
@@ -123,16 +122,10 @@ pub fn refresh_index(
     // Rebuild refs for dirty files (need full symbol set)
     let known_symbols = db.get_all_symbol_names()?;
     if !known_symbols.is_empty() {
-        for (relative, source, _) in &dirty_files {
+        for (relative, source, _, _) in &dirty_files {
             let refs = parser::extract_refs(source, relative, &known_symbols)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-            for r in &refs {
-                let source_id = db.get_symbol_id(&r.source_name, &r.source_file)?;
-                let target_id = db.get_symbol_id_by_name(&r.target_name)?;
-                if let (Some(sid), Some(tid)) = (source_id, target_id) {
-                    db.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
-                }
-            }
+            db.store_symbol_refs(&refs)?;
         }
     }
 
@@ -150,7 +143,7 @@ fn index_single_crate(
     store::store_dependencies(db, &resolved)?;
 
     let pkg_name = extract_package_name(cargo_toml).unwrap_or_else(|| "root".to_string());
-    let crate_id = db.insert_crate(&pkg_name, ".", false)?;
+    let crate_id = db.insert_crate(&pkg_name, ".")?;
 
     index_crate_sources(db, config, &config.repo_path.join("src"), crate_id)?;
     Ok(())
@@ -170,6 +163,9 @@ fn index_workspace(
     let mut crate_ids: std::collections::HashMap<String, crate::db::CrateId> =
         std::collections::HashMap::new();
 
+    // Collect path deps per crate to record after all crates are registered
+    let mut path_deps_by_crate: Vec<(String, Vec<String>)> = Vec::new();
+
     for member in &ws_info.members {
         let member_dir = config.repo_path.join(member);
         let member_toml_path = member_dir.join("Cargo.toml");
@@ -179,7 +175,7 @@ fn index_workspace(
         };
 
         let pkg_name = extract_package_name(&member_toml).unwrap_or_else(|| member.clone());
-        let crate_id = db.insert_crate(&pkg_name, member, false)?;
+        let crate_id = db.insert_crate(&pkg_name, member)?;
         crate_ids.insert(pkg_name.clone(), crate_id);
 
         // Resolve external deps for this member
@@ -193,6 +189,13 @@ fn index_workspace(
             }
         }
 
+        // Collect inter-crate path deps (recorded after all crates exist)
+        let pds = workspace::extract_path_deps(&member_toml)?;
+        let dep_names: Vec<String> = pds.into_iter().map(|pd| pd.name).collect();
+        if !dep_names.is_empty() {
+            path_deps_by_crate.push((pkg_name, dep_names));
+        }
+
         // Index source files
         let src_dir = member_dir.join("src");
         index_crate_sources(db, config, &src_dir, crate_id)?;
@@ -202,22 +205,13 @@ fn index_workspace(
     let resolved = dependencies::resolve_dependencies(&all_direct, &locked);
     store::store_dependencies(db, &resolved)?;
 
-    // Record inter-crate dependencies
-    for member in &ws_info.members {
-        let member_dir = config.repo_path.join(member);
-        let member_toml_path = member_dir.join("Cargo.toml");
-        let Ok(member_toml) = std::fs::read_to_string(&member_toml_path) else {
+    // Record inter-crate dependencies (all crates registered now)
+    for (pkg_name, dep_names) in &path_deps_by_crate {
+        let Some(&source_id) = crate_ids.get(pkg_name.as_str()) else {
             continue;
         };
-
-        let pkg_name = extract_package_name(&member_toml).unwrap_or_else(|| member.clone());
-        let Some(&source_id) = crate_ids.get(&pkg_name) else {
-            continue;
-        };
-
-        let path_deps = workspace::extract_path_deps(&member_toml)?;
-        for pd in &path_deps {
-            if let Some(&target_id) = crate_ids.get(&pd.name) {
+        for dep_name in dep_names {
+            if let Some(&target_id) = crate_ids.get(dep_name.as_str()) {
                 db.insert_crate_dep(source_id, target_id)?;
             }
         }
@@ -232,9 +226,6 @@ fn index_crate_sources(
     src_dir: &std::path::Path,
     crate_id: crate::db::CrateId,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if !src_dir.exists() {
-        return Ok(());
-    }
     for result in walkdir::WalkDir::new(src_dir) {
         let entry = match result {
             Ok(e) => e,
@@ -285,14 +276,7 @@ fn extract_all_symbol_refs(
         };
         let refs = parser::extract_refs(&source, relative, &known_symbols)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-        for r in &refs {
-            let source_id = db.get_symbol_id(&r.source_name, &r.source_file)?;
-            let target_id = db.get_symbol_id_by_name(&r.target_name)?;
-            if let (Some(sid), Some(tid)) = (source_id, target_id) {
-                db.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
-                ref_count += 1;
-            }
-        }
+        ref_count += db.store_symbol_refs(&refs)?;
     }
 
     tracing::info!("Stored {ref_count} symbol references");

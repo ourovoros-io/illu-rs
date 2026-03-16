@@ -48,31 +48,10 @@ pub fn parse_cargo_toml(content: &str) -> Result<Vec<DirectDep>, toml::de::Error
     };
     let mut result = Vec::new();
     for (name, value) in &deps {
-        let (version_req, features) = match value {
-            toml::Value::String(v) => (v.clone(), vec![]),
-            toml::Value::Table(t) => {
-                let version = t
-                    .get("version")
-                    .and_then(toml::Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                let features = t
-                    .get("features")
-                    .and_then(toml::Value::as_array)
-                    .map(|arr| {
-                        let mut feats = Vec::new();
-                        for v in arr {
-                            if let Some(s) = v.as_str() {
-                                feats.push(s.to_string());
-                            }
-                        }
-                        feats
-                    })
-                    .unwrap_or_default();
-                (version, features)
-            }
-            _ => continue,
-        };
+        if !matches!(value, toml::Value::String(_) | toml::Value::Table(_)) {
+            continue;
+        }
+        let (version_req, features) = crate::indexer::workspace::extract_version_features(value);
         result.push(DirectDep {
             name: name.clone(),
             version_req,
