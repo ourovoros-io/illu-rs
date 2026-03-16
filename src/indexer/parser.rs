@@ -113,6 +113,21 @@ fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
     Some(lines.join("\n"))
 }
 
+fn extract_body(node: &Node, source: &str) -> Option<String> {
+    let text = &source[node.start_byte()..node.end_byte()];
+    let line_count = text.lines().count();
+    if line_count > 100 {
+        let truncated: String = text
+            .lines()
+            .take(100)
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some(format!("{truncated}\n// ... truncated"))
+    } else {
+        Some(text.to_string())
+    }
+}
+
 fn extract_symbols(
     node: &Node,
     source: &str,
@@ -158,7 +173,7 @@ fn extract_symbols(
                     line_end: child.end_position().row + 1,
                     signature: sig,
                     doc_comment: None,
-                    body: None,
+                    body: extract_body(&child, source),
                     details: None,
                 });
                 extract_symbols(&child, source, file_path, symbols, trait_impls);
@@ -206,7 +221,7 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
         line_end: node.end_position().row + 1,
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
-        body: None,
+        body: extract_body(node, source),
         details: None,
     })
 }
@@ -232,7 +247,7 @@ fn extract_named_item(
         line_end: node.end_position().row + 1,
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
-        body: None,
+        body: extract_body(node, source),
         details: None,
     })
 }
@@ -561,5 +576,34 @@ pub struct Annotated;
         let annotated = symbols.iter().find(|s| s.name == "Annotated").unwrap();
         let doc = annotated.doc_comment.as_deref().unwrap();
         assert!(doc.contains("Doc comment here"));
+    }
+
+    #[test]
+    fn test_extract_body() {
+        let source = r#"
+pub fn greet(name: &str) -> String {
+    format!("Hello, {name}")
+}
+"#;
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "greet").unwrap();
+        let body = sym.body.as_deref().unwrap();
+        assert!(body.contains("pub fn greet"));
+        assert!(body.contains("format!"));
+    }
+
+    #[test]
+    fn test_body_truncation() {
+        let mut source = String::from("pub fn long_fn() {\n");
+        for i in 0..110 {
+            source.push_str(&format!("    let x{i} = {i};\n"));
+        }
+        source.push_str("}\n");
+
+        let (symbols, _) = parse_rust_source(&source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "long_fn").unwrap();
+        let body = sym.body.as_deref().unwrap();
+        assert!(body.contains("// ... truncated"));
+        assert!(body.lines().count() <= 101);
     }
 }
