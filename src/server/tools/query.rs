@@ -43,6 +43,11 @@ fn format_symbols(
                 "- **{}** ({}) at {}:{}-{}\n  `{}`",
                 sym.name, sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
             );
+            if let Some(doc) = &sym.doc_comment {
+                if let Some(first_line) = doc.lines().next() {
+                    let _ = writeln!(output, "  *{first_line}*");
+                }
+            }
         }
         output.push('\n');
     }
@@ -163,6 +168,36 @@ mod tests {
 
         let result = handle_query(&db, "serialize", None).unwrap();
         assert!(result.contains("serialize"));
+    }
+
+    #[test]
+    fn test_query_shows_doc_comment_snippet() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "parse_config".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 10,
+                signature: "pub fn parse_config() -> Config".into(),
+                doc_comment: Some(
+                    "Parse configuration from file.\nSupports TOML and JSON."
+                        .into(),
+                ),
+                body: None,
+                details: None,
+            }],
+        )
+        .unwrap();
+
+        let result = handle_query(&db, "parse_config", Some("symbols")).unwrap();
+        assert!(result.contains("*Parse configuration from file.*"));
+        assert!(!result.contains("Supports TOML"));
     }
 
     #[test]
