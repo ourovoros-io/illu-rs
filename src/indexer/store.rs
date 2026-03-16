@@ -235,8 +235,7 @@ mod tests {
         let stored = db.get_trait_impls_for_type("Config").unwrap();
         assert_eq!(stored.len(), 2);
 
-        let trait_names: Vec<&str> =
-            stored.iter().map(|i| i.trait_name.as_str()).collect();
+        let trait_names: Vec<&str> = stored.iter().map(|i| i.trait_name.as_str()).collect();
         assert!(trait_names.contains(&"Display"));
         assert!(trait_names.contains(&"Debug"));
 

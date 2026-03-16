@@ -185,10 +185,7 @@ mod tests {
                 line_start: 1,
                 line_end: 10,
                 signature: "pub fn parse_config() -> Config".into(),
-                doc_comment: Some(
-                    "Parse configuration from file.\nSupports TOML and JSON."
-                        .into(),
-                ),
+                doc_comment: Some("Parse configuration from file.\nSupports TOML and JSON.".into()),
                 body: None,
                 details: None,
             }],

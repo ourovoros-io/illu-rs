@@ -396,5 +396,8 @@ fn test_enum_details_in_context() {
     let (_dir, db) = setup_indexed_db();
     let result = context::handle_context(&db, "LogLevel").unwrap();
     assert!(result.contains("Debug"), "should show enum variants");
-    assert!(result.contains("Error(String)"), "should show tuple variant");
+    assert!(
+        result.contains("Error(String)"),
+        "should show tuple variant"
+    );
 }

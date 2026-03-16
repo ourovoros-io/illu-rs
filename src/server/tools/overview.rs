@@ -1,10 +1,7 @@
 use crate::db::Database;
 use std::fmt::Write;
 
-pub fn handle_overview(
-    db: &Database,
-    path: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_overview(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = db.get_symbols_by_path_prefix(path)?;
 
     if symbols.is_empty() {

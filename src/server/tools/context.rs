@@ -69,8 +69,7 @@ fn render_trait_info(
                 let _ = writeln!(
                     output,
                     "- **{}** ({}:{}-{})",
-                    ti.trait_name, ti.file_path,
-                    ti.line_start, ti.line_end
+                    ti.trait_name, ti.file_path, ti.line_start, ti.line_end
                 );
             }
             let _ = writeln!(output);
@@ -85,8 +84,7 @@ fn render_trait_info(
                 let _ = writeln!(
                     output,
                     "- **{}** ({}:{}-{})",
-                    ti.type_name, ti.file_path,
-                    ti.line_start, ti.line_end
+                    ti.type_name, ti.file_path, ti.line_start, ti.line_end
                 );
             }
             let _ = writeln!(output);
@@ -242,9 +240,7 @@ mod tests {
                 line_start: 5,
                 line_end: 15,
                 signature: "pub struct Config".into(),
-                doc_comment: Some(
-                    "Application configuration.\nHolds all settings.".into(),
-                ),
+                doc_comment: Some("Application configuration.\nHolds all settings.".into()),
                 body: Some("pub struct Config { pub port: u16 }".into()),
                 details: Some("port: u16".into()),
             }],
