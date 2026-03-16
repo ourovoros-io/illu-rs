@@ -13,8 +13,17 @@ pub fn handle_context(
     let mut output = String::new();
 
     for sym in &symbols {
-        let _ = writeln!(output, "## {} ({})", sym.name, sym.kind);
-        let _ = writeln!(output);
+        let _ = writeln!(output, "## {} ({})\n", sym.name, sym.kind);
+
+        // Doc comment
+        if let Some(doc) = &sym.doc_comment {
+            for line in doc.lines() {
+                let _ = writeln!(output, "> {line}");
+            }
+            let _ = writeln!(output);
+        }
+
+        // File/visibility/signature
         let _ = writeln!(
             output,
             "- **File:** {}:{}-{}",
@@ -23,9 +32,94 @@ pub fn handle_context(
         let _ = writeln!(output, "- **Visibility:** {}", sym.visibility);
         let _ = writeln!(output, "- **Signature:** `{}`", sym.signature);
         let _ = writeln!(output);
+
+        // Details (fields/variants)
+        if let Some(details) = &sym.details {
+            let _ = writeln!(output, "### Fields/Variants\n");
+            let _ = writeln!(output, "```rust\n{details}\n```\n");
+        }
+
+        // Source body
+        if let Some(body) = &sym.body {
+            let _ = writeln!(output, "### Source\n");
+            let _ = writeln!(output, "```rust\n{body}\n```\n");
+        }
+
+        // Trait implementations (for structs and enums)
+        if sym.kind == "struct" || sym.kind == "enum" {
+            let impls = db.get_trait_impls_for_type(&sym.name)?;
+            if !impls.is_empty() {
+                let _ = writeln!(output, "### Trait Implementations\n");
+                for ti in &impls {
+                    let _ = writeln!(
+                        output,
+                        "- **{}** ({}:{}-{})",
+                        ti.trait_name, ti.file_path,
+                        ti.line_start, ti.line_end
+                    );
+                }
+                let _ = writeln!(output);
+            }
+        }
+
+        // Trait implementors (for traits)
+        if sym.kind == "trait" {
+            let implementors = db.get_trait_impls_for_trait(&sym.name)?;
+            if !implementors.is_empty() {
+                let _ = writeln!(output, "### Implemented By\n");
+                for ti in &implementors {
+                    let _ = writeln!(
+                        output,
+                        "- **{}** ({}:{}-{})",
+                        ti.type_name, ti.file_path,
+                        ti.line_start, ti.line_end
+                    );
+                }
+                let _ = writeln!(output);
+            }
+        }
+
+        // Callees
+        let callees = db.get_callees(&sym.name)?;
+        if !callees.is_empty() {
+            let _ = writeln!(output, "### Callees\n");
+
+            let calls: Vec<_> = callees
+                .iter()
+                .filter(|c| c.ref_kind == "call")
+                .collect();
+            let type_refs: Vec<_> = callees
+                .iter()
+                .filter(|c| c.ref_kind != "call")
+                .collect();
+
+            if !calls.is_empty() {
+                let _ = writeln!(output, "**Calls:**");
+                for c in &calls {
+                    let _ = writeln!(
+                        output,
+                        "- {} ({})",
+                        c.name, c.file_path
+                    );
+                }
+                let _ = writeln!(output);
+            }
+
+            if !type_refs.is_empty() {
+                let _ = writeln!(output, "**Uses types:**");
+                for c in &type_refs {
+                    let _ = writeln!(
+                        output,
+                        "- {} ({})",
+                        c.name, c.file_path
+                    );
+                }
+                let _ = writeln!(output);
+            }
+        }
     }
 
-    // Check if any dependencies have related docs
+    // Related documentation
     let docs = db.search_docs(symbol_name)?;
     if !docs.is_empty() {
         output.push_str("## Related Documentation\n\n");
@@ -117,5 +211,123 @@ mod tests {
         let result = handle_context(&db, "serialize").unwrap();
         assert!(result.contains("serialize"));
         assert!(result.contains("Related Documentation"));
+    }
+
+    #[test]
+    fn test_context_includes_doc_comment() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "Config".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 5,
+                line_end: 15,
+                signature: "pub struct Config".into(),
+                doc_comment: Some(
+                    "Application configuration.\nHolds all settings.".into(),
+                ),
+                body: Some("pub struct Config { pub port: u16 }".into()),
+                details: Some("port: u16".into()),
+            }],
+        )
+        .unwrap();
+
+        let result = handle_context(&db, "Config").unwrap();
+        assert!(result.contains("> Application configuration."));
+        assert!(result.contains("> Holds all settings."));
+        assert!(result.contains("### Fields/Variants"));
+        assert!(result.contains("port: u16"));
+        assert!(result.contains("### Source"));
+        assert!(result.contains("pub struct Config { pub port: u16 }"));
+    }
+
+    #[test]
+    fn test_context_includes_callees() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "caller_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn caller_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                },
+                Symbol {
+                    name: "callee_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn callee_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let caller_id = db
+            .get_symbol_id("caller_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let callee_id = db
+            .get_symbol_id("callee_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(caller_id, callee_id, "call").unwrap();
+
+        let result = handle_context(&db, "caller_fn").unwrap();
+        assert!(result.contains("### Callees"));
+        assert!(result.contains("**Calls:**"));
+        assert!(result.contains("callee_fn"));
+    }
+
+    #[test]
+    fn test_context_includes_trait_impls() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "MyStruct".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub struct MyStruct".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+            }],
+        )
+        .unwrap();
+
+        db.insert_trait_impl("MyStruct", "Display", file_id, 10, 20)
+            .unwrap();
+        db.insert_trait_impl("MyStruct", "Debug", file_id, 22, 30)
+            .unwrap();
+
+        let result = handle_context(&db, "MyStruct").unwrap();
+        assert!(result.contains("### Trait Implementations"));
+        assert!(result.contains("**Display**"));
+        assert!(result.contains("**Debug**"));
     }
 }
