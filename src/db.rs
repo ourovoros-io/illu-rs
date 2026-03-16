@@ -101,7 +101,8 @@ impl Database {
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
                 content, content=docs, content_rowid=id
             );",
-        )
+        )?;
+        self.migrate_fts_schema()
     }
 
     /// Detect old FTS schema missing `doc_comment` column and
