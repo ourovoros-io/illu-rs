@@ -3,8 +3,7 @@ use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
 use illu_rs::server::IlluServer;
 use illu_rs::server::tools::{
-    context::handle_context, docs::handle_docs, impact::handle_impact,
-    query::handle_query,
+    context::handle_context, docs::handle_docs, impact::handle_impact, query::handle_query,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -58,10 +57,7 @@ fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> 
         .canonicalize()?
         .to_string_lossy()
         .into_owned();
-    let repo = repo_path
-        .canonicalize()?
-        .to_string_lossy()
-        .into_owned();
+    let repo = repo_path.canonicalize()?.to_string_lossy().into_owned();
 
     let illu_entry = serde_json::json!({
         "command": binary,
@@ -121,9 +117,7 @@ before grep, before guessing at code structure.
     )
 }
 
-fn write_claude_md_section(
-    repo_path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn write_claude_md_section(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let claude_md_path = repo_path.join("CLAUDE.md");
     let section = illu_claude_section();
 
@@ -165,9 +159,7 @@ fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error
     ensure_indexed(repo_path)
 }
 
-fn ensure_indexed(
-    repo_path: &Path,
-) -> Result<Database, Box<dyn std::error::Error>> {
+fn ensure_indexed(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error>> {
     let db_dir = repo_path.join(".illu");
     std::fs::create_dir_all(&db_dir)?;
     let db_path = db_dir.join("index.db");
@@ -245,8 +237,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Docs { dep, topic }) => {
             let db = open_or_index(repo_path)?;
-            let result =
-                handle_docs(&db, &dep, topic.as_deref())?;
+            let result = handle_docs(&db, &dep, topic.as_deref())?;
             print_result(&result);
         }
     }

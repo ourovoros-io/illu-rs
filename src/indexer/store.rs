@@ -26,12 +26,15 @@ pub fn store_symbols(db: &Database, file_id: i64, symbols: &[Symbol]) -> rusqlit
     let mut sym_stmt = db.conn.prepare(
         "INSERT INTO symbols \
          (file_id, name, kind, visibility, \
-          line_start, line_end, signature) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+          line_start, line_end, signature, \
+          doc_comment, body, details) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
+                 NULL, NULL, NULL)",
     )?;
     let mut fts_stmt = db.conn.prepare(
-        "INSERT INTO symbols_fts (rowid, name, signature) \
-         VALUES (?1, ?2, ?3)",
+        "INSERT INTO symbols_fts \
+         (rowid, name, signature, doc_comment) \
+         VALUES (?1, ?2, ?3, NULL)",
     )?;
     for sym in symbols {
         let line_start = i64::try_from(sym.line_start).unwrap_or(i64::MAX);

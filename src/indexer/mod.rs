@@ -89,9 +89,7 @@ pub fn refresh_index(
         };
 
         if needs_update {
-            let crate_id = existing
-                .get(&relative)
-                .and_then(|(_, cid)| *cid);
+            let crate_id = existing.get(&relative).and_then(|(_, cid)| *cid);
             dirty_files.push((relative, source, crate_id));
         }
     }
