@@ -64,7 +64,21 @@ pub fn index_repo(
     // Phase 3: Doc fetching skipped if configured
     // (async doc fetching handled separately)
 
-    // Phase 4: Update metadata
+    // Phase 4: Generate Claude skill file
+    let direct_deps = db.get_direct_dependencies()?;
+    let dep_names: Vec<String> =
+        direct_deps.iter().map(|d| d.name.clone()).collect();
+    let skill_content = generate_claude_skill(&dep_names);
+    let skill_dir =
+        config.repo_path.join(".claude").join("skills");
+    std::fs::create_dir_all(&skill_dir)?;
+    std::fs::write(
+        skill_dir.join("illu-rs.md"),
+        &skill_content,
+    )?;
+    tracing::info!("Wrote Claude skill to .claude/skills/illu-rs.md");
+
+    // Phase 5: Update metadata
     let commit_hash =
         get_current_commit_hash(&config.repo_path)
             .unwrap_or_else(|_| "unknown".to_string());
@@ -74,6 +88,55 @@ pub fn index_repo(
     )?;
 
     Ok(())
+}
+
+/// Generate a Claude skill markdown file listing available
+/// MCP tools and the project's direct dependencies.
+#[must_use]
+pub fn generate_claude_skill(
+    direct_dep_names: &[String],
+) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::new();
+    let _ = writeln!(out, "# illu-rs Code Intelligence\n");
+    let _ = writeln!(
+        out,
+        "This project is indexed by illu-rs. \
+         Use the following MCP tools to explore the codebase \
+         and its dependencies.\n"
+    );
+    let _ = writeln!(out, "## Tools\n");
+    let _ = writeln!(
+        out,
+        "- **query** — Search symbols, docs, or files. \
+         Pass `scope` (symbols/docs/files/all)."
+    );
+    let _ = writeln!(
+        out,
+        "- **context** — Get full context for a symbol: \
+         definition, signature, file location, related docs."
+    );
+    let _ = writeln!(
+        out,
+        "- **impact** — Analyze the impact of changing a \
+         symbol by finding all transitive dependents."
+    );
+    let _ = writeln!(
+        out,
+        "- **docs** — Get documentation for a dependency, \
+         optionally filtered by topic.\n"
+    );
+    let _ = writeln!(out, "## Direct Dependencies\n");
+
+    if direct_dep_names.is_empty() {
+        let _ = writeln!(out, "No direct dependencies found.");
+    } else {
+        for dep in direct_dep_names {
+            let _ = writeln!(out, "- {dep}");
+        }
+    }
+    out
 }
 
 fn content_hash(content: &str) -> String {
@@ -147,6 +210,27 @@ pub fn hello() -> &'static str { "hello" }
 
         let symbols = db.search_symbols("hello").unwrap();
         assert_eq!(symbols.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_skill_content() {
+        let deps = vec![
+            "serde".to_string(),
+            "tokio".to_string(),
+        ];
+        let skill = generate_claude_skill(&deps);
+        assert!(skill.contains("serde"));
+        assert!(skill.contains("tokio"));
+        assert!(skill.contains("docs"));
+        assert!(skill.contains("context"));
+        assert!(skill.contains("query"));
+        assert!(skill.contains("impact"));
+    }
+
+    #[test]
+    fn test_generate_skill_no_deps() {
+        let skill = generate_claude_skill(&[]);
+        assert!(skill.contains("No direct dependencies"));
     }
 
     #[test]
