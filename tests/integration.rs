@@ -2,7 +2,7 @@
 
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{context, docs, impact, query};
+use illu_rs::server::tools::{context, docs, impact, overview, query};
 
 fn setup_indexed_db() -> (tempfile::TempDir, Database) {
     let dir = tempfile::TempDir::new().unwrap();
@@ -44,17 +44,21 @@ dependencies = ["serde"]
         r#"
 use serde::Serialize;
 
+/// Application configuration.
+/// Holds host and port settings.
 pub struct Config {
     pub host: String,
     pub port: u16,
 }
 
 impl Config {
+    /// Create a new Config with defaults.
     pub fn new(host: String, port: u16) -> Self {
         Self { host, port }
     }
 }
 
+/// Parse configuration from input string.
 pub fn parse_config(input: &str) -> Config {
     let _ = input;
     Config::new("localhost".into(), 8080)
@@ -62,6 +66,19 @@ pub fn parse_config(input: &str) -> Config {
 
 pub trait Configurable {
     fn configure(&self) -> Config;
+}
+
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error(String),
+}
+
+impl std::fmt::Display for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.host, self.port)
+    }
 }
 "#,
     )
@@ -305,4 +322,79 @@ fn test_workspace_skill_file() {
         content.contains("serde"),
         "skill file should list serde dep"
     );
+}
+
+#[test]
+fn test_context_tool_enriched() {
+    let (_dir, db) = setup_indexed_db();
+    let result = context::handle_context(&db, "Config").unwrap();
+    assert!(
+        result.contains("Application configuration"),
+        "context should include doc comment"
+    );
+    assert!(
+        result.contains("host: String"),
+        "context should include struct fields"
+    );
+    assert!(
+        result.contains("pub struct Config"),
+        "context should include source body"
+    );
+}
+
+#[test]
+fn test_context_trait_impls() {
+    let (_dir, db) = setup_indexed_db();
+    let result = context::handle_context(&db, "Config").unwrap();
+    assert!(
+        result.contains("Display"),
+        "context should show Display trait impl for Config"
+    );
+}
+
+#[test]
+fn test_context_callees() {
+    let (_dir, db) = setup_indexed_db();
+    let result = context::handle_context(&db, "parse_config").unwrap();
+    assert!(
+        result.contains("Config") || result.contains("new"),
+        "parse_config should show callees"
+    );
+}
+
+#[test]
+fn test_query_doc_snippet() {
+    let (_dir, db) = setup_indexed_db();
+    let result = query::handle_query(&db, "parse_config", Some("symbols")).unwrap();
+    assert!(
+        result.contains("Parse configuration"),
+        "query should show doc comment snippet"
+    );
+}
+
+#[test]
+fn test_overview_tool() {
+    let (_dir, db) = setup_indexed_db();
+    let result = overview::handle_overview(&db, "src/").unwrap();
+    assert!(result.contains("Config"), "overview should list Config");
+    assert!(
+        result.contains("parse_config"),
+        "overview should list parse_config"
+    );
+    assert!(
+        result.contains("Configurable"),
+        "overview should list Configurable trait"
+    );
+    assert!(
+        result.contains("LogLevel"),
+        "overview should list LogLevel enum"
+    );
+}
+
+#[test]
+fn test_enum_details_in_context() {
+    let (_dir, db) = setup_indexed_db();
+    let result = context::handle_context(&db, "LogLevel").unwrap();
+    assert!(result.contains("Debug"), "should show enum variants");
+    assert!(result.contains("Error(String)"), "should show tuple variant");
 }
