@@ -226,6 +226,57 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
     })
 }
 
+fn extract_struct_details(node: &Node, source: &str) -> Option<String> {
+    let list = find_child_by_kind(node, "field_declaration_list")?;
+    let mut fields = Vec::new();
+    let mut cursor = list.walk();
+    for child in list.children(&mut cursor) {
+        if child.kind() == "field_declaration" {
+            let text = node_text(&child, source).trim_end().to_string();
+            let text = text.strip_suffix(',').unwrap_or(&text).to_string();
+            fields.push(text);
+        }
+    }
+    if fields.is_empty() {
+        return None;
+    }
+    Some(fields.join("\n"))
+}
+
+fn extract_enum_details(node: &Node, source: &str) -> Option<String> {
+    let list = find_child_by_kind(node, "enum_variant_list")?;
+    let mut variants = Vec::new();
+    let mut cursor = list.walk();
+    for child in list.children(&mut cursor) {
+        if child.kind() == "enum_variant" {
+            let text = node_text(&child, source).trim_end().to_string();
+            let text = text.strip_suffix(',').unwrap_or(&text).to_string();
+            variants.push(text);
+        }
+    }
+    if variants.is_empty() {
+        return None;
+    }
+    Some(variants.join("\n"))
+}
+
+fn extract_trait_details(node: &Node, source: &str) -> Option<String> {
+    let list = find_child_by_kind(node, "declaration_list")?;
+    let mut methods = Vec::new();
+    let mut cursor = list.walk();
+    for child in list.children(&mut cursor) {
+        if child.kind() == "function_signature_item" || child.kind() == "function_item" {
+            let sig = get_first_line(&child, source);
+            let sig = sig.strip_suffix(';').unwrap_or(&sig).to_string();
+            methods.push(sig);
+        }
+    }
+    if methods.is_empty() {
+        return None;
+    }
+    Some(methods.join("\n"))
+}
+
 fn extract_named_item(
     node: &Node,
     source: &str,
@@ -238,6 +289,13 @@ fn extract_named_item(
     let vis = get_visibility(node, source);
     let sig = get_first_line(node, source);
 
+    let details = match kind {
+        SymbolKind::Struct => extract_struct_details(node, source),
+        SymbolKind::Enum => extract_enum_details(node, source),
+        SymbolKind::Trait => extract_trait_details(node, source),
+        _ => None,
+    };
+
     Some(Symbol {
         name,
         kind,
@@ -248,7 +306,7 @@ fn extract_named_item(
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
         body: extract_body(node, source),
-        details: None,
+        details,
     })
 }
 
@@ -605,5 +663,63 @@ pub fn greet(name: &str) -> String {
         let body = sym.body.as_deref().unwrap();
         assert!(body.contains("// ... truncated"));
         assert!(body.lines().count() <= 101);
+    }
+
+    #[test]
+    fn test_extract_struct_fields() {
+        let source = r"
+pub struct Config {
+    pub port: u16,
+    pub host: String,
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Config").unwrap();
+        let details = sym.details.as_deref().unwrap();
+        assert!(details.contains("pub port: u16"));
+        assert!(details.contains("pub host: String"));
+        assert_eq!(details.lines().count(), 2);
+    }
+
+    #[test]
+    fn test_extract_enum_variants() {
+        let source = r"
+pub enum Color {
+    Red,
+    Green(u8),
+    Blue { intensity: f32 },
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Color").unwrap();
+        let details = sym.details.as_deref().unwrap();
+        assert!(details.contains("Red"));
+        assert!(details.contains("Green(u8)"));
+        assert!(details.contains("Blue { intensity: f32 }"));
+    }
+
+    #[test]
+    fn test_extract_trait_methods() {
+        let source = r"
+pub trait Drawable {
+    fn draw(&self);
+    fn resize(&mut self, width: u32, height: u32);
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Drawable").unwrap();
+        let details = sym.details.as_deref().unwrap();
+        assert!(details.contains("fn draw(&self)"));
+        assert!(details.contains("fn resize(&mut self, width: u32, height: u32)"));
+    }
+
+    #[test]
+    fn test_unit_struct_no_details() {
+        let source = r"
+pub struct Empty;
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Empty").unwrap();
+        assert!(sym.details.is_none());
     }
 }
