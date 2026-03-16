@@ -76,6 +76,19 @@ impl Database {
         )
     }
 
+    pub fn clear_index(&self) -> SqlResult<()> {
+        self.conn.execute_batch(
+            "DELETE FROM docs_fts;
+             DELETE FROM symbols_fts;
+             DELETE FROM docs;
+             DELETE FROM symbol_refs;
+             DELETE FROM symbols;
+             DELETE FROM files;
+             DELETE FROM dependencies;
+             DELETE FROM metadata;",
+        )
+    }
+
     pub fn set_metadata(&self, repo_path: &str, commit_hash: &str) -> SqlResult<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO metadata (repo_path, commit_hash)
@@ -113,6 +126,57 @@ impl Database {
             });
         }
         Ok(deps)
+    }
+
+    /// Get all distinct symbol names (for ref extraction matching).
+    pub fn get_all_symbol_names(&self) -> SqlResult<std::collections::HashSet<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT name FROM symbols WHERE kind != 'use' AND kind != 'mod'")?;
+        let mut names = std::collections::HashSet::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            names.insert(name);
+        }
+        Ok(names)
+    }
+
+    /// Look up a symbol's DB id by name and file path.
+    pub fn get_symbol_id(&self, name: &str, file_path: &str) -> SqlResult<Option<i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.name = ?1 AND f.path = ?2 \
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![name, file_path])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Look up any symbol's DB id by name (first match).
+    pub fn get_symbol_id_by_name(&self, name: &str) -> SqlResult<Option<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM symbols WHERE name = ?1 LIMIT 1")?;
+        let mut rows = stmt.query(params![name])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn insert_symbol_ref(&self, source_id: i64, target_id: i64, kind: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO symbol_refs \
+             (source_symbol_id, target_symbol_id, kind) \
+             VALUES (?1, ?2, ?3)",
+            params![source_id, target_id, kind],
+        )?;
+        Ok(())
     }
 
     pub fn get_dependency_id(&self, name: &str) -> SqlResult<Option<i64>> {

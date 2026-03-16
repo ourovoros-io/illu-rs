@@ -14,6 +14,9 @@ pub struct IndexConfig {
 }
 
 pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // Clear stale data from previous indexing runs
+    db.clear_index()?;
+
     // Phase 1: Parse dependencies
     let cargo_toml_path = config.repo_path.join("Cargo.toml");
     let cargo_toml = std::fs::read_to_string(&cargo_toml_path)?;
@@ -48,6 +51,40 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std
                     .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
                 store::store_symbols(db, file_id, &symbols)?;
             }
+        }
+    }
+
+    // Phase 2.5: Extract symbol references
+    let known_symbols = db.get_all_symbol_names()?;
+    if !known_symbols.is_empty() {
+        let src_dir = config.repo_path.join("src");
+        if src_dir.exists() {
+            let mut ref_count: u64 = 0;
+            for entry in walkdir::WalkDir::new(&src_dir)
+                .into_iter()
+                .filter_map(Result::ok)
+            {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "rs") {
+                    let source = std::fs::read_to_string(path)?;
+                    let relative = path
+                        .strip_prefix(&config.repo_path)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .to_string();
+                    let refs = parser::extract_refs(&source, &relative, &known_symbols)
+                        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+                    for r in &refs {
+                        let source_id = db.get_symbol_id(&r.source_name, &r.source_file)?;
+                        let target_id = db.get_symbol_id_by_name(&r.target_name)?;
+                        if let (Some(sid), Some(tid)) = (source_id, target_id) {
+                            db.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
+                            ref_count += 1;
+                        }
+                    }
+                }
+            }
+            tracing::info!("Stored {ref_count} symbol references");
         }
     }
 
