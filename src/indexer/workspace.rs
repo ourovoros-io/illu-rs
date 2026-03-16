@@ -16,9 +16,7 @@ pub struct PathDep {
 
 /// Parse a root `Cargo.toml` to detect whether it defines a workspace.
 /// Returns workspace members and workspace-level dependencies.
-pub fn parse_workspace_toml(
-    content: &str,
-) -> Result<WorkspaceInfo, toml::de::Error> {
+pub fn parse_workspace_toml(content: &str) -> Result<WorkspaceInfo, toml::de::Error> {
     let parsed: toml::Value = toml::from_str(content)?;
 
     let Some(workspace) = parsed.get("workspace") else {
@@ -43,9 +41,7 @@ pub fn parse_workspace_toml(
         })
         .unwrap_or_default();
 
-    let workspace_deps = parse_deps_table(
-        workspace.get("dependencies"),
-    );
+    let workspace_deps = parse_deps_table(workspace.get("dependencies"));
 
     Ok(WorkspaceInfo {
         is_workspace: true,
@@ -102,9 +98,7 @@ pub fn resolve_member_deps(
 
 /// Extract path-based dependencies from a member's `Cargo.toml`.
 /// These represent inter-crate dependencies within the workspace.
-pub fn extract_path_deps(
-    member_toml: &str,
-) -> Result<Vec<PathDep>, toml::de::Error> {
+pub fn extract_path_deps(member_toml: &str) -> Result<Vec<PathDep>, toml::de::Error> {
     let parsed: toml::Value = toml::from_str(member_toml)?;
 
     let mut result = Vec::new();
@@ -140,10 +134,7 @@ fn is_workspace_dep(value: &toml::Value) -> bool {
 }
 
 fn is_path_dep(value: &toml::Value) -> bool {
-    value
-        .as_table()
-        .and_then(|t| t.get("path"))
-        .is_some()
+    value.as_table().and_then(|t| t.get("path")).is_some()
 }
 
 fn get_path_value(value: &toml::Value) -> Option<String> {
@@ -182,9 +173,7 @@ fn extract_version_features(value: &toml::Value) -> (String, Vec<String>) {
     }
 }
 
-fn parse_deps_table(
-    table: Option<&toml::Value>,
-) -> Vec<DirectDep> {
+fn parse_deps_table(table: Option<&toml::Value>) -> Vec<DirectDep> {
     let Some(deps) = table.and_then(toml::Value::as_table) else {
         return vec![];
     };

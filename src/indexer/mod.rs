@@ -15,84 +15,178 @@ pub struct IndexConfig {
 }
 
 pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
-    // Clear stale data from previous indexing runs
     db.clear_index()?;
 
-    // Phase 1: Parse dependencies
-    let cargo_toml_path = config.repo_path.join("Cargo.toml");
-    let cargo_toml = std::fs::read_to_string(&cargo_toml_path)?;
-    let direct = dependencies::parse_cargo_toml(&cargo_toml)?;
+    let cargo_toml = std::fs::read_to_string(config.repo_path.join("Cargo.toml"))?;
+    let ws_info = workspace::parse_workspace_toml(&cargo_toml)?;
 
-    let locked = match std::fs::read_to_string(config.repo_path.join("Cargo.lock")) {
-        Ok(lock) => dependencies::parse_cargo_lock(&lock)?,
-        Err(_) => vec![],
-    };
+    if ws_info.is_workspace {
+        index_workspace(db, config, &ws_info)?;
+    } else {
+        index_single_crate(db, config, &cargo_toml)?;
+    }
 
+    extract_all_symbol_refs(db, config)?;
+    generate_skill_file(db, config)?;
+    update_metadata(db, config)?;
+
+    Ok(())
+}
+
+fn index_single_crate(
+    db: &Database,
+    config: &IndexConfig,
+    cargo_toml: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let direct = dependencies::parse_cargo_toml(cargo_toml)?;
+    let locked = parse_cargo_lock(&config.repo_path)?;
     let resolved = dependencies::resolve_dependencies(&direct, &locked);
     store::store_dependencies(db, &resolved)?;
 
-    // Phase 2: Parse source files
-    let src_dir = config.repo_path.join("src");
-    if src_dir.exists() {
-        for entry in walkdir::WalkDir::new(&src_dir)
-            .into_iter()
-            .filter_map(Result::ok)
-        {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "rs") {
-                let source = std::fs::read_to_string(path)?;
-                let relative = path
-                    .strip_prefix(&config.repo_path)
-                    .unwrap_or(path)
-                    .to_string_lossy()
-                    .to_string();
-                let hash = content_hash(&source);
-                let file_id = db.insert_file(&relative, &hash)?;
-                let symbols = parser::parse_rust_source(&source, &relative)
-                    .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-                store::store_symbols(db, file_id, &symbols)?;
-            }
-        }
-    }
+    let pkg_name = extract_package_name(cargo_toml).unwrap_or_else(|| "root".to_string());
+    let crate_id = db.insert_crate(&pkg_name, ".", false)?;
 
-    // Phase 2.5: Extract symbol references
-    let known_symbols = db.get_all_symbol_names()?;
-    if !known_symbols.is_empty() {
-        let src_dir = config.repo_path.join("src");
-        if src_dir.exists() {
-            let mut ref_count: u64 = 0;
-            for entry in walkdir::WalkDir::new(&src_dir)
-                .into_iter()
-                .filter_map(Result::ok)
+    index_crate_sources(db, config, &config.repo_path.join("src"), crate_id)?;
+    Ok(())
+}
+
+fn index_workspace(
+    db: &Database,
+    config: &IndexConfig,
+    ws_info: &workspace::WorkspaceInfo,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let locked = parse_cargo_lock(&config.repo_path)?;
+
+    // Collect all external deps across members
+    let mut all_direct = Vec::new();
+
+    // Register each member crate
+    let mut crate_ids: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+
+    for member in &ws_info.members {
+        let member_dir = config.repo_path.join(member);
+        let member_toml_path = member_dir.join("Cargo.toml");
+        let Ok(member_toml) = std::fs::read_to_string(&member_toml_path) else {
+            tracing::warn!("Skipping member {member}: no Cargo.toml");
+            continue;
+        };
+
+        let pkg_name = extract_package_name(&member_toml).unwrap_or_else(|| member.clone());
+        let crate_id = db.insert_crate(&pkg_name, member, false)?;
+        crate_ids.insert(pkg_name.clone(), crate_id);
+
+        // Resolve external deps for this member
+        let member_deps = workspace::resolve_member_deps(&member_toml, &ws_info.workspace_deps)?;
+        for dep in &member_deps {
+            if !all_direct
+                .iter()
+                .any(|d: &dependencies::DirectDep| d.name == dep.name)
             {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "rs") {
-                    let source = std::fs::read_to_string(path)?;
-                    let relative = path
-                        .strip_prefix(&config.repo_path)
-                        .unwrap_or(path)
-                        .to_string_lossy()
-                        .to_string();
-                    let refs = parser::extract_refs(&source, &relative, &known_symbols)
-                        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-                    for r in &refs {
-                        let source_id = db.get_symbol_id(&r.source_name, &r.source_file)?;
-                        let target_id = db.get_symbol_id_by_name(&r.target_name)?;
-                        if let (Some(sid), Some(tid)) = (source_id, target_id) {
-                            db.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
-                            ref_count += 1;
-                        }
-                    }
-                }
+                all_direct.push(dep.clone());
             }
-            tracing::info!("Stored {ref_count} symbol references");
+        }
+
+        // Index source files
+        let src_dir = member_dir.join("src");
+        index_crate_sources(db, config, &src_dir, crate_id)?;
+    }
+
+    // Store resolved external deps
+    let resolved = dependencies::resolve_dependencies(&all_direct, &locked);
+    store::store_dependencies(db, &resolved)?;
+
+    // Record inter-crate dependencies
+    for member in &ws_info.members {
+        let member_dir = config.repo_path.join(member);
+        let member_toml_path = member_dir.join("Cargo.toml");
+        let Ok(member_toml) = std::fs::read_to_string(&member_toml_path) else {
+            continue;
+        };
+
+        let pkg_name = extract_package_name(&member_toml).unwrap_or_else(|| member.clone());
+        let Some(&source_id) = crate_ids.get(&pkg_name) else {
+            continue;
+        };
+
+        let path_deps = workspace::extract_path_deps(&member_toml)?;
+        for pd in &path_deps {
+            if let Some(&target_id) = crate_ids.get(&pd.name) {
+                db.insert_crate_dep(source_id, target_id)?;
+            }
         }
     }
 
-    // Phase 3: Doc fetching skipped if configured
-    // (async doc fetching handled separately)
+    Ok(())
+}
 
-    // Phase 4: Generate Claude skill file
+fn index_crate_sources(
+    db: &Database,
+    config: &IndexConfig,
+    src_dir: &std::path::Path,
+    crate_id: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !src_dir.exists() {
+        return Ok(());
+    }
+    for entry in walkdir::WalkDir::new(src_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            let source = std::fs::read_to_string(path)?;
+            let relative = path
+                .strip_prefix(&config.repo_path)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            let hash = content_hash(&source);
+            let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
+            let symbols = parser::parse_rust_source(&source, &relative)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            store::store_symbols(db, file_id, &symbols)?;
+        }
+    }
+    Ok(())
+}
+
+fn extract_all_symbol_refs(
+    db: &Database,
+    config: &IndexConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let known_symbols = db.get_all_symbol_names()?;
+    if known_symbols.is_empty() {
+        return Ok(());
+    }
+
+    let files = db.get_all_file_paths()?;
+    let mut ref_count: u64 = 0;
+
+    for relative in &files {
+        let full_path = config.repo_path.join(relative);
+        let Ok(source) = std::fs::read_to_string(&full_path) else {
+            continue;
+        };
+        let refs = parser::extract_refs(&source, relative, &known_symbols)
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        for r in &refs {
+            let source_id = db.get_symbol_id(&r.source_name, &r.source_file)?;
+            let target_id = db.get_symbol_id_by_name(&r.target_name)?;
+            if let (Some(sid), Some(tid)) = (source_id, target_id) {
+                db.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
+                ref_count += 1;
+            }
+        }
+    }
+
+    tracing::info!("Stored {ref_count} symbol references");
+    Ok(())
+}
+
+fn generate_skill_file(
+    db: &Database,
+    config: &IndexConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     let direct_deps = db.get_direct_dependencies()?;
     let dep_names: Vec<String> = direct_deps.iter().map(|d| d.name.clone()).collect();
     let skill_content = generate_claude_skill(&dep_names);
@@ -100,13 +194,32 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std
     std::fs::create_dir_all(&skill_dir)?;
     std::fs::write(skill_dir.join("illu-rs.md"), &skill_content)?;
     tracing::info!("Wrote Claude skill to .claude/skills/illu-rs.md");
+    Ok(())
+}
 
-    // Phase 5: Update metadata
+fn update_metadata(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
     let commit_hash =
         get_current_commit_hash(&config.repo_path).unwrap_or_else(|_| "unknown".to_string());
     db.set_metadata(&config.repo_path.display().to_string(), &commit_hash)?;
-
     Ok(())
+}
+
+fn parse_cargo_lock(
+    repo_path: &std::path::Path,
+) -> Result<Vec<dependencies::LockedDep>, Box<dyn std::error::Error>> {
+    match std::fs::read_to_string(repo_path.join("Cargo.lock")) {
+        Ok(lock) => Ok(dependencies::parse_cargo_lock(&lock)?),
+        Err(_) => Ok(vec![]),
+    }
+}
+
+fn extract_package_name(cargo_toml: &str) -> Option<String> {
+    let parsed: toml::Value = toml::from_str(cargo_toml).ok()?;
+    parsed
+        .get("package")?
+        .get("name")?
+        .as_str()
+        .map(String::from)
 }
 
 /// Generate a Claude skill markdown file listing available
@@ -268,5 +381,116 @@ edition = "2021"
         index_repo(&db, &config).unwrap();
         let symbols = db.search_symbols("anything").unwrap();
         assert_eq!(symbols.len(), 0);
+    }
+
+    #[test]
+    fn test_index_workspace() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // Workspace root Cargo.toml
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"
+[workspace]
+members = ["shared", "app"]
+
+[workspace.dependencies]
+serde = "1.0"
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            dir.path().join("Cargo.lock"),
+            r#"
+[[package]]
+name = "serde"
+version = "1.0.210"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+
+[[package]]
+name = "app"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        // shared crate
+        let shared_dir = dir.path().join("shared");
+        std::fs::create_dir_all(shared_dir.join("src")).unwrap();
+        std::fs::write(
+            shared_dir.join("Cargo.toml"),
+            r#"
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            shared_dir.join("src").join("lib.rs"),
+            "pub struct SharedType { pub value: i32 }\n",
+        )
+        .unwrap();
+
+        // app crate depending on shared
+        let app_dir = dir.path().join("app");
+        std::fs::create_dir_all(app_dir.join("src")).unwrap();
+        std::fs::write(
+            app_dir.join("Cargo.toml"),
+            r#"
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+shared = { path = "../shared" }
+serde = { workspace = true }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            app_dir.join("src").join("main.rs"),
+            r"
+pub fn use_shared() -> SharedType {
+    SharedType { value: 42 }
+}
+",
+        )
+        .unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: dir.path().to_path_buf(),
+            skip_doc_fetch: true,
+        };
+        index_repo(&db, &config).unwrap();
+
+        // Both crates' symbols indexed
+        let shared_syms = db.search_symbols("SharedType").unwrap();
+        assert!(!shared_syms.is_empty(), "SharedType should be indexed");
+
+        let app_syms = db.search_symbols("use_shared").unwrap();
+        assert!(!app_syms.is_empty(), "use_shared should be indexed");
+
+        // Inter-crate dependency tracked
+        let shared_crate = db.get_crate_by_name("shared").unwrap().unwrap();
+        let dependents = db.get_crate_dependents(shared_crate.id).unwrap();
+        assert_eq!(dependents.len(), 1);
+        assert_eq!(dependents[0].name, "app");
+
+        // Workspace dep resolved
+        let serde_dep = db.get_dependency_by_name("serde").unwrap();
+        assert!(serde_dep.is_some());
+
+        // Cross-crate symbol ref exists
+        let refs_result = db.search_symbols("SharedType").unwrap();
+        assert!(!refs_result.is_empty());
     }
 }

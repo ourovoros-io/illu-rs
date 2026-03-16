@@ -144,6 +144,17 @@ impl Database {
         Ok(deps)
     }
 
+    /// Get all indexed file paths.
+    pub fn get_all_file_paths(&self) -> SqlResult<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT path FROM files")?;
+        let mut paths = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            paths.push(row.get(0)?);
+        }
+        Ok(paths)
+    }
+
     /// Get all distinct symbol names (for ref extraction matching).
     pub fn get_all_symbol_names(&self) -> SqlResult<std::collections::HashSet<String>> {
         let mut stmt = self
