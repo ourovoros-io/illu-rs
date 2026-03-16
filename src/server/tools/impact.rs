@@ -1,0 +1,159 @@
+use crate::db::Database;
+use rusqlite::params;
+use std::fmt::Write;
+
+pub fn handle_impact(
+    db: &Database,
+    symbol_name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let symbols = db.search_symbols(symbol_name)?;
+    if symbols.is_empty() {
+        return Ok(format!(
+            "No symbol found matching '{symbol_name}'."
+        ));
+    }
+
+    let mut output = String::new();
+    let _ = writeln!(
+        output,
+        "## Impact Analysis: {symbol_name}\n"
+    );
+
+    // Find direct references using symbol_refs
+    let mut stmt = db.conn.prepare(
+        "WITH RECURSIVE deps(id, name, file_path, depth) AS (
+            SELECT s.id, s.name, f.path, 0
+            FROM symbols s
+            JOIN files f ON f.id = s.file_id
+            WHERE s.name = ?1
+          UNION
+            SELECT s2.id, s2.name, f2.path, deps.depth + 1
+            FROM deps
+            JOIN symbol_refs sr ON sr.target_symbol_id = deps.id
+            JOIN symbols s2 ON s2.id = sr.source_symbol_id
+            JOIN files f2 ON f2.id = s2.file_id
+            WHERE deps.depth < 5
+        )
+        SELECT DISTINCT name, file_path, depth FROM deps
+        WHERE depth > 0
+        ORDER BY depth, name",
+    )?;
+
+    let mut has_deps = false;
+    let mut rows = stmt.query(params![symbol_name])?;
+    let mut current_depth: i64 = -1;
+
+    while let Some(row) = rows.next()? {
+        has_deps = true;
+        let name: String = row.get(0)?;
+        let file_path: String = row.get(1)?;
+        let depth: i64 = row.get(2)?;
+
+        if depth != current_depth {
+            current_depth = depth;
+            let _ = writeln!(
+                output,
+                "### Depth {depth}\n"
+            );
+        }
+        let _ = writeln!(output, "- **{name}** ({file_path})");
+    }
+
+    if !has_deps {
+        output.push_str("No dependents found.\n");
+        output.push_str(
+            "Note: Symbol references are populated \
+             during indexing.\n",
+        );
+    }
+
+    Ok(output)
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests")]
+mod tests {
+    use super::*;
+    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::store::store_symbols;
+
+    #[test]
+    fn test_impact_no_symbol() {
+        let db = Database::open_in_memory().unwrap();
+        let result =
+            handle_impact(&db, "nonexistent").unwrap();
+        assert!(result.contains("No symbol found"));
+    }
+
+    #[test]
+    fn test_impact_no_dependents() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id =
+            db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "lonely_fn".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn lonely_fn()".into(),
+            }],
+        )
+        .unwrap();
+
+        let result =
+            handle_impact(&db, "lonely_fn").unwrap();
+        assert!(result.contains("Impact Analysis"));
+        assert!(result.contains("No dependents found"));
+    }
+
+    #[test]
+    fn test_impact_with_refs() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id =
+            db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "base_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn base_fn()".into(),
+                },
+                Symbol {
+                    name: "caller_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 10,
+                    signature: "pub fn caller_fn()".into(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // Create a reference from caller_fn -> base_fn
+        db.conn
+            .execute(
+                "INSERT INTO symbol_refs \
+                 (source_symbol_id, target_symbol_id, kind) \
+                 VALUES (2, 1, 'call')",
+                [],
+            )
+            .unwrap();
+
+        let result =
+            handle_impact(&db, "base_fn").unwrap();
+        assert!(result.contains("caller_fn"));
+    }
+}
