@@ -133,4 +133,34 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "parse_config");
     }
+
+    #[test]
+    fn test_store_and_search_docs() {
+        let db = Database::open_in_memory().unwrap();
+        let dep_id =
+            db.insert_dependency("serde", "1.0.210", true, None)
+                .unwrap();
+        db.store_doc(
+            dep_id,
+            "docs.rs",
+            "Serde is a serialization framework",
+        )
+        .unwrap();
+        let results = db.search_docs("serialization").unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("serialization"));
+    }
+
+    #[test]
+    fn test_get_docs_for_dependency() {
+        let db = Database::open_in_memory().unwrap();
+        let dep_id =
+            db.insert_dependency("tokio", "1.0.0", true, None)
+                .unwrap();
+        db.store_doc(dep_id, "docs.rs", "Async runtime").unwrap();
+        db.store_doc(dep_id, "github_readme", "Tokio README")
+            .unwrap();
+        let docs = db.get_docs_for_dependency("tokio").unwrap();
+        assert_eq!(docs.len(), 2);
+    }
 }

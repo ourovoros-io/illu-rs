@@ -188,6 +188,98 @@ impl Database {
             None => Ok(None),
         }
     }
+
+    pub fn insert_dependency(
+        &self,
+        name: &str,
+        version: &str,
+        is_direct: bool,
+        repo_url: Option<&str>,
+    ) -> SqlResult<i64> {
+        self.conn.execute(
+            "INSERT INTO dependencies \
+             (name, version, is_direct, repository_url, features) \
+             VALUES (?1, ?2, ?3, ?4, '')",
+            params![name, version, is_direct, repo_url],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn store_doc(
+        &self,
+        dep_id: i64,
+        source: &str,
+        content: &str,
+    ) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT INTO docs (dependency_id, source, content) \
+             VALUES (?1, ?2, ?3)",
+            params![dep_id, source, content],
+        )?;
+        let rowid = self.conn.last_insert_rowid();
+        self.conn.execute(
+            "INSERT INTO docs_fts (rowid, content) \
+             VALUES (?1, ?2)",
+            params![rowid, content],
+        )?;
+        Ok(())
+    }
+
+    pub fn search_docs(
+        &self,
+        query: &str,
+    ) -> SqlResult<Vec<DocResult>> {
+        let fts_query = format!("{query}*");
+        let mut stmt = self.conn.prepare(
+            "SELECT d.content, d.source, dep.name, dep.version \
+             FROM docs_fts fts \
+             JOIN docs d ON d.id = fts.rowid \
+             JOIN dependencies dep ON dep.id = d.dependency_id \
+             WHERE docs_fts MATCH ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![fts_query])?;
+        while let Some(row) = rows.next()? {
+            results.push(DocResult {
+                content: row.get(0)?,
+                source: row.get(1)?,
+                dependency_name: row.get(2)?,
+                version: row.get(3)?,
+            });
+        }
+        Ok(results)
+    }
+
+    pub fn get_docs_for_dependency(
+        &self,
+        name: &str,
+    ) -> SqlResult<Vec<DocResult>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT d.content, d.source, dep.name, dep.version \
+             FROM docs d \
+             JOIN dependencies dep ON dep.id = d.dependency_id \
+             WHERE dep.name = ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![name])?;
+        while let Some(row) = rows.next()? {
+            results.push(DocResult {
+                content: row.get(0)?,
+                source: row.get(1)?,
+                dependency_name: row.get(2)?,
+                version: row.get(3)?,
+            });
+        }
+        Ok(results)
+    }
+}
+
+#[derive(Debug)]
+pub struct DocResult {
+    pub content: String,
+    pub source: String,
+    pub dependency_name: String,
+    pub version: String,
 }
 
 #[derive(Debug)]
