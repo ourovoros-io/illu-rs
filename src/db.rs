@@ -560,19 +560,35 @@ impl Database {
 
     pub fn search_symbols(&self, query: &str) -> SqlResult<Vec<StoredSymbol>> {
         let fts_query = format!("{query}*");
+        let like_pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
-            "SELECT s.name, s.kind, s.visibility, f.path, \
-                    s.line_start, s.line_end, s.signature, \
-                    s.doc_comment, s.body, s.details \
-             FROM symbols_fts fts \
-             JOIN symbols s ON s.id = fts.rowid \
-             JOIN files f ON f.id = s.file_id \
-             WHERE symbols_fts MATCH ?1 \
-             ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
-                      s.name",
+            "WITH fts_results AS ( \
+                SELECT fts.rowid AS sid \
+                FROM symbols_fts fts \
+                WHERE symbols_fts MATCH ?1 \
+            ), \
+            like_results AS ( \
+                SELECT s.id AS sid \
+                FROM symbols s \
+                WHERE s.name LIKE ?3 \
+                  AND s.id NOT IN (SELECT sid FROM fts_results) \
+            ), \
+            combined AS ( \
+                SELECT sid, 0 AS source FROM fts_results \
+                UNION ALL \
+                SELECT sid, 1 AS source FROM like_results \
+            ) \
+            SELECT s.name, s.kind, s.visibility, f.path, \
+                   s.line_start, s.line_end, s.signature, \
+                   s.doc_comment, s.body, s.details \
+            FROM combined c \
+            JOIN symbols s ON s.id = c.sid \
+            JOIN files f ON f.id = s.file_id \
+            ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
+                     c.source, s.name",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![fts_query, query])?;
+        let mut rows = stmt.query(params![fts_query, query, like_pattern])?;
         while let Some(row) = rows.next()? {
             results.push(row_to_stored_symbol(row)?);
         }
