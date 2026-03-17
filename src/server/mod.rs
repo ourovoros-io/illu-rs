@@ -62,6 +62,7 @@ impl IlluServer {
 struct QueryParams {
     query: String,
     scope: Option<String>,
+    kind: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -85,6 +86,11 @@ struct OverviewParams {
     path: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct TreeParams {
+    path: String,
+}
+
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
     McpError::internal_error(e.to_string(), None)
 }
@@ -97,7 +103,7 @@ fn text_result(text: String) -> CallToolResult {
 impl IlluServer {
     #[tool(
         name = "query",
-        description = "Search the codebase for symbols, documentation, or files. Scope: symbols, docs, files, or all (default)."
+        description = "Search the codebase for symbols, documentation, or files. Scope: symbols, docs, files, or all (default). Kind: function, struct, enum, trait, impl, const, static, type_alias, macro (filters symbol results)."
     )]
     async fn query(
         &self,
@@ -105,8 +111,13 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         self.refresh().await?;
         let db = self.lock_db()?;
-        let result = tools::query::handle_query(&db, &params.query, params.scope.as_deref())
-            .map_err(to_mcp_err)?;
+        let result = tools::query::handle_query(
+            &db,
+            &params.query,
+            params.scope.as_deref(),
+            params.kind.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -165,6 +176,20 @@ impl IlluServer {
         self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::overview::handle_overview(&db, &params.path).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "tree",
+        description = "Show the file/module tree under a path prefix with public symbol counts per file."
+    )]
+    async fn tree(
+        &self,
+        Parameters(params): Parameters<TreeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.refresh().await?;
+        let db = self.lock_db()?;
+        let result = tools::tree::handle_tree(&db, &params.path).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 }

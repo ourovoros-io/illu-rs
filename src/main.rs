@@ -4,6 +4,7 @@ use illu_rs::indexer::{IndexConfig, index_repo};
 use illu_rs::server::IlluServer;
 use illu_rs::server::tools::{
     context::handle_context, docs::handle_docs, impact::handle_impact, query::handle_query,
+    tree::handle_tree,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -31,6 +32,9 @@ enum Command {
         /// Scope: all, symbols, docs, files
         #[arg(short, long, default_value = "all")]
         scope: String,
+        /// Filter by symbol kind: function, struct, enum, trait, etc.
+        #[arg(short, long)]
+        kind: Option<String>,
     },
     /// Get full context for a symbol
     Context {
@@ -49,6 +53,12 @@ enum Command {
         /// Filter by topic
         #[arg(short, long)]
         topic: Option<String>,
+    },
+    /// Show file/module tree with symbol counts
+    Tree {
+        /// Path prefix
+        #[arg(default_value = "src/")]
+        path: String,
     },
 }
 
@@ -217,9 +227,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let service = server.serve(transport).await?;
             service.waiting().await?;
         }
-        Some(Command::Query { search, scope }) => {
+        Some(Command::Query {
+            search,
+            scope,
+            kind,
+        }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_query(&db, &search, Some(&scope))?;
+            let result = handle_query(&db, &search, Some(&scope), kind.as_deref())?;
             print_result(&result);
         }
         Some(Command::Context { symbol }) => {
@@ -235,6 +249,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::Docs { dep, topic }) => {
             let db = open_or_index(repo_path)?;
             let result = handle_docs(&db, &dep, topic.as_deref())?;
+            print_result(&result);
+        }
+        Some(Command::Tree { path }) => {
+            let db = open_or_index(repo_path)?;
+            let result = handle_tree(&db, &path)?;
             print_result(&result);
         }
     }
