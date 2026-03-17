@@ -50,6 +50,7 @@ fn row_to_stored_symbol(row: &rusqlite::Row) -> SqlResult<StoredSymbol> {
         doc_comment: row.get(7)?,
         body: row.get(8)?,
         details: row.get(9)?,
+        attributes: row.get(10)?,
     })
 }
 
@@ -124,7 +125,8 @@ impl Database {
                 signature TEXT NOT NULL,
                 doc_comment TEXT,
                 body TEXT,
-                details TEXT
+                details TEXT,
+                attributes TEXT
             );
 
             CREATE TABLE IF NOT EXISTS trait_impls (
@@ -279,6 +281,27 @@ impl Database {
             paths.push(row.get(0)?);
         }
         Ok(paths)
+    }
+
+    pub fn get_file_symbol_counts(&self, prefix: &str) -> SqlResult<Vec<FileSymbolCount>> {
+        let pattern = format!("{prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT f.path, COUNT(s.id) \
+             FROM files f \
+             LEFT JOIN symbols s ON s.file_id = f.id AND s.visibility = 'public' \
+             WHERE f.path LIKE ?1 \
+             GROUP BY f.path \
+             ORDER BY f.path",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(FileSymbolCount {
+                path: row.get(0)?,
+                count: row.get(1)?,
+            });
+        }
+        Ok(results)
     }
 
     /// Get all distinct symbol names (for ref extraction matching).
@@ -504,20 +527,23 @@ impl Database {
 
     pub fn impact_dependents(&self, symbol_name: &str) -> SqlResult<Vec<ImpactEntry>> {
         let mut stmt = self.conn.prepare(
-            "WITH RECURSIVE deps(id, name, file_path, depth) AS (
-                SELECT s.id, s.name, f.path, 0
+            "WITH RECURSIVE deps(id, name, file_path, depth, via) AS (
+                SELECT s.id, s.name, f.path, 0, ''
                 FROM symbols s
                 JOIN files f ON f.id = s.file_id
                 WHERE s.name = ?1
               UNION
-                SELECT s2.id, s2.name, f2.path, deps.depth + 1
+                SELECT s2.id, s2.name, f2.path, deps.depth + 1,
+                       CASE WHEN deps.via = '' THEN deps.name
+                            ELSE deps.via || ' -> ' || deps.name
+                       END
                 FROM deps
                 JOIN symbol_refs sr ON sr.target_symbol_id = deps.id
                 JOIN symbols s2 ON s2.id = sr.source_symbol_id
                 JOIN files f2 ON f2.id = s2.file_id
                 WHERE deps.depth < 5
             )
-            SELECT DISTINCT name, file_path, depth FROM deps
+            SELECT DISTINCT name, file_path, depth, via FROM deps
             WHERE depth > 0
             ORDER BY depth, name",
         )?;
@@ -528,6 +554,7 @@ impl Database {
                 name: row.get(0)?,
                 file_path: row.get(1)?,
                 depth: row.get(2)?,
+                via: row.get(3)?,
             });
         }
         Ok(results)
@@ -560,17 +587,35 @@ impl Database {
 
     pub fn search_symbols(&self, query: &str) -> SqlResult<Vec<StoredSymbol>> {
         let fts_query = format!("{query}*");
+        let like_pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
-            "SELECT s.name, s.kind, s.visibility, f.path, \
-                    s.line_start, s.line_end, s.signature, \
-                    s.doc_comment, s.body, s.details \
-             FROM symbols_fts fts \
-             JOIN symbols s ON s.id = fts.rowid \
-             JOIN files f ON f.id = s.file_id \
-             WHERE symbols_fts MATCH ?1",
+            "WITH fts_results AS ( \
+                SELECT fts.rowid AS sid \
+                FROM symbols_fts fts \
+                WHERE symbols_fts MATCH ?1 \
+            ), \
+            like_results AS ( \
+                SELECT s.id AS sid \
+                FROM symbols s \
+                WHERE s.name LIKE ?3 \
+                  AND s.id NOT IN (SELECT sid FROM fts_results) \
+            ), \
+            combined AS ( \
+                SELECT sid, 0 AS source FROM fts_results \
+                UNION ALL \
+                SELECT sid, 1 AS source FROM like_results \
+            ) \
+            SELECT s.name, s.kind, s.visibility, f.path, \
+                   s.line_start, s.line_end, s.signature, \
+                   s.doc_comment, s.body, s.details, s.attributes \
+            FROM combined c \
+            JOIN symbols s ON s.id = c.sid \
+            JOIN files f ON f.id = s.file_id \
+            ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
+                     c.source, s.name",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![fts_query])?;
+        let mut rows = stmt.query(params![fts_query, query, like_pattern])?;
         while let Some(row) = rows.next()? {
             results.push(row_to_stored_symbol(row)?);
         }
@@ -690,12 +735,31 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
-                    s.doc_comment, s.body, s.details \
+                    s.doc_comment, s.body, s.details, s.attributes \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
              WHERE f.path LIKE ?1 \
                AND s.visibility IN ('public', 'pub(crate)') \
              ORDER BY f.path, s.line_start",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
+    pub fn search_symbols_by_attribute(&self, attr: &str) -> SqlResult<Vec<StoredSymbol>> {
+        let pattern = format!("%{attr}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.attributes LIKE ?1 \
+             ORDER BY s.name",
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern])?;
@@ -758,6 +822,12 @@ impl Database {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct FileSymbolCount {
+    pub path: String,
+    pub count: i64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct FileRecord {
     pub path: String,
     pub content_hash: String,
@@ -769,6 +839,7 @@ pub struct ImpactEntry {
     pub name: String,
     pub file_path: String,
     pub depth: i64,
+    pub via: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -807,6 +878,7 @@ pub struct StoredSymbol {
     pub doc_comment: Option<String>,
     pub body: Option<String>,
     pub details: Option<String>,
+    pub attributes: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1297,5 +1369,114 @@ mod tests {
         assert!(callees.is_empty());
         // Verify: second file still intact
         assert!(db.get_file_hash("src/main.rs").unwrap().is_some());
+    }
+
+    #[test]
+    fn test_search_symbols_exact_match_first() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        // Insert "ConfigHelper" first so without exact-match priority
+        // it would sort before "Config" alphabetically or by rowid
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'ConfigHelper', 'struct', 'public', \
+                  10, 20, 'pub struct ConfigHelper')",
+                params![file_id],
+            )
+            .unwrap();
+        let id1 = db.conn.last_insert_rowid();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts \
+                 (rowid, name, signature, doc_comment) \
+                 VALUES (?1, 'ConfigHelper', \
+                  'pub struct ConfigHelper', '')",
+                params![id1],
+            )
+            .unwrap();
+
+        // Insert "Config" second (higher rowid)
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'Config', 'struct', 'public', \
+                  1, 8, 'pub struct Config')",
+                params![file_id],
+            )
+            .unwrap();
+        let id2 = db.conn.last_insert_rowid();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts \
+                 (rowid, name, signature, doc_comment) \
+                 VALUES (?1, 'Config', 'pub struct Config', '')",
+                params![id2],
+            )
+            .unwrap();
+
+        let results = db.search_symbols("Config").unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].name, "Config");
+        assert_eq!(results[1].name, "ConfigHelper");
+    }
+
+    #[test]
+    fn test_search_symbols_substring_match() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        // Insert symbol with CamelCase name where "Conf" is a
+        // mid-word substring that FTS5 prefix match cannot find
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'AppConfigLoader', 'struct', 'public', \
+                         1, 10, 'pub struct AppConfigLoader')",
+                params![file_id],
+            )
+            .unwrap();
+        let rowid = db.conn.last_insert_rowid();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts \
+                 (rowid, name, signature, doc_comment) \
+                 VALUES (?1, 'AppConfigLoader', \
+                         'pub struct AppConfigLoader', '')",
+                params![rowid],
+            )
+            .unwrap();
+        // FTS5 prefix "onfig*" won't match "AppConfigLoader"
+        // since the tokenizer treats the whole name as one token.
+        // The LIKE fallback (%onfig%) should catch it.
+        let results = db.search_symbols("onfig").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "AppConfigLoader");
+    }
+
+    #[test]
+    fn test_search_by_attribute() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, attributes) \
+                 VALUES (?1, 'Config', 'struct', 'public', \
+                         1, 5, 'pub struct Config', \
+                         'derive(Debug, Clone, Serialize)')",
+                params![file_id],
+            )
+            .unwrap();
+        let results = db.search_symbols_by_attribute("Serialize").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Config");
     }
 }

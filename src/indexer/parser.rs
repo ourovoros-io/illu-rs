@@ -9,6 +9,10 @@ pub enum SymbolKind {
     Impl,
     Use,
     Mod,
+    Const,
+    Static,
+    TypeAlias,
+    Macro,
 }
 
 impl std::fmt::Display for SymbolKind {
@@ -21,6 +25,10 @@ impl std::fmt::Display for SymbolKind {
             Self::Impl => "impl",
             Self::Use => "use",
             Self::Mod => "mod",
+            Self::Const => "const",
+            Self::Static => "static",
+            Self::TypeAlias => "type_alias",
+            Self::Macro => "macro",
         };
         f.write_str(s)
     }
@@ -37,6 +45,10 @@ impl std::str::FromStr for SymbolKind {
             "impl" => Ok(Self::Impl),
             "use" => Ok(Self::Use),
             "mod" => Ok(Self::Mod),
+            "const" => Ok(Self::Const),
+            "static" => Ok(Self::Static),
+            "type_alias" => Ok(Self::TypeAlias),
+            "macro" => Ok(Self::Macro),
             other => Err(format!("unknown symbol kind: {other}")),
         }
     }
@@ -84,6 +96,7 @@ pub struct Symbol {
     pub doc_comment: Option<String>,
     pub body: Option<String>,
     pub details: Option<String>,
+    pub attributes: Option<String>,
 }
 
 pub fn parse_rust_source(
@@ -139,6 +152,31 @@ fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
     }
     lines.reverse();
     Some(lines.join("\n"))
+}
+
+fn extract_attributes(node: &Node, source: &str) -> Option<String> {
+    let mut attrs = Vec::new();
+    let mut sibling = node.prev_sibling();
+    while let Some(sib) = sibling {
+        match sib.kind() {
+            "attribute_item" => {
+                let text = node_text(&sib, source);
+                let inner = text
+                    .strip_prefix("#[")
+                    .and_then(|s| s.strip_suffix(']'))
+                    .unwrap_or(&text);
+                attrs.push(inner.trim().to_string());
+            }
+            "line_comment" | "block_comment" => {}
+            _ => break,
+        }
+        sibling = sib.prev_sibling();
+    }
+    if attrs.is_empty() {
+        return None;
+    }
+    attrs.reverse();
+    Some(attrs.join(", "))
 }
 
 fn extract_body(node: &Node, source: &str) -> String {
@@ -202,6 +240,7 @@ fn extract_symbols(
                     doc_comment: None,
                     body: Some(extract_body(&child, source)),
                     details: None,
+                    attributes: None,
                 });
                 extract_symbols(&child, source, file_path, symbols, trait_impls);
             }
@@ -218,10 +257,35 @@ fn extract_symbols(
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 });
             }
             "mod_item" => {
                 if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Mod) {
+                    symbols.push(sym);
+                }
+            }
+            "const_item" => {
+                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Const)
+                {
+                    symbols.push(sym);
+                }
+            }
+            "static_item" => {
+                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Static)
+                {
+                    symbols.push(sym);
+                }
+            }
+            "type_item" => {
+                if let Some(sym) =
+                    extract_named_item(&child, source, file_path, SymbolKind::TypeAlias)
+                {
+                    symbols.push(sym);
+                }
+            }
+            "macro_definition" => {
+                if let Some(sym) = extract_macro_def(&child, source, file_path) {
                     symbols.push(sym);
                 }
             }
@@ -250,6 +314,7 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
         details: None,
+        attributes: extract_attributes(node, source),
     })
 }
 
@@ -334,6 +399,27 @@ fn extract_named_item(
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
         details,
+        attributes: extract_attributes(node, source),
+    })
+}
+
+fn extract_macro_def(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
+    let name = find_child_by_kind(node, "identifier")?;
+    let name_text = node_text(&name, source);
+    let sig = get_first_line(node, source);
+
+    Some(Symbol {
+        name: name_text,
+        kind: SymbolKind::Macro,
+        visibility: Visibility::Public,
+        file_path: file_path.to_string(),
+        line_start: node.start_position().row + 1,
+        line_end: node.end_position().row + 1,
+        signature: sig,
+        doc_comment: extract_doc_comment(node, source),
+        body: Some(extract_body(node, source)),
+        details: None,
+        attributes: extract_attributes(node, source),
     })
 }
 
@@ -437,6 +523,37 @@ pub struct TraitImpl {
     pub line_end: usize,
 }
 
+const NOISY_SYMBOL_NAMES: &[&str] = &[
+    "new",
+    "default",
+    "from",
+    "into",
+    "clone",
+    "fmt",
+    "eq",
+    "ne",
+    "partial_cmp",
+    "cmp",
+    "hash",
+    "drop",
+    "deref",
+    "deref_mut",
+    "as_ref",
+    "as_mut",
+    "borrow",
+    "borrow_mut",
+    "to_string",
+    "to_owned",
+    "try_from",
+    "try_into",
+    "build",
+    "init",
+];
+
+fn is_noisy_symbol(name: &str) -> bool {
+    NOISY_SYMBOL_NAMES.contains(&name)
+}
+
 impl std::fmt::Display for RefKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -507,7 +624,10 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
             match child.kind() {
                 "type_identifier" => {
                     let name = node_text(&child, source);
-                    if name != fn_name && known_symbols.contains(&name) && seen.insert(name.clone())
+                    if name != fn_name
+                        && !is_noisy_symbol(&name)
+                        && known_symbols.contains(&name)
+                        && seen.insert(name.clone())
                     {
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
@@ -519,7 +639,10 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
                 }
                 "identifier" => {
                     let name = node_text(&child, source);
-                    if name != fn_name && known_symbols.contains(&name) && seen.insert(name.clone())
+                    if name != fn_name
+                        && !is_noisy_symbol(&name)
+                        && known_symbols.contains(&name)
+                        && seen.insert(name.clone())
                     {
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
@@ -821,6 +944,97 @@ impl Foo {
     }
 
     #[test]
+    fn test_extract_refs_filters_noisy_names() {
+        let source = r"
+pub struct Config {
+    pub port: u16,
+}
+
+impl Config {
+    pub fn new(port: u16) -> Self {
+        Self { port }
+    }
+}
+
+pub fn caller() -> Config {
+    Config::new(8080)
+}
+";
+        let known: std::collections::HashSet<String> = ["Config", "new", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        assert!(
+            refs.iter().any(|r| r.target_name == "Config"),
+            "should find Config as a target"
+        );
+        assert!(
+            !refs.iter().any(|r| r.target_name == "new"),
+            "should NOT find 'new' as a target (noisy symbol)"
+        );
+    }
+
+    #[test]
+    fn test_extract_const() {
+        let source = r"
+/// Maximum retry count.
+pub const MAX_RETRIES: u32 = 3;
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "MAX_RETRIES");
+        assert!(sym.is_some(), "should extract const");
+        let sym = sym.unwrap();
+        assert_eq!(sym.kind, SymbolKind::Const);
+        assert_eq!(sym.visibility, Visibility::Public);
+        assert!(sym.doc_comment.as_deref().unwrap().contains("Maximum"));
+    }
+
+    #[test]
+    fn test_extract_static() {
+        let source = r"
+pub static GLOBAL_COUNT: u64 = 0;
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "GLOBAL_COUNT" && s.kind == SymbolKind::Static)
+        );
+    }
+
+    #[test]
+    fn test_extract_type_alias() {
+        let source = r"
+pub type Result<T> = std::result::Result<T, MyError>;
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Result" && s.kind == SymbolKind::TypeAlias)
+        );
+    }
+
+    #[test]
+    fn test_extract_macro_rules() {
+        let source = r"
+/// Helper macro for creating responses.
+macro_rules! response {
+    ($code:expr, $body:expr) => {
+        Response::new($code, $body)
+    };
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "response" && s.kind == SymbolKind::Macro)
+        );
+    }
+
+    #[test]
     fn test_generic_trait_impl() {
         let source = r#"
 use std::fmt;
@@ -842,5 +1056,47 @@ impl fmt::Display for MyType {
             "trait_name was: {}",
             trait_impls[0].trait_name
         );
+    }
+
+    #[test]
+    fn test_extract_derives() {
+        let source = r"
+#[derive(Debug, Clone, Serialize)]
+pub struct Config {
+    pub port: u16,
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Config").unwrap();
+        let attrs = sym.attributes.as_ref().unwrap();
+        assert!(attrs.contains("derive(Debug, Clone, Serialize)"));
+    }
+
+    #[test]
+    fn test_extract_serde_attribute() {
+        let source = r#"
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Config {
+    pub port: u16,
+}
+"#;
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Config").unwrap();
+        let attrs = sym.attributes.as_ref().unwrap();
+        assert!(attrs.contains("derive(Serialize)"));
+        assert!(attrs.contains("serde(rename_all"));
+    }
+
+    #[test]
+    fn test_no_attributes() {
+        let source = r"
+pub struct Plain {
+    pub x: i32,
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Plain").unwrap();
+        assert!(sym.attributes.is_none());
     }
 }

@@ -42,6 +42,9 @@ fn render_symbol_header(output: &mut String, sym: &StoredSymbol) {
     );
     let _ = writeln!(output, "- **Visibility:** {}", sym.visibility);
     let _ = writeln!(output, "- **Signature:** `{}`", sym.signature);
+    if let Some(attrs) = &sym.attributes {
+        let _ = writeln!(output, "- **Attributes:** {attrs}");
+    }
     let _ = writeln!(output);
 }
 
@@ -175,6 +178,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -210,6 +214,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -241,6 +246,7 @@ mod tests {
                 doc_comment: Some("Application configuration.\nHolds all settings.".into()),
                 body: Some("pub struct Config { pub port: u16 }".into()),
                 details: Some("port: u16".into()),
+                attributes: None,
             }],
         )
         .unwrap();
@@ -273,6 +279,7 @@ mod tests {
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 },
                 Symbol {
                     name: "callee_fn".into(),
@@ -285,6 +292,7 @@ mod tests {
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 },
             ],
         )
@@ -324,6 +332,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();

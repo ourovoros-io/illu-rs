@@ -10,12 +10,17 @@ pub fn handle_overview(db: &Database, path: &str) -> Result<String, Box<dyn std:
 
     let mut output = String::new();
     let mut current_file = "";
+    let mut file_count = 0u32;
+    let mut kind_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
 
     for sym in &symbols {
         if sym.file_path != current_file {
             current_file = &sym.file_path;
+            file_count += 1;
             let _ = writeln!(output, "### {current_file}\n");
         }
+
+        *kind_counts.entry(sym.kind.to_string()).or_default() += 1;
 
         let _ = write!(
             output,
@@ -31,6 +36,17 @@ pub fn handle_overview(db: &Database, path: &str) -> Result<String, Box<dyn std:
 
         let _ = writeln!(output);
     }
+
+    let _ = writeln!(
+        output,
+        "\n---\n**Summary:** {} symbols across {} files",
+        symbols.len(),
+        file_count
+    );
+    let mut kinds: Vec<_> = kind_counts.into_iter().collect();
+    kinds.sort_by(|a, b| b.1.cmp(&a.1));
+    let kind_summary: Vec<String> = kinds.iter().map(|(k, c)| format!("{c} {k}s")).collect();
+    let _ = writeln!(output, "{}", kind_summary.join(", "));
 
     Ok(output)
 }
@@ -61,6 +77,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -78,6 +95,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -108,6 +126,7 @@ mod tests {
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 },
                 Symbol {
                     name: "private_fn".into(),
@@ -120,6 +139,7 @@ mod tests {
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 },
             ],
         )

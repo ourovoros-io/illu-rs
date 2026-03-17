@@ -49,9 +49,9 @@ fn store_symbols_inner(db: &Database, file_id: FileId, symbols: &[Symbol]) -> ru
         "INSERT INTO symbols \
          (file_id, name, kind, visibility, \
           line_start, line_end, signature, \
-          doc_comment, body, details) \
+          doc_comment, body, details, attributes) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
-                 ?8, ?9, ?10)",
+                 ?8, ?9, ?10, ?11)",
     )?;
     let mut fts_stmt = db.conn.prepare(
         "INSERT INTO symbols_fts \
@@ -72,6 +72,7 @@ fn store_symbols_inner(db: &Database, file_id: FileId, symbols: &[Symbol]) -> ru
             sym.doc_comment,
             sym.body,
             sym.details,
+            sym.attributes,
         ])?;
         let rowid = db.conn.last_insert_rowid();
         let doc_for_fts = sym.doc_comment.as_deref().unwrap_or("");
@@ -189,6 +190,7 @@ mod tests {
             doc_comment: None,
             body: None,
             details: None,
+            attributes: None,
         }];
         store_symbols(&db, file_id, &symbols).unwrap();
         let results = db.search_symbols("parse").unwrap();
@@ -235,6 +237,7 @@ mod tests {
             doc_comment: Some("Configuration for the app.".into()),
             body: Some("pub struct Config { pub port: u16 }".into()),
             details: Some("fields: port: u16".into()),
+            attributes: None,
         }];
         store_symbols(&db, file_id, &symbols).unwrap();
 
