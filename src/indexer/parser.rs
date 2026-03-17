@@ -437,6 +437,17 @@ pub struct TraitImpl {
     pub line_end: usize,
 }
 
+const NOISY_SYMBOL_NAMES: &[&str] = &[
+    "new", "default", "from", "into", "clone", "fmt", "eq", "ne",
+    "partial_cmp", "cmp", "hash", "drop", "deref", "deref_mut",
+    "as_ref", "as_mut", "borrow", "borrow_mut", "to_string",
+    "to_owned", "try_from", "try_into", "build", "init",
+];
+
+fn is_noisy_symbol(name: &str) -> bool {
+    NOISY_SYMBOL_NAMES.contains(&name)
+}
+
 impl std::fmt::Display for RefKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -507,7 +518,10 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
             match child.kind() {
                 "type_identifier" => {
                     let name = node_text(&child, source);
-                    if name != fn_name && known_symbols.contains(&name) && seen.insert(name.clone())
+                    if name != fn_name
+                        && !is_noisy_symbol(&name)
+                        && known_symbols.contains(&name)
+                        && seen.insert(name.clone())
                     {
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
@@ -519,7 +533,10 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
                 }
                 "identifier" => {
                     let name = node_text(&child, source);
-                    if name != fn_name && known_symbols.contains(&name) && seen.insert(name.clone())
+                    if name != fn_name
+                        && !is_noisy_symbol(&name)
+                        && known_symbols.contains(&name)
+                        && seen.insert(name.clone())
                     {
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
@@ -818,6 +835,38 @@ impl Foo {
 ";
         let (_, trait_impls) = parse_rust_source(source, "src/lib.rs").unwrap();
         assert!(trait_impls.is_empty());
+    }
+
+    #[test]
+    fn test_extract_refs_filters_noisy_names() {
+        let source = r"
+pub struct Config {
+    pub port: u16,
+}
+
+impl Config {
+    pub fn new(port: u16) -> Self {
+        Self { port }
+    }
+}
+
+pub fn caller() -> Config {
+    Config::new(8080)
+}
+";
+        let known: std::collections::HashSet<String> = ["Config", "new", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        assert!(
+            refs.iter().any(|r| r.target_name == "Config"),
+            "should find Config as a target"
+        );
+        assert!(
+            !refs.iter().any(|r| r.target_name == "new"),
+            "should NOT find 'new' as a target (noisy symbol)"
+        );
     }
 
     #[test]
