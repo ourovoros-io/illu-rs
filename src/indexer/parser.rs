@@ -1099,4 +1099,562 @@ pub struct Plain {
         let sym = symbols.iter().find(|s| s.name == "Plain").unwrap();
         assert!(sym.attributes.is_none());
     }
+
+    // ── 1. Function Signature Fidelity ──
+
+    #[test]
+    fn test_async_function_signature() {
+        let source = r"
+pub async fn fetch(url: &str) -> Result<String> {
+    todo!()
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "fetch").unwrap();
+        assert_eq!(sym.kind, SymbolKind::Function);
+        assert!(
+            sym.signature.contains("async fn fetch"),
+            "signature was: {}",
+            sym.signature
+        );
+    }
+
+    #[test]
+    fn test_generic_function_signature() {
+        let source = r"
+pub fn convert<T: Into<String>>(value: T) -> String {
+    value.into()
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "convert").unwrap();
+        assert!(
+            sym.signature.contains("<T: Into<String>>"),
+            "signature was: {}",
+            sym.signature
+        );
+    }
+
+    #[test]
+    fn test_lifetime_function_signature() {
+        let source = r"
+pub fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() > y.len() { x } else { y }
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "longest").unwrap();
+        assert!(
+            sym.signature.contains("<'a>"),
+            "signature was: {}",
+            sym.signature
+        );
+        assert!(
+            sym.signature.contains("&'a str"),
+            "signature was: {}",
+            sym.signature
+        );
+    }
+
+    #[test]
+    fn test_where_clause_not_in_signature() {
+        let source = r"
+pub fn process<T>(items: Vec<T>) -> String
+where
+    T: std::fmt::Display,
+{
+    String::new()
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "process").unwrap();
+        // signature is first line only, so no `where`
+        assert!(
+            !sym.signature.contains("where"),
+            "signature should not contain where clause: {}",
+            sym.signature
+        );
+        // but body has it
+        let body = sym.body.as_deref().unwrap();
+        assert!(
+            body.contains("where"),
+            "body should contain where clause"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_and_extern_function() {
+        let source = r#"
+pub unsafe fn dangerous(ptr: *mut u8) {}
+extern "C" fn callback(code: i32) {}
+"#;
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+
+        let dangerous = symbols.iter().find(|s| s.name == "dangerous").unwrap();
+        assert!(
+            dangerous.signature.contains("unsafe fn"),
+            "signature was: {}",
+            dangerous.signature
+        );
+        assert_eq!(dangerous.visibility, Visibility::Public);
+
+        let callback = symbols.iter().find(|s| s.name == "callback").unwrap();
+        assert!(
+            callback.signature.contains("extern \"C\" fn"),
+            "signature was: {}",
+            callback.signature
+        );
+        assert_eq!(callback.visibility, Visibility::Private);
+    }
+
+    // ── 2. Generic & Complex Types ──
+
+    #[test]
+    fn test_generic_struct_details() {
+        let source = r"
+pub struct Wrapper<T: Clone> {
+    pub inner: T,
+    pub count: usize,
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "Wrapper" && s.kind == SymbolKind::Struct)
+            .unwrap();
+        assert!(
+            sym.signature.contains("<T: Clone>"),
+            "signature was: {}",
+            sym.signature
+        );
+        let details = sym.details.as_deref().unwrap();
+        assert!(details.contains("pub inner: T"));
+        assert!(details.contains("pub count: usize"));
+    }
+
+    #[test]
+    fn test_const_generic_struct() {
+        let source = r"
+pub struct FixedArray<const N: usize> {
+    pub data: [u8; N],
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "FixedArray" && s.kind == SymbolKind::Struct)
+            .unwrap();
+        assert!(
+            sym.signature.contains("<const N: usize>"),
+            "signature was: {}",
+            sym.signature
+        );
+    }
+
+    #[test]
+    fn test_generic_trait_impl_strips_params() {
+        let source = r"
+pub struct Wrapper<T>(T);
+
+impl<T: Clone> From<Vec<T>> for Wrapper<T> {
+    fn from(v: Vec<T>) -> Self {
+        Self(v.into_iter().next().unwrap())
+    }
+}
+";
+        let (_, trait_impls) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert_eq!(trait_impls.len(), 1);
+        assert_eq!(
+            trait_impls[0].trait_name, "From",
+            "should strip generic params from trait name"
+        );
+        assert_eq!(
+            trait_impls[0].type_name, "Wrapper",
+            "should strip generic params from type name"
+        );
+    }
+
+    #[test]
+    fn test_tuple_struct_no_field_details() {
+        let source = r"
+pub struct Pair(pub u32, pub String);
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "Pair" && s.kind == SymbolKind::Struct)
+            .unwrap();
+        // Tuple structs use ordered_field_declaration_list, not field_declaration_list
+        assert!(
+            sym.details.is_none(),
+            "tuple struct should have no details (uses ordered_field_declaration_list)"
+        );
+    }
+
+    // ── 3. Trait Extraction ──
+
+    #[test]
+    fn test_trait_associated_type_not_in_details() {
+        let source = r"
+pub trait Iterator {
+    type Item;
+    fn next(&mut self) -> Option<Self::Item>;
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "Iterator" && s.kind == SymbolKind::Trait)
+            .unwrap();
+        let details = sym.details.as_deref().unwrap();
+        assert!(
+            details.contains("fn next"),
+            "details should have fn next: {details}"
+        );
+        // extract_trait_details only collects function_signature_item / function_item
+        assert!(
+            !details.contains("type Item"),
+            "details should NOT contain associated type: {details}"
+        );
+    }
+
+    #[test]
+    fn test_trait_default_method_body() {
+        let source = r#"
+pub trait Greeting {
+    fn name(&self) -> &str;
+    fn greet(&self) -> String {
+        format!("Hello, {}!", self.name())
+    }
+}
+"#;
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "Greeting" && s.kind == SymbolKind::Trait)
+            .unwrap();
+        let details = sym.details.as_deref().unwrap();
+        assert!(details.contains("fn name(&self)"));
+        assert!(details.contains("fn greet(&self)"));
+        assert_eq!(details.lines().count(), 2);
+    }
+
+    #[test]
+    fn test_empty_trait_no_details() {
+        let source = r"
+pub trait Marker {}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "Marker" && s.kind == SymbolKind::Trait)
+            .unwrap();
+        assert!(
+            sym.details.is_none(),
+            "empty trait should have no details"
+        );
+    }
+
+    // ── 4. Visibility Edge Cases ──
+
+    #[test]
+    fn test_pub_super_classified_as_public() {
+        let source = r"
+pub(super) fn parent_visible() {}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "parent_visible")
+            .unwrap();
+        // Known limitation: get_visibility checks `text.contains("crate")`,
+        // so `pub(super)` falls through to Visibility::Public
+        assert_eq!(sym.visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_pub_crate_function() {
+        let source = r"
+pub(crate) fn internal_helper() -> i32 { 42 }
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "internal_helper")
+            .unwrap();
+        assert_eq!(sym.visibility, Visibility::PublicCrate);
+        assert!(
+            sym.signature.contains("pub(crate)"),
+            "signature was: {}",
+            sym.signature
+        );
+    }
+
+    // ── 5. Reference Extraction ──
+
+    #[test]
+    fn test_refs_from_impl_method() {
+        let source = r"
+fn helper() -> i32 { 42 }
+
+pub struct Foo;
+
+impl Foo {
+    fn method(&self) -> i32 {
+        helper()
+    }
+}
+";
+        let known: std::collections::HashSet<String> =
+            ["helper", "method", "Foo"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let helper_ref = refs
+            .iter()
+            .find(|r| r.target_name == "helper" && r.source_name == "method");
+        assert!(
+            helper_ref.is_some(),
+            "should find helper call from impl method, refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_refs_inside_closure() {
+        let source = r"
+fn target() -> i32 { 42 }
+
+fn caller() {
+    let f = |x: i32| target() + x;
+}
+";
+        let known: std::collections::HashSet<String> =
+            ["target", "caller"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let target_ref = refs
+            .iter()
+            .find(|r| r.target_name == "target" && r.source_name == "caller");
+        assert!(
+            target_ref.is_some(),
+            "should find target call inside closure, refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_refs_type_in_function_body() {
+        let source = r"
+pub struct Config {
+    pub port: u16,
+}
+
+fn make() -> Config {
+    Config { port: 8080 }
+}
+";
+        let known: std::collections::HashSet<String> =
+            ["Config", "make"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let config_ref = refs
+            .iter()
+            .find(|r| r.target_name == "Config" && r.source_name == "make");
+        assert!(
+            config_ref.is_some(),
+            "should find Config type ref in function body, refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_refs_noisy_filtered_in_chain() {
+        let source = r"
+fn setup() -> String { String::new() }
+
+fn caller() -> String {
+    setup().to_string()
+}
+";
+        let known: std::collections::HashSet<String> =
+            ["setup", "caller", "to_string"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        assert!(
+            refs.iter().any(|r| r.target_name == "setup"),
+            "should find setup ref"
+        );
+        assert!(
+            !refs.iter().any(|r| r.target_name == "to_string"),
+            "to_string should be filtered as noisy"
+        );
+    }
+
+    #[test]
+    fn test_refs_deduplicated() {
+        let source = r"
+fn target() -> i32 { 1 }
+
+fn caller() -> i32 {
+    target() + target() + target()
+}
+";
+        let known: std::collections::HashSet<String> =
+            ["target", "caller"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let target_refs: Vec<_> = refs
+            .iter()
+            .filter(|r| r.target_name == "target")
+            .collect();
+        assert_eq!(
+            target_refs.len(),
+            1,
+            "should deduplicate refs to same target, got: {target_refs:?}"
+        );
+    }
+
+    // ── 6. Edge Cases & Robustness ──
+
+    #[test]
+    fn test_empty_enum_no_details() {
+        let source = r"
+pub enum Never {}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "Never" && s.kind == SymbolKind::Enum)
+            .unwrap();
+        assert!(
+            sym.details.is_none(),
+            "empty enum should have no details"
+        );
+    }
+
+    #[test]
+    fn test_inline_mod_does_not_extract_inner_symbols() {
+        let source = r"
+pub mod outer {
+    pub fn inner_fn() {}
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(
+            symbols.iter().any(|s| s.name == "outer" && s.kind == SymbolKind::Mod),
+            "should extract mod symbol"
+        );
+        // Parser does not recurse into mod_item bodies (only impl_item
+        // and declaration_list are recursed)
+        assert!(
+            !symbols.iter().any(|s| s.name == "inner_fn"),
+            "should NOT extract inner_fn from mod body"
+        );
+    }
+
+    #[test]
+    fn test_pub_use_reexport() {
+        let source = r"
+pub use crate::inner::Symbol;
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.kind == SymbolKind::Use)
+            .unwrap();
+        assert_eq!(sym.visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_multiple_impl_blocks_same_type() {
+        let source = r"
+pub struct Widget {
+    pub width: u32,
+}
+
+impl Widget {
+    pub fn area(&self) -> u32 { self.width * self.width }
+}
+
+impl Widget {
+    pub fn perimeter(&self) -> u32 { self.width * 4 }
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let structs: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Struct)
+            .collect();
+        let impls: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Impl)
+            .collect();
+        let fns: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Function)
+            .collect();
+        assert_eq!(structs.len(), 1, "1 struct");
+        assert_eq!(impls.len(), 2, "2 impl blocks");
+        assert_eq!(fns.len(), 2, "2 methods");
+        assert_eq!(symbols.len(), 5, "5 total symbols");
+    }
+
+    #[test]
+    fn test_complex_attributes() {
+        let source = r"
+#[cfg(test)]
+#[tokio::test]
+#[instrument(skip(self))]
+pub fn instrumented_test() {}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "instrumented_test")
+            .unwrap();
+        let attrs = sym.attributes.as_deref().unwrap();
+        assert!(attrs.contains("cfg(test)"), "attrs: {attrs}");
+        assert!(attrs.contains("tokio::test"), "attrs: {attrs}");
+        assert!(attrs.contains("instrument(skip(self))"), "attrs: {attrs}");
+        // Comma-separated
+        assert_eq!(
+            attrs.matches(", ").count(),
+            2,
+            "should have 3 attrs joined by commas: {attrs}"
+        );
+    }
+
+    #[test]
+    fn test_doc_comment_with_code_block() {
+        let source = r"
+/// Creates a new instance.
+///
+/// # Examples
+///
+/// ```
+/// let x = MyType::new();
+/// assert!(x.is_valid());
+/// ```
+pub fn documented_with_code() {}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols
+            .iter()
+            .find(|s| s.name == "documented_with_code")
+            .unwrap();
+        let doc = sym.doc_comment.as_deref().unwrap();
+        assert!(doc.contains("# Examples"), "doc: {doc}");
+        assert!(doc.contains("```"), "doc should preserve backticks: {doc}");
+        assert!(
+            doc.contains("let x = MyType::new()"),
+            "doc should preserve code content: {doc}"
+        );
+    }
 }

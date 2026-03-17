@@ -77,6 +77,17 @@ pub fn parse_cargo_lock(content: &str) -> Result<Vec<LockedDep>, toml::de::Error
     Ok(result)
 }
 
+/// Extract a repository URL from a Cargo.lock `source` field.
+/// Git sources look like `git+https://github.com/user/repo?branch=main#commit`.
+fn repo_url_from_lock_source(source: Option<&String>) -> Option<String> {
+    let source = source?;
+    let url = source.strip_prefix("git+")?;
+    // Strip fragment (#commit) and query (?branch=...)
+    let url = url.split('#').next()?;
+    let url = url.split('?').next()?;
+    Some(url.to_string())
+}
+
 #[must_use]
 pub fn resolve_dependencies(direct: &[DirectDep], locked: &[LockedDep]) -> Vec<ResolvedDep> {
     let direct_names: HashMap<&str, &DirectDep> =
@@ -93,7 +104,7 @@ pub fn resolve_dependencies(direct: &[DirectDep], locked: &[LockedDep]) -> Vec<R
             name: lock.name.clone(),
             version: lock.version.clone(),
             is_direct,
-            repository_url: None,
+            repository_url: repo_url_from_lock_source(lock.source.as_ref()),
             features,
         });
     }
@@ -174,6 +185,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
                 .unwrap()
                 .is_direct
         );
+    }
+
+    #[test]
+    fn test_git_dep_repo_url_extracted() {
+        let direct = vec![DirectDep {
+            name: "my_sdk".into(),
+            version_req: "*".into(),
+            features: vec![],
+        }];
+        let locked = vec![LockedDep {
+            name: "my_sdk".into(),
+            version: "0.1.0".into(),
+            source: Some(
+                "git+https://github.com/user/my-sdk?branch=main#abc123".into(),
+            ),
+        }];
+        let resolved = resolve_dependencies(&direct, &locked);
+        let dep = resolved.iter().find(|d| d.name == "my_sdk").unwrap();
+        assert_eq!(
+            dep.repository_url.as_deref(),
+            Some("https://github.com/user/my-sdk")
+        );
+    }
+
+    #[test]
+    fn test_registry_dep_no_repo_url() {
+        let direct = vec![];
+        let locked = vec![LockedDep {
+            name: "serde".into(),
+            version: "1.0.210".into(),
+            source: Some(
+                "registry+https://github.com/rust-lang/crates.io-index".into(),
+            ),
+        }];
+        let resolved = resolve_dependencies(&direct, &locked);
+        assert!(resolved[0].repository_url.is_none());
     }
 
     #[test]
