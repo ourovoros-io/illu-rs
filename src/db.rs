@@ -283,6 +283,27 @@ impl Database {
         Ok(paths)
     }
 
+    pub fn get_file_symbol_counts(&self, prefix: &str) -> SqlResult<Vec<FileSymbolCount>> {
+        let pattern = format!("{prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT f.path, COUNT(s.id) \
+             FROM files f \
+             LEFT JOIN symbols s ON s.file_id = f.id AND s.visibility = 'public' \
+             WHERE f.path LIKE ?1 \
+             GROUP BY f.path \
+             ORDER BY f.path",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(FileSymbolCount {
+                path: row.get(0)?,
+                count: row.get(1)?,
+            });
+        }
+        Ok(results)
+    }
+
     /// Get all distinct symbol names (for ref extraction matching).
     pub fn get_all_symbol_names(&self) -> SqlResult<std::collections::HashSet<String>> {
         let mut stmt = self
@@ -506,20 +527,23 @@ impl Database {
 
     pub fn impact_dependents(&self, symbol_name: &str) -> SqlResult<Vec<ImpactEntry>> {
         let mut stmt = self.conn.prepare(
-            "WITH RECURSIVE deps(id, name, file_path, depth) AS (
-                SELECT s.id, s.name, f.path, 0
+            "WITH RECURSIVE deps(id, name, file_path, depth, via) AS (
+                SELECT s.id, s.name, f.path, 0, ''
                 FROM symbols s
                 JOIN files f ON f.id = s.file_id
                 WHERE s.name = ?1
               UNION
-                SELECT s2.id, s2.name, f2.path, deps.depth + 1
+                SELECT s2.id, s2.name, f2.path, deps.depth + 1,
+                       CASE WHEN deps.via = '' THEN deps.name
+                            ELSE deps.via || ' -> ' || deps.name
+                       END
                 FROM deps
                 JOIN symbol_refs sr ON sr.target_symbol_id = deps.id
                 JOIN symbols s2 ON s2.id = sr.source_symbol_id
                 JOIN files f2 ON f2.id = s2.file_id
                 WHERE deps.depth < 5
             )
-            SELECT DISTINCT name, file_path, depth FROM deps
+            SELECT DISTINCT name, file_path, depth, via FROM deps
             WHERE depth > 0
             ORDER BY depth, name",
         )?;
@@ -530,6 +554,7 @@ impl Database {
                 name: row.get(0)?,
                 file_path: row.get(1)?,
                 depth: row.get(2)?,
+                via: row.get(3)?,
             });
         }
         Ok(results)
@@ -725,10 +750,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn search_symbols_by_attribute(
-        &self,
-        attr: &str,
-    ) -> SqlResult<Vec<StoredSymbol>> {
+    pub fn search_symbols_by_attribute(&self, attr: &str) -> SqlResult<Vec<StoredSymbol>> {
         let pattern = format!("%{attr}%");
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
@@ -800,6 +822,12 @@ impl Database {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct FileSymbolCount {
+    pub path: String,
+    pub count: i64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct FileRecord {
     pub path: String,
     pub content_hash: String,
@@ -811,6 +839,7 @@ pub struct ImpactEntry {
     pub name: String,
     pub file_path: String,
     pub depth: i64,
+    pub via: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]

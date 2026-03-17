@@ -38,7 +38,15 @@ pub fn handle_impact(
             current_depth = dep.depth;
             let _ = writeln!(output, "### Depth {}\n", dep.depth);
         }
-        let _ = writeln!(output, "- **{}** ({})", dep.name, dep.file_path);
+        if dep.via.is_empty() {
+            let _ = writeln!(output, "- **{}** ({})", dep.name, dep.file_path);
+        } else {
+            let _ = writeln!(
+                output,
+                "- **{}** ({}) — via {}",
+                dep.name, dep.file_path, dep.via
+            );
+        }
     }
 
     if dependents.is_empty() {
@@ -142,6 +150,72 @@ mod tests {
 
         let result = handle_impact(&db, "base_fn").unwrap();
         assert!(result.contains("caller_fn"));
+    }
+
+    #[test]
+    fn test_impact_shows_chain() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "base_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn base_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                },
+                Symbol {
+                    name: "mid_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 10,
+                    signature: "pub fn mid_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                },
+                Symbol {
+                    name: "top_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 15,
+                    signature: "pub fn top_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let base_id = db.get_symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
+        let mid_id = db.get_symbol_id("mid_fn", "src/lib.rs").unwrap().unwrap();
+        let top_id = db.get_symbol_id("top_fn", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(mid_id, base_id, "call").unwrap();
+        db.insert_symbol_ref(top_id, mid_id, "call").unwrap();
+
+        let result = handle_impact(&db, "base_fn").unwrap();
+        assert!(result.contains("mid_fn"), "should show direct dependent");
+        assert!(
+            result.contains("top_fn"),
+            "should show transitive dependent"
+        );
+        assert!(result.contains("via"), "should show dependency chain");
     }
 
     #[test]
