@@ -60,6 +60,8 @@ enum Command {
         #[arg(default_value = "src/")]
         path: String,
     },
+    /// Set up illu in a Rust repo (writes .mcp.json, CLAUDE.md, builds index)
+    Init,
 }
 
 fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -188,6 +190,60 @@ fn print_result(result: &str) {
     println!("{result}");
 }
 
+#[expect(clippy::print_stdout, reason = "CLI output")]
+fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let repo_path = repo_path.canonicalize()?;
+
+    // Verify it's a Rust project
+    let cargo_toml = repo_path.join("Cargo.toml");
+    if !cargo_toml.exists() {
+        return Err(format!(
+            "No Cargo.toml found in {}",
+            repo_path.display()
+        ).into());
+    }
+
+    println!("Setting up illu in {}", repo_path.display());
+
+    // 1. Write .mcp.json
+    write_mcp_config(&repo_path)?;
+    println!("  wrote .mcp.json");
+
+    // 2. Update CLAUDE.md
+    write_claude_md_section(&repo_path)?;
+    println!("  updated CLAUDE.md");
+
+    // 3. Build initial index
+    println!("  indexing...");
+    ensure_indexed(&repo_path)?;
+    println!("  index built");
+
+    // 4. Add .illu/ to .gitignore if not already there
+    if ensure_gitignore(&repo_path)? {
+        println!("  added .illu/ to .gitignore");
+    }
+
+    println!("\nDone. Start Claude Code in this repo and illu will run automatically.");
+    Ok(())
+}
+
+fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    let gitignore_path = repo_path.join(".gitignore");
+    let content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
+
+    if content.lines().any(|l| l.trim() == ".illu/" || l.trim() == ".illu") {
+        return Ok(false);
+    }
+
+    let mut new_content = content;
+    if !new_content.is_empty() && !new_content.ends_with('\n') {
+        new_content.push('\n');
+    }
+    new_content.push_str(".illu/\n");
+    std::fs::write(&gitignore_path, new_content)?;
+    Ok(true)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -200,8 +256,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         None | Some(Command::Serve) => {
+            tracing::info!(repo = %repo_path.display(), "Starting illu server");
             let db_dir = repo_path.join(".illu");
             std::fs::create_dir_all(&db_dir)?;
+            illu_rs::status::init(repo_path);
+            illu_rs::status::set("starting");
             write_mcp_config(repo_path)?;
             write_claude_md_section(repo_path)?;
 
@@ -210,22 +269,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let db_path = db_dir.join("index.db");
+            tracing::debug!(path = %db_path.display(), "Opening database");
             let db = Database::open(&db_path)?;
 
-            // If already indexed, fetch any missing docs (fast, cached)
-            // If not indexed, skip — first tool call will trigger full index
-            let has_index = db
-                .get_all_file_paths()
-                .map(|f| !f.is_empty())
-                .unwrap_or(false);
-            if has_index {
-                illu_rs::indexer::docs::fetch_dependency_docs(&db).await?;
+            // Index eagerly at startup so tools are ready immediately
+            illu_rs::status::set("indexing");
+            let refreshed = illu_rs::indexer::refresh_index(&db, &config)?;
+            if refreshed > 0 {
+                tracing::info!(count = refreshed, "Refreshed changed files");
+            }
+
+            // Fetch docs eagerly so they're available on first tool call
+            let pending = illu_rs::indexer::docs::pending_docs(&db)?;
+            if !pending.is_empty() {
+                let total = pending.len();
+                tracing::info!(count = total, "Fetching dependency docs");
+                illu_rs::status::set(&format!("fetching docs ▸ 0/{total}"));
+                let fetched = illu_rs::indexer::docs::fetch_docs(&pending).await;
+                if !fetched.is_empty() {
+                    let stored = illu_rs::indexer::docs::store_fetched_docs(
+                        &db, &fetched,
+                    )?;
+                    tracing::info!(count = stored, "Stored dependency docs");
+                }
             }
 
             let server = IlluServer::new(db, config);
             let transport = stdio();
+            tracing::info!("MCP transport ready, starting handshake");
+            illu_rs::status::set(illu_rs::status::READY);
             let service = server.serve(transport).await?;
+            tracing::info!("MCP server initialized, waiting for requests");
             service.waiting().await?;
+            tracing::info!("MCP server shut down");
+            illu_rs::status::clear();
         }
         Some(Command::Query {
             search,
@@ -255,6 +332,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let db = open_or_index(repo_path)?;
             let result = handle_tree(&db, &path)?;
             print_result(&result);
+        }
+        Some(Command::Init) => {
+            init_repo(repo_path)?;
         }
     }
 

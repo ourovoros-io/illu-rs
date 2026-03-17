@@ -15,10 +15,16 @@ pub fn handle_docs(
             .collect();
 
         if filtered.is_empty() {
-            return Ok(format!(
-                "No documentation found for '{dep_name}' \
-                 matching topic '{topic}'."
-            ));
+            let dep = db.get_dependency_by_name(dep_name)?;
+            return match dep {
+                Some(_) => Ok(format!(
+                    "'{dep_name}' is a known dependency but no docs match \
+                     topic '{topic}'. It may not be published on docs.rs."
+                )),
+                None => Ok(format!(
+                    "'{dep_name}' is not a known dependency of this project."
+                )),
+            };
         }
 
         let mut output = String::new();
@@ -36,7 +42,16 @@ pub fn handle_docs(
     // No topic — return all docs for this dependency
     let docs = db.get_docs_for_dependency(dep_name)?;
     if docs.is_empty() {
-        return Ok(format!("No documentation found for '{dep_name}'."));
+        let dep = db.get_dependency_by_name(dep_name)?;
+        return match dep {
+            Some(_) => Ok(format!(
+                "'{dep_name}' is a known dependency but no docs were \
+                 fetched. It may not be published on docs.rs."
+            )),
+            None => Ok(format!(
+                "'{dep_name}' is not a known dependency of this project."
+            )),
+        };
     }
 
     let mut output = String::new();
@@ -88,10 +103,20 @@ mod tests {
     }
 
     #[test]
-    fn test_docs_not_found() {
+    fn test_docs_unknown_dependency() {
         let db = Database::open_in_memory().unwrap();
         let result = handle_docs(&db, "nonexistent", None).unwrap();
-        assert!(result.contains("No documentation found"));
+        assert!(result.contains("not a known dependency"));
+    }
+
+    #[test]
+    fn test_docs_known_but_no_docs() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_dependency("obscure_crate", "0.1.0", true, None)
+            .unwrap();
+        let result = handle_docs(&db, "obscure_crate", None).unwrap();
+        assert!(result.contains("known dependency"));
+        assert!(result.contains("no docs were fetched"));
     }
 
     #[test]
@@ -101,6 +126,6 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "Serde framework").unwrap();
 
         let result = handle_docs(&db, "serde", Some("graphql")).unwrap();
-        assert!(result.contains("No documentation found"));
+        assert!(result.contains("no docs match topic"));
     }
 }

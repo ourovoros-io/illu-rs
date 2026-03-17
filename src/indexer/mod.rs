@@ -19,14 +19,30 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std
     let ws_info = workspace::parse_workspace_toml(&cargo_toml)?;
 
     if ws_info.is_workspace {
+        tracing::info!(
+            members = ws_info.members.len(),
+            "Phase 1/4: indexing workspace"
+        );
+        crate::status::set("indexing ▸ parsing workspace");
         index_workspace(db, config, &ws_info)?;
     } else {
+        tracing::info!("Phase 1/4: indexing single crate");
+        crate::status::set("indexing ▸ parsing crate");
         index_single_crate(db, config, &cargo_toml)?;
     }
 
+    tracing::info!("Phase 2/4: extracting symbol references");
+    crate::status::set("indexing ▸ extracting refs");
     extract_all_symbol_refs(db, config)?;
+    tracing::info!("Phase 3/4: generating skill file");
+    crate::status::set("indexing ▸ writing skill file");
     generate_skill_file(db, config)?;
+    tracing::info!("Phase 4/4: updating metadata");
     update_metadata(db, config)?;
+
+    let file_count = db.file_count()?;
+    tracing::info!(files = file_count, "Indexing complete");
+    crate::status::set(crate::status::READY);
 
     Ok(())
 }
@@ -104,9 +120,11 @@ pub fn refresh_index(
     }
 
     let count = dirty_files.len();
-    tracing::info!("{count} file(s) changed, re-indexing");
+    tracing::info!(files = count, "Re-indexing changed files");
+    crate::status::set(&format!("refreshing ▸ {count} files"));
 
-    for (relative, source, hash, crate_id) in &dirty_files {
+    for (i, (relative, source, hash, crate_id)) in dirty_files.iter().enumerate() {
+        tracing::debug!("[{}/{}] Re-indexing {relative}", i + 1, count);
         db.delete_file_data(relative)?;
         let file_id = if let Some(cid) = crate_id {
             db.insert_file_with_crate(relative, hash, *cid)?
@@ -122,11 +140,13 @@ pub fn refresh_index(
     // Rebuild refs for dirty files (need full symbol set)
     let known_symbols = db.get_all_symbol_names()?;
     if !known_symbols.is_empty() {
+        db.begin_transaction()?;
         for (relative, source, _, _) in &dirty_files {
             let refs = parser::extract_refs(source, relative, &known_symbols)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             db.store_symbol_refs(&refs)?;
         }
+        db.commit()?;
     }
 
     Ok(count)
@@ -166,13 +186,24 @@ fn index_workspace(
     // Collect path deps per crate to record after all crates are registered
     let mut path_deps_by_crate: Vec<(String, Vec<String>)> = Vec::new();
 
-    for member in &ws_info.members {
+    let total_members = ws_info.members.len();
+    for (i, member) in ws_info.members.iter().enumerate() {
         let member_dir = config.repo_path.join(member);
         let member_toml_path = member_dir.join("Cargo.toml");
         let Ok(member_toml) = std::fs::read_to_string(&member_toml_path) else {
             tracing::warn!("Skipping member {member}: no Cargo.toml");
             continue;
         };
+        tracing::info!(
+            "[{}/{}] Indexing crate: {member}",
+            i + 1,
+            total_members
+        );
+        crate::status::set(&format!(
+            "indexing ▸ crate [{}/{}] {member}",
+            i + 1,
+            total_members
+        ));
 
         let pkg_name = extract_package_name(&member_toml).unwrap_or_else(|| member.clone());
         let crate_id = db.insert_crate(&pkg_name, member)?;
@@ -226,30 +257,38 @@ fn index_crate_sources(
     src_dir: &std::path::Path,
     crate_id: crate::db::CrateId,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for result in walkdir::WalkDir::new(src_dir) {
-        let entry = match result {
-            Ok(e) => e,
+    // Collect files first so we can report progress
+    let rs_files: Vec<_> = walkdir::WalkDir::new(src_dir)
+        .into_iter()
+        .filter_map(|r| match r {
+            Ok(e) if e.path().extension().is_some_and(|ext| ext == "rs") => {
+                Some(e.into_path())
+            }
             Err(e) => {
                 tracing::warn!("Skipping directory entry: {e}");
-                continue;
+                None
             }
-        };
-        let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "rs") {
-            let source = std::fs::read_to_string(path)?;
-            let relative = path
-                .strip_prefix(&config.repo_path)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .to_string();
-            let hash = content_hash(&source);
-            let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
-            let (symbols, trait_impls) = parser::parse_rust_source(&source, &relative)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-            store::store_symbols(db, file_id, &symbols)?;
-            store::store_trait_impls(db, file_id, &trait_impls)?;
-        }
+            _ => None,
+        })
+        .collect();
+
+    let total = rs_files.len();
+    for (i, path) in rs_files.iter().enumerate() {
+        let source = std::fs::read_to_string(path)?;
+        let relative = path
+            .strip_prefix(&config.repo_path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        tracing::debug!("[{}/{}] Parsing {relative}", i + 1, total);
+        let hash = content_hash(&source);
+        let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
+        let (symbols, trait_impls) = parser::parse_rust_source(&source, &relative)
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        store::store_symbols(db, file_id, &symbols)?;
+        store::store_trait_impls(db, file_id, &trait_impls)?;
     }
+    tracing::info!(files = total, "Parsed source files");
     Ok(())
 }
 
@@ -259,13 +298,29 @@ fn extract_all_symbol_refs(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let known_symbols = db.get_all_symbol_names()?;
     if known_symbols.is_empty() {
+        tracing::info!("No symbols found, skipping ref extraction");
         return Ok(());
     }
 
     let files = db.get_all_file_paths()?;
+    let total = files.len();
+    tracing::info!(
+        files = total,
+        symbols = known_symbols.len(),
+        "Extracting symbol references"
+    );
     let mut ref_count: u64 = 0;
 
-    for relative in &files {
+    db.begin_transaction()?;
+    for (i, relative) in files.iter().enumerate() {
+        if total > 20 && (i + 1) % 20 == 0 {
+            tracing::info!("[{}/{}] Extracting refs...", i + 1, total);
+            crate::status::set(&format!(
+                "indexing ▸ refs [{}/{}]",
+                i + 1,
+                total
+            ));
+        }
         let full_path = config.repo_path.join(relative);
         let source = match std::fs::read_to_string(&full_path) {
             Ok(s) => s,
@@ -278,8 +333,9 @@ fn extract_all_symbol_refs(
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         ref_count += db.store_symbol_refs(&refs)?;
     }
+    db.commit()?;
 
-    tracing::info!("Stored {ref_count} symbol references");
+    tracing::info!(refs = ref_count, "Symbol reference extraction complete");
     Ok(())
 }
 

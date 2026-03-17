@@ -95,6 +95,14 @@ impl Database {
 
     pub fn open(path: &std::path::Path) -> SqlResult<Self> {
         let conn = Connection::open(path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -8000;
+             PRAGMA mmap_size = 67108864;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA foreign_keys = ON;",
+        )?;
         let db = Self { conn };
         db.migrate()?;
         Ok(db)
@@ -186,10 +194,22 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS idx_symbols_name
                 ON symbols(name);
+            CREATE INDEX IF NOT EXISTS idx_symbols_file_id
+                ON symbols(file_id);
             CREATE INDEX IF NOT EXISTS idx_symbol_refs_target
                 ON symbol_refs(target_symbol_id);
             CREATE INDEX IF NOT EXISTS idx_symbol_refs_source
-                ON symbol_refs(source_symbol_id);",
+                ON symbol_refs(source_symbol_id);
+            CREATE INDEX IF NOT EXISTS idx_trait_impls_type
+                ON trait_impls(type_name);
+            CREATE INDEX IF NOT EXISTS idx_trait_impls_trait
+                ON trait_impls(trait_name);
+            CREATE INDEX IF NOT EXISTS idx_trait_impls_file_id
+                ON trait_impls(file_id);
+            CREATE INDEX IF NOT EXISTS idx_deps_name
+                ON dependencies(name);
+            CREATE INDEX IF NOT EXISTS idx_docs_dep_id
+                ON docs(dependency_id);",
         )?;
         self.migrate_fts_schema()
     }
@@ -490,33 +510,37 @@ impl Database {
     }
 
     pub fn delete_file_data(&self, path: &str) -> SqlResult<()> {
+        let file_id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM files WHERE path = ?1",
+                params![path],
+                |row| row.get(0),
+            )
+            .ok();
+        let Some(fid) = file_id else {
+            return Ok(());
+        };
         self.conn.execute(
-            "DELETE FROM trait_impls WHERE file_id = \
-             (SELECT id FROM files WHERE path = ?1)",
-            params![path],
+            "DELETE FROM trait_impls WHERE file_id = ?1",
+            params![fid],
         )?;
         self.conn.execute(
             "DELETE FROM symbol_refs WHERE source_symbol_id IN \
-             (SELECT id FROM symbols WHERE file_id = \
-              (SELECT id FROM files WHERE path = ?1)) \
+             (SELECT id FROM symbols WHERE file_id = ?1) \
              OR target_symbol_id IN \
-             (SELECT id FROM symbols WHERE file_id = \
-              (SELECT id FROM files WHERE path = ?1))",
-            params![path],
+             (SELECT id FROM symbols WHERE file_id = ?1)",
+            params![fid],
         )?;
         self.conn.execute(
             "DELETE FROM symbols_fts WHERE rowid IN \
-             (SELECT id FROM symbols WHERE file_id = \
-              (SELECT id FROM files WHERE path = ?1))",
-            params![path],
-        )?;
-        self.conn.execute(
-            "DELETE FROM symbols WHERE file_id = \
-             (SELECT id FROM files WHERE path = ?1)",
-            params![path],
+             (SELECT id FROM symbols WHERE file_id = ?1)",
+            params![fid],
         )?;
         self.conn
-            .execute("DELETE FROM files WHERE path = ?1", params![path])?;
+            .execute("DELETE FROM symbols WHERE file_id = ?1", params![fid])?;
+        self.conn
+            .execute("DELETE FROM files WHERE id = ?1", params![fid])?;
         Ok(())
     }
 
@@ -806,7 +830,18 @@ impl Database {
         Ok(results)
     }
 
+    /// Begin an explicit transaction. Caller must call `commit()`
+    /// on the returned guard, or it rolls back on drop.
+    pub fn begin_transaction(&self) -> SqlResult<()> {
+        self.conn.execute_batch("BEGIN")
+    }
+
+    pub fn commit(&self) -> SqlResult<()> {
+        self.conn.execute_batch("COMMIT")
+    }
+
     /// Insert symbol references from parsed refs, looking up IDs by name.
+    /// Caller should wrap in a transaction for performance.
     pub fn store_symbol_refs(&self, refs: &[crate::indexer::parser::SymbolRef]) -> SqlResult<u64> {
         let mut count = 0;
         for r in refs {
