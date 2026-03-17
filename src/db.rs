@@ -610,6 +610,9 @@ impl Database {
     }
 
     pub fn search_symbols(&self, query: &str) -> SqlResult<Vec<StoredSymbol>> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
         let fts_query = format!("{query}*");
         let like_pattern = format!("%{query}%");
         let mut stmt = self.conn.prepare(
@@ -696,6 +699,9 @@ impl Database {
     }
 
     pub fn search_docs(&self, query: &str) -> SqlResult<Vec<DocResult>> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
         let fts_query = format!("{query}*");
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version \
