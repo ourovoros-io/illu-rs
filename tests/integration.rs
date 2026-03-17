@@ -164,7 +164,7 @@ fn test_docs_tool_with_topic() {
 fn test_docs_tool_unknown_dependency() {
     let (_dir, db) = setup_indexed_db();
     let result = docs::handle_docs(&db, "unknown_crate", None).unwrap();
-    assert!(result.contains("No documentation found"));
+    assert!(result.contains("not a known dependency"));
 }
 
 #[test]
