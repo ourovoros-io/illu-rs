@@ -120,6 +120,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -158,6 +159,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -184,6 +186,7 @@ mod tests {
                 doc_comment: Some("Parse configuration from file.\nSupports TOML and JSON.".into()),
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();

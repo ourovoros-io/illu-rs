@@ -84,6 +84,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -112,6 +113,7 @@ mod tests {
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 },
                 Symbol {
                     name: "caller_fn".into(),
@@ -124,6 +126,7 @@ mod tests {
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 },
             ],
         )
@@ -170,6 +173,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -188,6 +192,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();

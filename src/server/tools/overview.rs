@@ -61,6 +61,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -78,6 +79,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
+                attributes: None,
             }],
         )
         .unwrap();
@@ -108,6 +110,7 @@ mod tests {
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 },
                 Symbol {
                     name: "private_fn".into(),
@@ -120,6 +123,7 @@ mod tests {
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 },
             ],
         )

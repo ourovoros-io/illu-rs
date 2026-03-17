@@ -50,6 +50,7 @@ fn row_to_stored_symbol(row: &rusqlite::Row) -> SqlResult<StoredSymbol> {
         doc_comment: row.get(7)?,
         body: row.get(8)?,
         details: row.get(9)?,
+        attributes: row.get(10)?,
     })
 }
 
@@ -124,7 +125,8 @@ impl Database {
                 signature TEXT NOT NULL,
                 doc_comment TEXT,
                 body TEXT,
-                details TEXT
+                details TEXT,
+                attributes TEXT
             );
 
             CREATE TABLE IF NOT EXISTS trait_impls (
@@ -580,7 +582,7 @@ impl Database {
             ) \
             SELECT s.name, s.kind, s.visibility, f.path, \
                    s.line_start, s.line_end, s.signature, \
-                   s.doc_comment, s.body, s.details \
+                   s.doc_comment, s.body, s.details, s.attributes \
             FROM combined c \
             JOIN symbols s ON s.id = c.sid \
             JOIN files f ON f.id = s.file_id \
@@ -708,12 +710,34 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
-                    s.doc_comment, s.body, s.details \
+                    s.doc_comment, s.body, s.details, s.attributes \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
              WHERE f.path LIKE ?1 \
                AND s.visibility IN ('public', 'pub(crate)') \
              ORDER BY f.path, s.line_start",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
+    pub fn search_symbols_by_attribute(
+        &self,
+        attr: &str,
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        let pattern = format!("%{attr}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.attributes LIKE ?1 \
+             ORDER BY s.name",
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern])?;
@@ -825,6 +849,7 @@ pub struct StoredSymbol {
     pub doc_comment: Option<String>,
     pub body: Option<String>,
     pub details: Option<String>,
+    pub attributes: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1404,5 +1429,25 @@ mod tests {
         let results = db.search_symbols("onfig").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "AppConfigLoader");
+    }
+
+    #[test]
+    fn test_search_by_attribute() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, attributes) \
+                 VALUES (?1, 'Config', 'struct', 'public', \
+                         1, 5, 'pub struct Config', \
+                         'derive(Debug, Clone, Serialize)')",
+                params![file_id],
+            )
+            .unwrap();
+        let results = db.search_symbols_by_attribute("Serialize").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Config");
     }
 }

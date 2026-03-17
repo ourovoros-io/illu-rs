@@ -96,6 +96,7 @@ pub struct Symbol {
     pub doc_comment: Option<String>,
     pub body: Option<String>,
     pub details: Option<String>,
+    pub attributes: Option<String>,
 }
 
 pub fn parse_rust_source(
@@ -151,6 +152,31 @@ fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
     }
     lines.reverse();
     Some(lines.join("\n"))
+}
+
+fn extract_attributes(node: &Node, source: &str) -> Option<String> {
+    let mut attrs = Vec::new();
+    let mut sibling = node.prev_sibling();
+    while let Some(sib) = sibling {
+        match sib.kind() {
+            "attribute_item" => {
+                let text = node_text(&sib, source);
+                let inner = text
+                    .strip_prefix("#[")
+                    .and_then(|s| s.strip_suffix(']'))
+                    .unwrap_or(&text);
+                attrs.push(inner.trim().to_string());
+            }
+            "line_comment" | "block_comment" => {}
+            _ => break,
+        }
+        sibling = sib.prev_sibling();
+    }
+    if attrs.is_empty() {
+        return None;
+    }
+    attrs.reverse();
+    Some(attrs.join(", "))
 }
 
 fn extract_body(node: &Node, source: &str) -> String {
@@ -214,6 +240,7 @@ fn extract_symbols(
                     doc_comment: None,
                     body: Some(extract_body(&child, source)),
                     details: None,
+                    attributes: None,
                 });
                 extract_symbols(&child, source, file_path, symbols, trait_impls);
             }
@@ -230,6 +257,7 @@ fn extract_symbols(
                     doc_comment: None,
                     body: None,
                     details: None,
+                    attributes: None,
                 });
             }
             "mod_item" => {
@@ -288,6 +316,7 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
         details: None,
+        attributes: extract_attributes(node, source),
     })
 }
 
@@ -372,6 +401,7 @@ fn extract_named_item(
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
         details,
+        attributes: extract_attributes(node, source),
     })
 }
 
@@ -391,6 +421,7 @@ fn extract_macro_def(node: &Node, source: &str, file_path: &str) -> Option<Symbo
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
         details: None,
+        attributes: extract_attributes(node, source),
     })
 }
 
@@ -1007,5 +1038,47 @@ impl fmt::Display for MyType {
             "trait_name was: {}",
             trait_impls[0].trait_name
         );
+    }
+
+    #[test]
+    fn test_extract_derives() {
+        let source = r"
+#[derive(Debug, Clone, Serialize)]
+pub struct Config {
+    pub port: u16,
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Config").unwrap();
+        let attrs = sym.attributes.as_ref().unwrap();
+        assert!(attrs.contains("derive(Debug, Clone, Serialize)"));
+    }
+
+    #[test]
+    fn test_extract_serde_attribute() {
+        let source = r#"
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Config {
+    pub port: u16,
+}
+"#;
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Config").unwrap();
+        let attrs = sym.attributes.as_ref().unwrap();
+        assert!(attrs.contains("derive(Serialize)"));
+        assert!(attrs.contains("serde(rename_all"));
+    }
+
+    #[test]
+    fn test_no_attributes() {
+        let source = r"
+pub struct Plain {
+    pub x: i32,
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "Plain").unwrap();
+        assert!(sym.attributes.is_none());
     }
 }
