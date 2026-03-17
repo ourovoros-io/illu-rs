@@ -567,10 +567,12 @@ impl Database {
              FROM symbols_fts fts \
              JOIN symbols s ON s.id = fts.rowid \
              JOIN files f ON f.id = s.file_id \
-             WHERE symbols_fts MATCH ?1",
+             WHERE symbols_fts MATCH ?1 \
+             ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
+                      s.name",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![fts_query])?;
+        let mut rows = stmt.query(params![fts_query, query])?;
         while let Some(row) = rows.next()? {
             results.push(row_to_stored_symbol(row)?);
         }
@@ -1297,5 +1299,94 @@ mod tests {
         assert!(callees.is_empty());
         // Verify: second file still intact
         assert!(db.get_file_hash("src/main.rs").unwrap().is_some());
+    }
+
+    #[test]
+    fn test_search_symbols_exact_match_first() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        // Insert "ConfigHelper" first so without exact-match priority
+        // it would sort before "Config" alphabetically or by rowid
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'ConfigHelper', 'struct', 'public', \
+                  10, 20, 'pub struct ConfigHelper')",
+                params![file_id],
+            )
+            .unwrap();
+        let id1 = db.conn.last_insert_rowid();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts \
+                 (rowid, name, signature, doc_comment) \
+                 VALUES (?1, 'ConfigHelper', \
+                  'pub struct ConfigHelper', '')",
+                params![id1],
+            )
+            .unwrap();
+
+        // Insert "Config" second (higher rowid)
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'Config', 'struct', 'public', \
+                  1, 8, 'pub struct Config')",
+                params![file_id],
+            )
+            .unwrap();
+        let id2 = db.conn.last_insert_rowid();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts \
+                 (rowid, name, signature, doc_comment) \
+                 VALUES (?1, 'Config', 'pub struct Config', '')",
+                params![id2],
+            )
+            .unwrap();
+
+        let results = db.search_symbols("Config").unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].name, "Config");
+        assert_eq!(results[1].name, "ConfigHelper");
+    }
+
+    #[test]
+    fn test_search_symbols_substring_match() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        // Insert symbol with CamelCase name where "Conf" is a
+        // mid-word substring that FTS5 prefix match cannot find
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'AppConfigLoader', 'struct', 'public', \
+                         1, 10, 'pub struct AppConfigLoader')",
+                params![file_id],
+            )
+            .unwrap();
+        let rowid = db.conn.last_insert_rowid();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts \
+                 (rowid, name, signature, doc_comment) \
+                 VALUES (?1, 'AppConfigLoader', \
+                         'pub struct AppConfigLoader', '')",
+                params![rowid],
+            )
+            .unwrap();
+        // FTS5 prefix "onfig*" won't match "AppConfigLoader"
+        // since the tokenizer treats the whole name as one token.
+        // The LIKE fallback (%onfig%) should catch it.
+        let results = db.search_symbols("onfig").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "AppConfigLoader");
     }
 }
