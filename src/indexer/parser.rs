@@ -9,6 +9,10 @@ pub enum SymbolKind {
     Impl,
     Use,
     Mod,
+    Const,
+    Static,
+    TypeAlias,
+    Macro,
 }
 
 impl std::fmt::Display for SymbolKind {
@@ -21,6 +25,10 @@ impl std::fmt::Display for SymbolKind {
             Self::Impl => "impl",
             Self::Use => "use",
             Self::Mod => "mod",
+            Self::Const => "const",
+            Self::Static => "static",
+            Self::TypeAlias => "type_alias",
+            Self::Macro => "macro",
         };
         f.write_str(s)
     }
@@ -37,6 +45,10 @@ impl std::str::FromStr for SymbolKind {
             "impl" => Ok(Self::Impl),
             "use" => Ok(Self::Use),
             "mod" => Ok(Self::Mod),
+            "const" => Ok(Self::Const),
+            "static" => Ok(Self::Static),
+            "type_alias" => Ok(Self::TypeAlias),
+            "macro" => Ok(Self::Macro),
             other => Err(format!("unknown symbol kind: {other}")),
         }
     }
@@ -225,6 +237,32 @@ fn extract_symbols(
                     symbols.push(sym);
                 }
             }
+            "const_item" => {
+                if let Some(sym) =
+                    extract_named_item(&child, source, file_path, SymbolKind::Const)
+                {
+                    symbols.push(sym);
+                }
+            }
+            "static_item" => {
+                if let Some(sym) =
+                    extract_named_item(&child, source, file_path, SymbolKind::Static)
+                {
+                    symbols.push(sym);
+                }
+            }
+            "type_item" => {
+                if let Some(sym) =
+                    extract_named_item(&child, source, file_path, SymbolKind::TypeAlias)
+                {
+                    symbols.push(sym);
+                }
+            }
+            "macro_definition" => {
+                if let Some(sym) = extract_macro_def(&child, source, file_path) {
+                    symbols.push(sym);
+                }
+            }
             "declaration_list" => {
                 extract_symbols(&child, source, file_path, symbols, trait_impls);
             }
@@ -334,6 +372,25 @@ fn extract_named_item(
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
         details,
+    })
+}
+
+fn extract_macro_def(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
+    let name = find_child_by_kind(node, "identifier")?;
+    let name_text = node_text(&name, source);
+    let sig = get_first_line(node, source);
+
+    Some(Symbol {
+        name: name_text,
+        kind: SymbolKind::Macro,
+        visibility: Visibility::Public,
+        file_path: file_path.to_string(),
+        line_start: node.start_position().row + 1,
+        line_end: node.end_position().row + 1,
+        signature: sig,
+        doc_comment: extract_doc_comment(node, source),
+        body: Some(extract_body(node, source)),
+        details: None,
     })
 }
 
@@ -866,6 +923,65 @@ pub fn caller() -> Config {
         assert!(
             !refs.iter().any(|r| r.target_name == "new"),
             "should NOT find 'new' as a target (noisy symbol)"
+        );
+    }
+
+    #[test]
+    fn test_extract_const() {
+        let source = r"
+/// Maximum retry count.
+pub const MAX_RETRIES: u32 = 3;
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "MAX_RETRIES");
+        assert!(sym.is_some(), "should extract const");
+        let sym = sym.unwrap();
+        assert_eq!(sym.kind, SymbolKind::Const);
+        assert_eq!(sym.visibility, Visibility::Public);
+        assert!(sym.doc_comment.as_deref().unwrap().contains("Maximum"));
+    }
+
+    #[test]
+    fn test_extract_static() {
+        let source = r"
+pub static GLOBAL_COUNT: u64 = 0;
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "GLOBAL_COUNT" && s.kind == SymbolKind::Static)
+        );
+    }
+
+    #[test]
+    fn test_extract_type_alias() {
+        let source = r"
+pub type Result<T> = std::result::Result<T, MyError>;
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Result" && s.kind == SymbolKind::TypeAlias)
+        );
+    }
+
+    #[test]
+    fn test_extract_macro_rules() {
+        let source = r"
+/// Helper macro for creating responses.
+macro_rules! response {
+    ($code:expr, $body:expr) => {
+        Response::new($code, $body)
+    };
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "response" && s.kind == SymbolKind::Macro)
         );
     }
 
