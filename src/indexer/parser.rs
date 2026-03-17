@@ -266,15 +266,13 @@ fn extract_symbols(
                 }
             }
             "const_item" => {
-                if let Some(sym) =
-                    extract_named_item(&child, source, file_path, SymbolKind::Const)
+                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Const)
                 {
                     symbols.push(sym);
                 }
             }
             "static_item" => {
-                if let Some(sym) =
-                    extract_named_item(&child, source, file_path, SymbolKind::Static)
+                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Static)
                 {
                     symbols.push(sym);
                 }
@@ -526,10 +524,30 @@ pub struct TraitImpl {
 }
 
 const NOISY_SYMBOL_NAMES: &[&str] = &[
-    "new", "default", "from", "into", "clone", "fmt", "eq", "ne",
-    "partial_cmp", "cmp", "hash", "drop", "deref", "deref_mut",
-    "as_ref", "as_mut", "borrow", "borrow_mut", "to_string",
-    "to_owned", "try_from", "try_into", "build", "init",
+    "new",
+    "default",
+    "from",
+    "into",
+    "clone",
+    "fmt",
+    "eq",
+    "ne",
+    "partial_cmp",
+    "cmp",
+    "hash",
+    "drop",
+    "deref",
+    "deref_mut",
+    "as_ref",
+    "as_mut",
+    "borrow",
+    "borrow_mut",
+    "to_string",
+    "to_owned",
+    "try_from",
+    "try_into",
+    "build",
+    "init",
 ];
 
 fn is_noisy_symbol(name: &str) -> bool {
