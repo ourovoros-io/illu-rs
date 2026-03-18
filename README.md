@@ -240,6 +240,38 @@ Shows the file/module hierarchy with how many public symbols each file exports. 
 | **Full body access** | `full_body: true` reads untruncated source from disk |
 | **Dual client support** | Auto-configures Claude Code and Gemini CLI |
 
+## Statusline Extension
+
+illu writes real-time status to `.illu/status` so you can see what it's doing in your terminal.
+
+```
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: indexing ▸ refs [12/40]
+```
+
+- **Green `◆ illu`** — ready, index is up to date
+- **Yellow `◆ illu: indexing ...`** — parsing source files
+- **Cyan `◆ illu: fetching docs ...`** — downloading dependency docs
+
+Install the combined statusline (model + repo + context + illu):
+
+```bash
+cp extensions/statusline/combined-statusline.sh ~/.claude/statusline.sh
+chmod +x ~/.claude/statusline.sh
+```
+
+Then in `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "command": "~/.claude/statusline.sh"
+  }
+}
+```
+
+See [`extensions/statusline/`](extensions/statusline/) for standalone and add-to-existing options.
+
 ## Architecture
 
 ```
