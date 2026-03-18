@@ -13,7 +13,7 @@
 
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo, refresh_index};
-use illu_rs::server::tools::{context, impact, query};
+use illu_rs::server::tools::{context, docs, impact, overview, query, tree};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -966,4 +966,267 @@ pub fn beta() {}
         !beta.contains("belongs to alpha"),
         "beta must NOT have alpha's doc: {beta}"
     );
+}
+
+// =========================================================================
+// 10. DOCS TOOL DATA INTEGRITY
+//     Wrong docs → Claude uses wrong API / hallucinates function signatures
+// =========================================================================
+
+#[test]
+fn docs_tool_shows_version_and_source() {
+    let (_dir, db) = index_source("pub fn placeholder() {}\n");
+    let dep_id = db
+        .insert_dependency("serde", "1.0.210", true, None)
+        .unwrap();
+    db.store_doc(dep_id, "docs.rs", "Serde serialization framework")
+        .unwrap();
+    db.store_doc(dep_id, "cargo_doc", "# serde 1.0.210\n\nStructured docs")
+        .unwrap();
+
+    let result = docs::handle_docs(&db, "serde", None).unwrap();
+    // Must show version so Claude knows which API it's looking at
+    assert!(
+        result.contains("1.0.210"),
+        "docs must include version: {result}"
+    );
+    // Must show both doc sources
+    assert!(
+        result.contains("docs.rs"),
+        "must show docs.rs source: {result}"
+    );
+    assert!(
+        result.contains("cargo_doc"),
+        "must show cargo_doc source: {result}"
+    );
+}
+
+#[test]
+fn docs_tool_topic_filter_is_precise() {
+    let (_dir, db) = index_source("pub fn placeholder() {}\n");
+    let serde_id = db.insert_dependency("serde", "1.0", true, None).unwrap();
+    let tokio_id = db.insert_dependency("tokio", "1.0", true, None).unwrap();
+    db.store_doc(serde_id, "docs.rs", "Serde serialization framework")
+        .unwrap();
+    db.store_doc(
+        tokio_id,
+        "docs.rs",
+        "Tokio async runtime with serialization support",
+    )
+    .unwrap();
+
+    // Searching for "serialization" scoped to serde should NOT return tokio
+    let result = docs::handle_docs(&db, "serde", Some("serialization")).unwrap();
+    assert!(result.contains("Serde"), "should find serde docs: {result}");
+    assert!(
+        !result.contains("Tokio"),
+        "must NOT include tokio docs when scoped to serde: {result}"
+    );
+}
+
+#[test]
+fn docs_tool_clear_message_for_unknown_dep() {
+    let (_dir, db) = index_source("pub fn placeholder() {}\n");
+    let result = docs::handle_docs(&db, "nonexistent_crate", None).unwrap();
+    assert!(
+        result.contains("not a known dependency"),
+        "must clearly state dep is unknown: {result}"
+    );
+}
+
+#[test]
+fn docs_tool_clear_message_for_known_dep_no_docs() {
+    let (_dir, db) = index_source("pub fn placeholder() {}\n");
+    db.insert_dependency("obscure", "0.1.0", true, None)
+        .unwrap();
+    let result = docs::handle_docs(&db, "obscure", None).unwrap();
+    assert!(
+        result.contains("known dependency"),
+        "must acknowledge dep exists: {result}"
+    );
+    assert!(
+        result.contains("no docs"),
+        "must explain docs are missing: {result}"
+    );
+}
+
+// =========================================================================
+// 11. OVERVIEW TOOL DATA INTEGRITY
+//     Wrong overview → Claude has wrong mental model of project structure
+// =========================================================================
+
+#[test]
+fn overview_includes_signature_and_kind() {
+    let (_dir, db) = index_source(
+        r"
+/// Application configuration.
+pub struct Config {
+    pub port: u16,
+}
+
+pub fn start_server() {}
+pub trait Handler {}
+",
+    );
+    let result = overview::handle_overview(&db, "src/").unwrap();
+
+    // Every symbol must show kind and signature
+    assert!(result.contains("(struct)"), "struct kind: {result}");
+    assert!(result.contains("(function)"), "function kind: {result}");
+    assert!(result.contains("(trait)"), "trait kind: {result}");
+    assert!(
+        result.contains("`pub struct Config"),
+        "struct signature: {result}"
+    );
+    assert!(
+        result.contains("`pub fn start_server()"),
+        "fn signature: {result}"
+    );
+
+    // Doc comment first line shown
+    assert!(
+        result.contains("Application configuration"),
+        "doc snippet: {result}"
+    );
+
+    // Summary at the bottom
+    assert!(result.contains("Summary"), "must have summary: {result}");
+}
+
+#[test]
+fn overview_scoped_to_path_prefix() {
+    let (_dir, db) = index_multi_file(&[
+        ("lib.rs", "pub fn root_fn() {}\n"),
+        ("models/user.rs", "pub struct User { pub id: u64 }\n"),
+        ("models/post.rs", "pub struct Post { pub title: String }\n"),
+    ]);
+    let result = overview::handle_overview(&db, "src/models/").unwrap();
+
+    assert!(result.contains("User"), "should include User: {result}");
+    assert!(result.contains("Post"), "should include Post: {result}");
+    assert!(
+        !result.contains("root_fn"),
+        "must NOT include root_fn: {result}"
+    );
+}
+
+#[test]
+fn overview_empty_prefix_returns_everything() {
+    let (_dir, db) = index_source(
+        r"
+pub fn alpha() {}
+pub fn beta() {}
+",
+    );
+    let result = overview::handle_overview(&db, "src/").unwrap();
+    assert!(result.contains("alpha"), "alpha: {result}");
+    assert!(result.contains("beta"), "beta: {result}");
+}
+
+// =========================================================================
+// 12. TREE TOOL DATA INTEGRITY
+//     Wrong tree → Claude navigates to wrong files
+// =========================================================================
+
+#[test]
+fn tree_shows_all_files_with_symbol_counts() {
+    let (_dir, db) = index_multi_file(&[
+        ("lib.rs", "pub fn a() {}\npub fn b() {}\n"),
+        ("models/user.rs", "pub struct User { pub id: u64 }\n"),
+    ]);
+    let result = tree::handle_tree(&db, "src/").unwrap();
+
+    assert!(result.contains("lib.rs"), "must show lib.rs: {result}");
+    assert!(
+        result.contains("models/user.rs") || result.contains("models\\user.rs"),
+        "must show nested file: {result}"
+    );
+}
+
+#[test]
+fn tree_empty_prefix_returns_full_tree() {
+    let (_dir, db) = index_source("pub fn hello() {}\n");
+    let result = tree::handle_tree(&db, "").unwrap();
+    assert!(
+        result.contains("src/lib.rs"),
+        "empty prefix should show all files: {result}"
+    );
+}
+
+#[test]
+fn tree_nonexistent_prefix_is_clear() {
+    let (_dir, db) = index_source("pub fn hello() {}\n");
+    let result = tree::handle_tree(&db, "nonexistent/").unwrap();
+    assert!(
+        result.contains("No files") || result.is_empty() || !result.contains("src/"),
+        "nonexistent prefix should not show files: {result}"
+    );
+}
+
+// =========================================================================
+// 13. CARGO DOC JSON PARSING INTEGRITY
+//     Wrong doc parsing → Claude gets wrong API descriptions
+// =========================================================================
+
+#[test]
+fn cargo_doc_parse_includes_all_item_kinds() {
+    let json = serde_json::json!({
+        "root": 1,
+        "crate_version": "2.0.0",
+        "index": {
+            "1": {
+                "id": 1, "crate_id": 0, "name": "mylib",
+                "visibility": "public", "docs": "My library.",
+                "inner": { "module": { "is_crate": true, "items": [2,3,4,5,6] } }
+            },
+            "2": {
+                "id": 2, "crate_id": 0, "name": "MyTrait",
+                "visibility": "public", "docs": "A trait.",
+                "inner": { "trait_": { "items": [10,11], "generics": {"params":[],"where_predicates":[]}, "bounds": [] } }
+            },
+            "3": {
+                "id": 3, "crate_id": 0, "name": "MyStruct",
+                "visibility": "public", "docs": "A struct.",
+                "inner": { "struct": { "kind": {"plain":{"fields":[],"has_stripped_fields":false}}, "generics": {"params":[{"name":"T","kind":{"type":{"bounds":[],"default":null,"is_synthetic":false}}}],"where_predicates":[]}, "impls": [] } }
+            },
+            "4": {
+                "id": 4, "crate_id": 0, "name": "MyEnum",
+                "visibility": "public", "docs": "An enum.",
+                "inner": { "enum": { "variants": [], "generics": {"params":[],"where_predicates":[]}, "impls": [] } }
+            },
+            "5": {
+                "id": 5, "crate_id": 0, "name": "my_func",
+                "visibility": "public", "docs": "A function.",
+                "inner": { "function": { "sig": {"inputs":[["x",{"primitive":"i32"}]],"output":null}, "generics": {"params":[],"where_predicates":[]} } }
+            },
+            "6": {
+                "id": 6, "crate_id": 0, "name": "my_macro",
+                "visibility": "public", "docs": "A macro.",
+                "inner": { "macro": "macro content" }
+            }
+        },
+        "paths": {},
+        "external_crates": {},
+        "format_version": 39
+    });
+
+    let result =
+        illu_rs::indexer::cargo_doc::parse_rustdoc_json_public(&json.to_string(), "mylib").unwrap();
+
+    assert!(result.contains("# mylib 2.0.0"), "header: {result}");
+    assert!(result.contains("My library."), "crate docs: {result}");
+    assert!(result.contains("## Traits"), "traits section: {result}");
+    assert!(result.contains("**MyTrait**"), "trait name: {result}");
+    assert!(result.contains("## Structs"), "structs section: {result}");
+    assert!(result.contains("**MyStruct**"), "struct name: {result}");
+    assert!(result.contains("<T>"), "generic params: {result}");
+    assert!(result.contains("## Enums"), "enums section: {result}");
+    assert!(result.contains("**MyEnum**"), "enum name: {result}");
+    assert!(
+        result.contains("## Functions"),
+        "functions section: {result}"
+    );
+    assert!(result.contains("my_func"), "fn name: {result}");
+    assert!(result.contains("## Macros"), "macros section: {result}");
+    assert!(result.contains("**my_macro!**"), "macro name: {result}");
 }
