@@ -315,25 +315,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tracing::info!(count = refreshed, "Refreshed changed files");
             }
 
-            // Fetch docs eagerly so they're available on first tool call
-            let pending = illu_rs::indexer::docs::pending_docs(&db)?;
-            if !pending.is_empty() {
-                let total = pending.len();
-                tracing::info!(count = total, "Fetching dependency docs");
-                illu_rs::status::set(&format!("fetching docs ▸ 0/{total}"));
-                let fetched = illu_rs::indexer::docs::fetch_docs(&pending, &config.repo_path).await;
-                if !fetched.is_empty() {
-                    let stored = illu_rs::indexer::docs::store_fetched_docs(&db, &fetched)?;
-                    tracing::info!(count = stored, "Stored dependency docs");
-                }
-            }
+            // Check for pending docs before handing DB to the server
+            let pending_docs = illu_rs::indexer::docs::pending_docs(&db)?;
 
-            let server = IlluServer::new(db, config);
+            let server = IlluServer::new(db, config.clone());
+            let db_arc = server.db();
             let transport = stdio();
             tracing::info!("MCP transport ready, starting handshake");
             illu_rs::status::set(illu_rs::status::READY);
             let service = server.serve(transport).await?;
             tracing::info!("MCP server initialized, waiting for requests");
+
+            // Fetch docs in background — server is already accepting requests
+            if !pending_docs.is_empty() {
+                let db = db_arc;
+                let repo_path = config.repo_path.clone();
+                tokio::spawn(async move {
+                    let total = pending_docs.len();
+                    tracing::info!(count = total, "Fetching docs in background");
+                    illu_rs::status::set(&format!("fetching docs ▸ 0/{total}"));
+                    let fetched =
+                        illu_rs::indexer::docs::fetch_docs(&pending_docs, &repo_path).await;
+                    if !fetched.is_empty() {
+                        let Ok(db) = db.lock() else { return };
+                        let count = fetched.len();
+                        let _ = illu_rs::indexer::docs::store_fetched_docs(&db, &fetched);
+                        tracing::info!(count, "Stored dependency docs");
+                    }
+                    illu_rs::status::set(illu_rs::status::READY);
+                });
+            }
+
             service.waiting().await?;
             tracing::info!("MCP server shut down");
             illu_rs::status::clear();
