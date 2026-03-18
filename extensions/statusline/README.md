@@ -11,9 +11,9 @@ Shows illu's real-time indexing status in your Claude Code statusline.
 When illu is actively working:
 
 ```
-▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: indexing ▸ parsing [5/19] ▰▰▱▱▱▱▱▱
-▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: indexing ▸ refs [12/40] ▰▰▰▱▱▱▱▱
-▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: fetching docs ▸ 3/8 ▰▰▰▱▱▱▱▱
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: indexing ▸ parsing [5/19]
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: indexing ▸ refs [12/40]
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: fetching docs ▸ 3/8
 ```
 
 ## Status indicators
@@ -21,9 +21,9 @@ When illu is actively working:
 | Color | Symbol | Meaning |
 |-------|--------|---------|
 | Green | `◆ illu` | Ready — index is up to date |
-| Yellow | `◆ illu: indexing ▸ ... ▰▰▱▱` | Indexing source files or extracting refs |
-| Yellow | `◆ illu: refreshing ▸ ... ▰▰▱▱` | Re-indexing changed files |
-| Cyan | `◆ illu: fetching docs ▸ ... ▰▰▱▱` | Fetching dependency documentation |
+| Yellow | `◆ illu: indexing ▸ ...` | Indexing source files or extracting refs |
+| Yellow | `◆ illu: refreshing ▸ ...` | Re-indexing changed files |
+| Cyan | `◆ illu: fetching docs ▸ ...` | Fetching dependency documentation |
 
 ## Installation
 
