@@ -27,18 +27,34 @@ pub fn generate_cargo_docs(
     }
 
     // Run cargo doc with JSON output — documents project crate only
-    // (--no-deps), but for deps we need to run without --no-deps
+    // (--no-deps), but for deps we need to run without --no-deps.
+    // Timeout after 60s to avoid blocking on large builds.
     tracing::info!("Running cargo +nightly doc for dependency docs");
-    let status = std::process::Command::new("cargo")
+    let mut child = std::process::Command::new("cargo")
         .args(["+nightly", "doc"])
         .env("RUSTDOCFLAGS", "-Z unstable-options --output-format json")
         .current_dir(repo_path)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .status()?;
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
 
-    if !status.success() {
-        return Err("cargo +nightly doc failed".into());
+    let start = std::time::Instant::now();
+    let deadline = start + std::time::Duration::from_secs(60);
+    loop {
+        match child.try_wait()? {
+            Some(status) if status.success() => break,
+            Some(_) => return Err("cargo +nightly doc failed".into()),
+            None if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("cargo +nightly doc timed out (>60s)".into());
+            }
+            None => {
+                let elapsed = start.elapsed().as_secs();
+                crate::status::set(&format!("fetching docs ▸ cargo doc ({elapsed}s)"));
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
     }
 
     let doc_dir = repo_path.join("target").join("doc");
