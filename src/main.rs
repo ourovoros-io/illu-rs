@@ -60,7 +60,7 @@ enum Command {
         #[arg(default_value = "src/")]
         path: String,
     },
-    /// Set up illu in a Rust repo (writes .mcp.json, CLAUDE.md, builds index)
+    /// Set up illu in a Rust repo (configures Claude Code + Gemini CLI, builds index)
     Init,
 }
 

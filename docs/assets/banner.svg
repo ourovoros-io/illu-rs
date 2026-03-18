@@ -1,77 +1,113 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 340" width="400" height="340">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#0f0f1a;stop-opacity:1"/>
-      <stop offset="100%" style="stop-color:#1a1a2e;stop-opacity:1"/>
+    <linearGradient id="cyanMagenta" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00fff2"/>
+      <stop offset="100%" stop-color="#d946ef"/>
     </linearGradient>
-    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#f59e0b"/>
-      <stop offset="50%" style="stop-color:#f97316"/>
-      <stop offset="100%" style="stop-color:#ef4444"/>
-    </linearGradient>
-    <linearGradient id="bulb" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#fde68a"/>
-      <stop offset="100%" style="stop-color:#f59e0b"/>
-    </linearGradient>
-    <radialGradient id="light" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" style="stop-color:#fef3c7;stop-opacity:0.6"/>
-      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:0"/>
+    <radialGradient id="bloomCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00fff2" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#00fff2" stop-opacity="0"/>
     </radialGradient>
-    <filter id="textGlow">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
-      <feColorMatrix in="blur" type="matrix" values="1 0.6 0 0 0  0.6 0.4 0 0 0  0 0 0 0 0  0 0 0 0.5 0"/>
-      <feComposite in="SourceGraphic"/>
-    </filter>
+    <radialGradient id="bloomMagenta" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d946ef" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#d946ef" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
   <!-- Background -->
-  <rect width="800" height="200" rx="12" fill="url(#bg)"/>
-  <rect width="800" height="200" rx="12" fill="none" stroke="url(#glow)" stroke-width="1.5" opacity="0.4"/>
+  <rect width="400" height="340" rx="12" fill="#050510"/>
 
-  <!-- Light aura around bulb -->
-  <ellipse cx="120" cy="90" rx="60" ry="55" fill="url(#light)"/>
-
-  <!-- Light rays -->
-  <g opacity="0.35" stroke="#fbbf24" stroke-width="2" stroke-linecap="round">
-    <line x1="120" y1="25" x2="120" y2="42"/>
-    <line x1="70" y1="48" x2="82" y2="60"/>
-    <line x1="170" y1="48" x2="158" y2="60"/>
-    <line x1="52" y1="90" x2="68" y2="90"/>
-    <line x1="188" y1="90" x2="172" y2="90"/>
+  <!-- Faint grid -->
+  <g stroke="#00fff2" stroke-width="0.3" opacity="0.07">
+    <line x1="0" y1="68" x2="400" y2="68"/>
+    <line x1="0" y1="136" x2="400" y2="136"/>
+    <line x1="0" y1="204" x2="400" y2="204"/>
+    <line x1="0" y1="272" x2="400" y2="272"/>
+    <line x1="80" y1="0" x2="80" y2="340"/>
+    <line x1="160" y1="0" x2="160" y2="340"/>
+    <line x1="240" y1="0" x2="240" y2="340"/>
+    <line x1="320" y1="0" x2="320" y2="340"/>
   </g>
 
-  <!-- Lightbulb -->
-  <path d="M 100 100 C 100 72, 106 58, 120 52 C 134 58, 140 72, 140 100 C 140 112, 133 118, 131 122 L 109 122 C 107 118, 100 112, 100 100 Z"
-        fill="url(#bulb)" opacity="0.9"/>
+  <!-- Border -->
+  <rect width="400" height="340" rx="12" fill="none" stroke="url(#cyanMagenta)" stroke-width="1" opacity="0.3"/>
 
-  <!-- Code brackets inside bulb -->
-  <g transform="translate(120, 88)" fill="none" stroke="#92400e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <polyline points="-12,-10 -20,0 -12,10"/>
-    <line x1="-4" y1="12" x2="4" y2="-12"/>
-    <polyline points="12,-10 20,0 12,10"/>
+  <!-- Bloom (baked as radial gradient circles) -->
+  <circle cx="200" cy="100" r="90" fill="url(#bloomCyan)"/>
+  <circle cx="200" cy="100" r="60" fill="url(#bloomMagenta)"/>
+
+  <!-- Diamond glow layer (thicker, lower opacity = fake blur) -->
+  <polygon points="200,44 256,100 200,156 144,100"
+           fill="none" stroke="#00fff2" stroke-width="6" opacity="0.12"/>
+  <polygon points="200,44 256,100 200,156 144,100"
+           fill="none" stroke="#00fff2" stroke-width="3" opacity="0.25"/>
+  <!-- Diamond crisp -->
+  <polygon points="200,44 256,100 200,156 144,100"
+           fill="none" stroke="#00fff2" stroke-width="1.5" opacity="0.7"/>
+
+  <!-- Circuit traces -->
+  <g fill="none" stroke="#00fff2" stroke-width="0.8" opacity="0.25" stroke-linecap="round">
+    <polyline points="144,100 118,100 118,73"/>
+    <polyline points="144,100 124,120 100,120"/>
+    <polyline points="256,100 282,100 282,73"/>
+    <polyline points="256,100 276,120 300,120"/>
+    <line x1="200" y1="44" x2="200" y2="26"/>
+    <line x1="200" y1="156" x2="200" y2="174"/>
   </g>
 
-  <!-- Bulb base -->
-  <rect x="107" y="122" width="26" height="4" rx="1" fill="#d97706"/>
-  <rect x="109" y="127" width="22" height="3" rx="1" fill="#b45309"/>
-  <rect x="112" y="131" width="16" height="3" rx="3" fill="#92400e"/>
+  <!-- Circuit nodes -->
+  <g fill="#00fff2" opacity="0.4">
+    <circle cx="118" cy="73" r="2"/>
+    <circle cx="100" cy="120" r="2"/>
+    <circle cx="282" cy="73" r="2"/>
+    <circle cx="300" cy="120" r="2"/>
+    <circle cx="200" cy="26" r="2"/>
+    <circle cx="200" cy="174" r="2"/>
+  </g>
 
-  <!-- "illu" text -->
-  <text x="240" y="108" font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', monospace" font-weight="800" font-size="80" fill="url(#glow)" filter="url(#textGlow)" letter-spacing="-3">illu</text>
+  <!-- Code brackets — glow layers (fake neon via stacked strokes) -->
+  <g transform="translate(200, 100)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- < glow -->
+    <polyline points="-22,-20 -35,0 -22,20" stroke="#00fff2" stroke-width="10" opacity="0.1"/>
+    <polyline points="-22,-20 -35,0 -22,20" stroke="#00fff2" stroke-width="5" opacity="0.2"/>
+    <polyline points="-22,-20 -35,0 -22,20" stroke="#00fff2" stroke-width="3" opacity="0.9"/>
+    <!-- > glow -->
+    <polyline points="22,-20 35,0 22,20" stroke="#d946ef" stroke-width="10" opacity="0.1"/>
+    <polyline points="22,-20 35,0 22,20" stroke="#d946ef" stroke-width="5" opacity="0.2"/>
+    <polyline points="22,-20 35,0 22,20" stroke="#d946ef" stroke-width="3" opacity="0.9"/>
+    <!-- / -->
+    <line x1="-8" y1="22" x2="8" y2="-22" stroke="#ffffff" stroke-width="2" opacity="0.85"/>
+  </g>
+
+  <!-- "illu" text — glow layers -->
+  <text x="200" y="248" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="68" letter-spacing="6"
+        fill="#00fff2" opacity="0.08" stroke="#00fff2" stroke-width="8">illu</text>
+  <text x="200" y="248" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="68" letter-spacing="6"
+        fill="#00fff2" opacity="0.2" stroke="#00fff2" stroke-width="4">illu</text>
+  <text x="200" y="248" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="68" letter-spacing="6"
+        fill="#00fff2">illu</text>
 
   <!-- Tagline -->
-  <text x="242" y="140" font-family="'Inter', 'Helvetica Neue', sans-serif" font-weight="400" font-size="18" fill="#9ca3af" letter-spacing="1">Code intelligence for AI agents</text>
+  <text x="200" y="274" text-anchor="middle"
+        font-family="'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-weight="300" font-size="15" letter-spacing="1"
+        fill="#a78bfa">Code intelligence for AI agents</text>
 
-  <!-- Badges area -->
-  <g transform="translate(242, 155)">
-    <!-- Rust badge -->
-    <rect x="0" y="0" width="56" height="22" rx="4" fill="#282828"/>
-    <text x="28" y="15" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#dea584" font-weight="600">Rust</text>
-    <!-- MCP badge -->
-    <rect x="64" y="0" width="50" height="22" rx="4" fill="#282828"/>
-    <text x="89" y="15" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#818cf8" font-weight="600">MCP</text>
-    <!-- SQLite badge -->
-    <rect x="122" y="0" width="58" height="22" rx="4" fill="#282828"/>
-    <text x="151" y="15" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#60a5fa" font-weight="600">SQLite</text>
+  <!-- Tech badges -->
+  <g transform="translate(200, 294)">
+    <rect x="-88" y="0" width="52" height="20" rx="3" fill="none" stroke="#00fff2" stroke-width="0.7" opacity="0.4"/>
+    <text x="-62" y="14" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#00fff2" opacity="0.7">Rust</text>
+
+    <rect x="-24" y="0" width="48" height="20" rx="3" fill="none" stroke="#d946ef" stroke-width="0.7" opacity="0.4"/>
+    <text x="0" y="14" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#d946ef" opacity="0.7">MCP</text>
+
+    <rect x="36" y="0" width="52" height="20" rx="3" fill="none" stroke="#7c3aed" stroke-width="0.7" opacity="0.4"/>
+    <text x="62" y="14" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7c3aed" opacity="0.7">SQLite</text>
   </g>
 </svg>
