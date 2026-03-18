@@ -654,74 +654,101 @@ impl Database {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let fts_query = format!("{query}*");
+        // FTS5 MATCH cannot handle certain characters even when quoted.
+        // Skip FTS entirely for queries containing problematic chars and
+        // fall back to trigram or LIKE only.
+        // FTS5 MATCH cannot handle certain metacharacters
+        let fts_safe = !query
+            .chars()
+            .any(|c| matches!(c, '"' | '%' | '\'' | '\\' | '*' | '(' | ')'));
         let use_trigram = query.len() >= 3;
 
-        // The two SQL variants differ only in the fallback CTE
-        let (sql, substr_param) = if use_trigram {
-            (
-                "WITH fts_results AS ( \
-                    SELECT fts.rowid AS sid FROM symbols_fts fts \
-                    WHERE symbols_fts MATCH ?1 \
-                ), \
-                fallback AS ( \
-                    SELECT tri.rowid AS sid FROM symbols_trigram tri \
-                    WHERE symbols_trigram MATCH ?3 \
-                      AND tri.rowid NOT IN (SELECT sid FROM fts_results) \
-                ), \
-                combined AS ( \
-                    SELECT sid, 0 AS source FROM fts_results \
-                    UNION ALL \
-                    SELECT sid, 1 AS source FROM fallback \
-                ) \
-                SELECT s.name, s.kind, s.visibility, f.path, \
-                       s.line_start, s.line_end, s.signature, \
-                       s.doc_comment, s.body, s.details, s.attributes \
-                FROM combined c \
-                JOIN symbols s ON s.id = c.sid \
-                JOIN files f ON f.id = s.file_id \
-                ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
-                         c.source, s.name \
-                LIMIT 50",
-                query.to_string(),
-            )
+        if fts_safe {
+            let fts_query = format!("\"{query}\"*");
+            let (sql, substr_param) = if use_trigram {
+                (
+                    "WITH fts_results AS ( \
+                        SELECT fts.rowid AS sid FROM symbols_fts fts \
+                        WHERE symbols_fts MATCH ?1 \
+                    ), \
+                    fallback AS ( \
+                        SELECT tri.rowid AS sid FROM symbols_trigram tri \
+                        WHERE symbols_trigram MATCH ?3 \
+                          AND tri.rowid NOT IN (SELECT sid FROM fts_results) \
+                    ), \
+                    combined AS ( \
+                        SELECT sid, 0 AS source FROM fts_results \
+                        UNION ALL \
+                        SELECT sid, 1 AS source FROM fallback \
+                    ) \
+                    SELECT s.name, s.kind, s.visibility, f.path, \
+                           s.line_start, s.line_end, s.signature, \
+                           s.doc_comment, s.body, s.details, s.attributes \
+                    FROM combined c \
+                    JOIN symbols s ON s.id = c.sid \
+                    JOIN files f ON f.id = s.file_id \
+                    ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
+                             c.source, s.name \
+                    LIMIT 50",
+                    query.to_string(),
+                )
+            } else {
+                let escaped = query.replace('%', r"\%").replace('_', r"\_");
+                (
+                    "WITH fts_results AS ( \
+                        SELECT fts.rowid AS sid FROM symbols_fts fts \
+                        WHERE symbols_fts MATCH ?1 \
+                    ), \
+                    fallback AS ( \
+                        SELECT s.id AS sid FROM symbols s \
+                        WHERE s.name LIKE ?3 ESCAPE '\\' \
+                          AND s.id NOT IN (SELECT sid FROM fts_results) \
+                    ), \
+                    combined AS ( \
+                        SELECT sid, 0 AS source FROM fts_results \
+                        UNION ALL \
+                        SELECT sid, 1 AS source FROM fallback \
+                    ) \
+                    SELECT s.name, s.kind, s.visibility, f.path, \
+                           s.line_start, s.line_end, s.signature, \
+                           s.doc_comment, s.body, s.details, s.attributes \
+                    FROM combined c \
+                    JOIN symbols s ON s.id = c.sid \
+                    JOIN files f ON f.id = s.file_id \
+                    ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
+                             c.source, s.name \
+                    LIMIT 50",
+                    format!("%{escaped}%"),
+                )
+            };
+            let mut stmt = self.conn.prepare_cached(sql)?;
+            let mut results = Vec::new();
+            let mut rows = stmt.query(params![fts_query, query, substr_param])?;
+            while let Some(row) = rows.next()? {
+                results.push(row_to_stored_symbol(row)?);
+            }
+            Ok(results)
         } else {
+            // Unsafe for FTS — use LIKE only (always safe)
             let escaped = query.replace('%', r"\%").replace('_', r"\_");
-            (
-                "WITH fts_results AS ( \
-                    SELECT fts.rowid AS sid FROM symbols_fts fts \
-                    WHERE symbols_fts MATCH ?1 \
-                ), \
-                fallback AS ( \
-                    SELECT s.id AS sid FROM symbols s \
-                    WHERE s.name LIKE ?3 ESCAPE '\\' \
-                      AND s.id NOT IN (SELECT sid FROM fts_results) \
-                ), \
-                combined AS ( \
-                    SELECT sid, 0 AS source FROM fts_results \
-                    UNION ALL \
-                    SELECT sid, 1 AS source FROM fallback \
-                ) \
-                SELECT s.name, s.kind, s.visibility, f.path, \
+            let like_pattern = format!("%{escaped}%");
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT s.name, s.kind, s.visibility, f.path, \
                        s.line_start, s.line_end, s.signature, \
                        s.doc_comment, s.body, s.details, s.attributes \
-                FROM combined c \
-                JOIN symbols s ON s.id = c.sid \
+                FROM symbols s \
                 JOIN files f ON f.id = s.file_id \
-                ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
-                         c.source, s.name \
+                WHERE s.name LIKE ?1 ESCAPE '\\' \
+                ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, s.name \
                 LIMIT 50",
-                format!("%{escaped}%"),
-            )
-        };
-
-        let mut stmt = self.conn.prepare_cached(sql)?;
-        let mut results = Vec::new();
-        let mut rows = stmt.query(params![fts_query, query, substr_param])?;
-        while let Some(row) = rows.next()? {
-            results.push(row_to_stored_symbol(row)?);
+            )?;
+            let mut results = Vec::new();
+            let mut rows = stmt.query(params![like_pattern, query])?;
+            while let Some(row) = rows.next()? {
+                results.push(row_to_stored_symbol(row)?);
+            }
+            Ok(results)
         }
-        Ok(results)
     }
 
     pub fn get_dependency_by_name(&self, name: &str) -> SqlResult<Option<StoredDep>> {
@@ -777,7 +804,13 @@ impl Database {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let fts_query = format!("{query}*");
+        let fts_safe = !query
+            .chars()
+            .any(|c| matches!(c, '"' | '%' | '\'' | '\\' | '*' | '(' | ')'));
+        if !fts_safe {
+            return Ok(Vec::new());
+        }
+        let fts_query = format!("\"{query}\"*");
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version \
              FROM docs_fts fts \
