@@ -197,9 +197,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         let locked = vec![LockedDep {
             name: "my_sdk".into(),
             version: "0.1.0".into(),
-            source: Some(
-                "git+https://github.com/user/my-sdk?branch=main#abc123".into(),
-            ),
+            source: Some("git+https://github.com/user/my-sdk?branch=main#abc123".into()),
         }];
         let resolved = resolve_dependencies(&direct, &locked);
         let dep = resolved.iter().find(|d| d.name == "my_sdk").unwrap();
@@ -215,9 +213,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         let locked = vec![LockedDep {
             name: "serde".into(),
             version: "1.0.210".into(),
-            source: Some(
-                "registry+https://github.com/rust-lang/crates.io-index".into(),
-            ),
+            source: Some("registry+https://github.com/rust-lang/crates.io-index".into()),
         }];
         let resolved = resolve_dependencies(&direct, &locked);
         assert!(resolved[0].repository_url.is_none());

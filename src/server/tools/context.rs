@@ -1,21 +1,24 @@
 use crate::db::{Database, StoredSymbol};
 use crate::indexer::parser::SymbolKind;
 use std::fmt::Write;
+use std::path::Path;
 
 pub fn handle_context(
     db: &Database,
     symbol_name: &str,
+    full_body: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = db.search_symbols(symbol_name)?;
     if symbols.is_empty() {
         return Ok(format!("No symbol found matching '{symbol_name}'."));
     }
 
+    let repo_root = db.repo_root();
     let mut output = String::new();
 
     for sym in &symbols {
         render_symbol_header(&mut output, sym);
-        render_symbol_details(&mut output, sym);
+        render_symbol_details(&mut output, sym, full_body, repo_root);
         render_trait_info(db, &mut output, sym)?;
         render_callees(db, &mut output, sym)?;
     }
@@ -48,16 +51,66 @@ fn render_symbol_header(output: &mut String, sym: &StoredSymbol) {
     let _ = writeln!(output);
 }
 
-fn render_symbol_details(output: &mut String, sym: &StoredSymbol) {
+fn render_symbol_details(
+    output: &mut String,
+    sym: &StoredSymbol,
+    full_body: bool,
+    repo_root: Option<&Path>,
+) {
     if let Some(details) = &sym.details {
         let _ = writeln!(output, "### Fields/Variants\n");
         let _ = writeln!(output, "```rust\n{details}\n```\n");
     }
 
     if let Some(body) = &sym.body {
-        let _ = writeln!(output, "### Source\n");
-        let _ = writeln!(output, "```rust\n{body}\n```\n");
+        let is_truncated = body.ends_with("// ... truncated");
+        if is_truncated
+            && full_body
+            && let Some(full) =
+                read_lines_from_file(repo_root, &sym.file_path, sym.line_start, sym.line_end)
+        {
+            let _ = writeln!(output, "### Source\n");
+            let _ = writeln!(output, "```rust\n{full}\n```\n");
+        } else if is_truncated {
+            let _ = writeln!(output, "### Source (truncated)\n");
+            let _ = writeln!(output, "```rust\n{body}\n```\n");
+            let _ = writeln!(
+                output,
+                "*Full source at {}:{}-{}. Use `full_body: true` to fetch.*\n",
+                sym.file_path, sym.line_start, sym.line_end,
+            );
+        } else {
+            let _ = writeln!(output, "### Source\n");
+            let _ = writeln!(output, "```rust\n{body}\n```\n");
+        }
     }
+}
+
+fn read_lines_from_file(
+    repo_root: Option<&Path>,
+    file_path: &str,
+    line_start: i64,
+    line_end: i64,
+) -> Option<String> {
+    let root = repo_root?;
+    let full_path = root.join(file_path);
+    let content = match std::fs::read_to_string(&full_path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("full_body: failed to read {}: {e}", full_path.display());
+            return None;
+        }
+    };
+    let start = usize::try_from(line_start.saturating_sub(1)).ok()?;
+    let end = usize::try_from(line_end).ok()?;
+    let mut result = String::new();
+    for (i, line) in content.lines().skip(start).take(end - start).enumerate() {
+        if i > 0 {
+            result.push('\n');
+        }
+        result.push_str(line);
+    }
+    Some(result)
 }
 
 fn render_trait_info(
@@ -183,7 +236,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "parse_config").unwrap();
+        let result = handle_context(&db, "parse_config", false).unwrap();
         assert!(result.contains("parse_config"));
         assert!(result.contains("src/lib.rs"));
         assert!(result.contains("public"));
@@ -192,7 +245,7 @@ mod tests {
     #[test]
     fn test_context_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_context(&db, "nonexistent").unwrap();
+        let result = handle_context(&db, "nonexistent", false).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
@@ -223,7 +276,7 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "serialize and deserialize data")
             .unwrap();
 
-        let result = handle_context(&db, "serialize").unwrap();
+        let result = handle_context(&db, "serialize", false).unwrap();
         assert!(result.contains("serialize"));
         assert!(result.contains("Related Documentation"));
     }
@@ -251,7 +304,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "Config").unwrap();
+        let result = handle_context(&db, "Config", false).unwrap();
         assert!(result.contains("> Application configuration."));
         assert!(result.contains("> Holds all settings."));
         assert!(result.contains("### Fields/Variants"));
@@ -308,7 +361,7 @@ mod tests {
             .unwrap();
         db.insert_symbol_ref(caller_id, callee_id, "call").unwrap();
 
-        let result = handle_context(&db, "caller_fn").unwrap();
+        let result = handle_context(&db, "caller_fn", false).unwrap();
         assert!(result.contains("### Callees"));
         assert!(result.contains("**Calls:**"));
         assert!(result.contains("callee_fn"));
@@ -342,7 +395,7 @@ mod tests {
         db.insert_trait_impl("MyStruct", "Debug", file_id, 22, 30)
             .unwrap();
 
-        let result = handle_context(&db, "MyStruct").unwrap();
+        let result = handle_context(&db, "MyStruct", false).unwrap();
         assert!(result.contains("### Trait Implementations"));
         assert!(result.contains("**Display**"));
         assert!(result.contains("**Debug**"));

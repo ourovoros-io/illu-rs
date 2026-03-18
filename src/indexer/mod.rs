@@ -1,3 +1,4 @@
+pub mod cargo_doc;
 pub mod dependencies;
 pub mod docs;
 pub mod parser;
@@ -194,11 +195,7 @@ fn index_workspace(
             tracing::warn!("Skipping member {member}: no Cargo.toml");
             continue;
         };
-        tracing::info!(
-            "[{}/{}] Indexing crate: {member}",
-            i + 1,
-            total_members
-        );
+        tracing::info!("[{}/{}] Indexing crate: {member}", i + 1, total_members);
         crate::status::set(&format!(
             "indexing ▸ crate [{}/{}] {member}",
             i + 1,
@@ -261,9 +258,7 @@ fn index_crate_sources(
     let rs_files: Vec<_> = walkdir::WalkDir::new(src_dir)
         .into_iter()
         .filter_map(|r| match r {
-            Ok(e) if e.path().extension().is_some_and(|ext| ext == "rs") => {
-                Some(e.into_path())
-            }
+            Ok(e) if e.path().extension().is_some_and(|ext| ext == "rs") => Some(e.into_path()),
             Err(e) => {
                 tracing::warn!("Skipping directory entry: {e}");
                 None
@@ -315,11 +310,7 @@ fn extract_all_symbol_refs(
     for (i, relative) in files.iter().enumerate() {
         if total > 20 && (i + 1) % 20 == 0 {
             tracing::info!("[{}/{}] Extracting refs...", i + 1, total);
-            crate::status::set(&format!(
-                "indexing ▸ refs [{}/{}]",
-                i + 1,
-                total
-            ));
+            crate::status::set(&format!("indexing ▸ refs [{}/{}]", i + 1, total));
         }
         let full_path = config.repo_path.join(relative);
         let source = match std::fs::read_to_string(&full_path) {

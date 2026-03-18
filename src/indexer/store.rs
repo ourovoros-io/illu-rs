@@ -58,6 +58,10 @@ fn store_symbols_inner(db: &Database, file_id: FileId, symbols: &[Symbol]) -> ru
          (rowid, name, signature, doc_comment) \
          VALUES (?1, ?2, ?3, ?4)",
     )?;
+    let mut trigram_stmt = db.conn.prepare(
+        "INSERT INTO symbols_trigram (rowid, name) \
+         VALUES (?1, ?2)",
+    )?;
     for sym in symbols {
         let line_start = i64::try_from(sym.line_start).unwrap_or(i64::MAX);
         let line_end = i64::try_from(sym.line_end).unwrap_or(i64::MAX);
@@ -77,6 +81,7 @@ fn store_symbols_inner(db: &Database, file_id: FileId, symbols: &[Symbol]) -> ru
         let rowid = db.conn.last_insert_rowid();
         let doc_for_fts = sym.doc_comment.as_deref().unwrap_or("");
         fts_stmt.execute(params![rowid, sym.name, sym.signature, doc_for_fts])?;
+        trigram_stmt.execute(params![rowid, sym.name])?;
     }
     Ok(())
 }

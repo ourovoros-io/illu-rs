@@ -11,7 +11,6 @@ pub fn init(repo_path: &Path) {
     let _ = STATUS_PATH.set(path);
 }
 
-
 /// Write current status. Silently ignores errors — status
 /// is best-effort and must never block the main work.
 pub fn set(message: &str) {

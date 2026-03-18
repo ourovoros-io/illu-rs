@@ -58,6 +58,7 @@ impl std::str::FromStr for SymbolKind {
 pub enum Visibility {
     Public,
     PublicCrate,
+    Restricted,
     Private,
 }
 
@@ -66,6 +67,7 @@ impl std::fmt::Display for Visibility {
         let s = match self {
             Self::Public => "public",
             Self::PublicCrate => "pub(crate)",
+            Self::Restricted => "restricted",
             Self::Private => "private",
         };
         f.write_str(s)
@@ -78,6 +80,7 @@ impl std::str::FromStr for Visibility {
         match s {
             "public" => Ok(Self::Public),
             "pub(crate)" => Ok(Self::PublicCrate),
+            "restricted" => Ok(Self::Restricted),
             "private" => Ok(Self::Private),
             other => Err(format!("unknown visibility: {other}")),
         }
@@ -471,7 +474,15 @@ fn get_visibility(node: &Node, source: &str) -> Visibility {
         return Visibility::Private;
     };
     let text = node_text(&vis_node, source);
-    if text.contains("crate") {
+    if text == "pub" {
+        return Visibility::Public;
+    }
+    // pub(...) forms: check what's inside the parens
+    // "pub(in ...)" must be checked first since "pub(in crate::x)"
+    // contains "crate" but is a path restriction, not pub(crate)
+    if text.contains("super") || text.contains("self") || text.contains("in ") {
+        Visibility::Restricted
+    } else if text.contains("crate") {
         Visibility::PublicCrate
     } else {
         Visibility::Public
@@ -607,6 +618,39 @@ fn collect_refs<S: std::hash::BuildHasher>(
     }
 }
 
+fn collect_locals(node: &Node, source: &str) -> std::collections::HashSet<String> {
+    let mut locals = std::collections::HashSet::new();
+    let mut stack = vec![*node];
+
+    while let Some(n) = stack.pop() {
+        let mut cursor = n.walk();
+        for child in n.children(&mut cursor) {
+            match child.kind() {
+                "parameter" | "self_parameter" | "let_declaration" | "for_expression" => {
+                    if let Some(pat) = find_child_by_kind(&child, "identifier") {
+                        locals.insert(node_text(&pat, source));
+                    }
+                }
+                "closure_parameters" => {
+                    let mut inner = child.walk();
+                    for param in child.children(&mut inner) {
+                        if param.kind() == "identifier" {
+                            locals.insert(node_text(&param, source));
+                        }
+                    }
+                }
+                _ => {}
+            }
+            // Always recurse except into parameter/self_parameter
+            // (they have no deeper bindings)
+            if child.kind() != "parameter" && child.kind() != "self_parameter" {
+                stack.push(child);
+            }
+        }
+    }
+    locals
+}
+
 fn collect_body_refs<S: std::hash::BuildHasher>(
     fn_node: &Node,
     source: &str,
@@ -615,6 +659,7 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
     known_symbols: &std::collections::HashSet<String, S>,
     refs: &mut Vec<SymbolRef>,
 ) {
+    let locals = collect_locals(fn_node, source);
     let mut seen = std::collections::HashSet::new();
     let mut stack = vec![*fn_node];
 
@@ -622,10 +667,16 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "type_identifier" => {
+                "type_identifier" | "identifier" => {
                     let name = node_text(&child, source);
+                    let ref_kind = if child.kind() == "type_identifier" {
+                        RefKind::TypeRef
+                    } else {
+                        RefKind::Call
+                    };
                     if name != fn_name
                         && !is_noisy_symbol(&name)
+                        && !locals.contains(&name)
                         && known_symbols.contains(&name)
                         && seen.insert(name.clone())
                     {
@@ -633,22 +684,7 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
                             source_name: fn_name.to_string(),
                             source_file: file_path.to_string(),
                             target_name: name,
-                            kind: RefKind::TypeRef,
-                        });
-                    }
-                }
-                "identifier" => {
-                    let name = node_text(&child, source);
-                    if name != fn_name
-                        && !is_noisy_symbol(&name)
-                        && known_symbols.contains(&name)
-                        && seen.insert(name.clone())
-                    {
-                        refs.push(SymbolRef {
-                            source_name: fn_name.to_string(),
-                            source_file: file_path.to_string(),
-                            target_name: name,
-                            kind: RefKind::Call,
+                            kind: ref_kind,
                         });
                     }
                 }
@@ -1176,10 +1212,7 @@ where
         );
         // but body has it
         let body = sym.body.as_deref().unwrap();
-        assert!(
-            body.contains("where"),
-            "body should contain where clause"
-        );
+        assert!(body.contains("where"), "body should contain where clause");
     }
 
     #[test]
@@ -1349,27 +1382,29 @@ pub trait Marker {}
             .iter()
             .find(|s| s.name == "Marker" && s.kind == SymbolKind::Trait)
             .unwrap();
-        assert!(
-            sym.details.is_none(),
-            "empty trait should have no details"
-        );
+        assert!(sym.details.is_none(), "empty trait should have no details");
     }
 
     // ── 4. Visibility Edge Cases ──
 
     #[test]
-    fn test_pub_super_classified_as_public() {
+    fn test_pub_super_classified_as_restricted() {
         let source = r"
 pub(super) fn parent_visible() {}
 ";
         let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
-        let sym = symbols
-            .iter()
-            .find(|s| s.name == "parent_visible")
-            .unwrap();
-        // Known limitation: get_visibility checks `text.contains("crate")`,
-        // so `pub(super)` falls through to Visibility::Public
-        assert_eq!(sym.visibility, Visibility::Public);
+        let sym = symbols.iter().find(|s| s.name == "parent_visible").unwrap();
+        assert_eq!(sym.visibility, Visibility::Restricted);
+    }
+
+    #[test]
+    fn test_pub_in_path_classified_as_restricted() {
+        let source = r"
+pub(in crate::foo) fn scoped_visible() {}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "scoped_visible").unwrap();
+        assert_eq!(sym.visibility, Visibility::Restricted);
     }
 
     #[test]
@@ -1405,11 +1440,10 @@ impl Foo {
     }
 }
 ";
-        let known: std::collections::HashSet<String> =
-            ["helper", "method", "Foo"]
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
+        let known: std::collections::HashSet<String> = ["helper", "method", "Foo"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
         let helper_ref = refs
             .iter()
@@ -1429,11 +1463,10 @@ fn caller() {
     let f = |x: i32| target() + x;
 }
 ";
-        let known: std::collections::HashSet<String> =
-            ["target", "caller"]
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
+        let known: std::collections::HashSet<String> = ["target", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
         let target_ref = refs
             .iter()
@@ -1455,11 +1488,10 @@ fn make() -> Config {
     Config { port: 8080 }
 }
 ";
-        let known: std::collections::HashSet<String> =
-            ["Config", "make"]
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
+        let known: std::collections::HashSet<String> = ["Config", "make"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
         let config_ref = refs
             .iter()
@@ -1479,11 +1511,10 @@ fn caller() -> String {
     setup().to_string()
 }
 ";
-        let known: std::collections::HashSet<String> =
-            ["setup", "caller", "to_string"]
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
+        let known: std::collections::HashSet<String> = ["setup", "caller", "to_string"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
         assert!(
             refs.iter().any(|r| r.target_name == "setup"),
@@ -1504,20 +1535,61 @@ fn caller() -> i32 {
     target() + target() + target()
 }
 ";
-        let known: std::collections::HashSet<String> =
-            ["target", "caller"]
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
-        let target_refs: Vec<_> = refs
+        let known: std::collections::HashSet<String> = ["target", "caller"]
             .iter()
-            .filter(|r| r.target_name == "target")
+            .map(|s| (*s).to_string())
             .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let target_refs: Vec<_> = refs.iter().filter(|r| r.target_name == "target").collect();
         assert_eq!(
             target_refs.len(),
             1,
             "should deduplicate refs to same target, got: {target_refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_locals_excluded_from_refs() {
+        let source = r"
+pub struct Config {}
+
+fn builder() {
+    let Config = 42;
+    Config + 1
+}
+";
+        let known: std::collections::HashSet<String> = ["Config", "builder"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        assert!(
+            !refs
+                .iter()
+                .any(|r| r.source_name == "builder" && r.target_name == "Config"),
+            "local `let Config` should shadow the struct, refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_param_excluded_from_refs() {
+        let source = r"
+pub fn target() {}
+
+fn caller(target: i32) -> i32 {
+    target + 1
+}
+";
+        let known: std::collections::HashSet<String> = ["target", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        assert!(
+            !refs
+                .iter()
+                .any(|r| r.source_name == "caller" && r.target_name == "target"),
+            "param `target` should shadow the function, refs: {refs:?}"
         );
     }
 
@@ -1533,10 +1605,7 @@ pub enum Never {}
             .iter()
             .find(|s| s.name == "Never" && s.kind == SymbolKind::Enum)
             .unwrap();
-        assert!(
-            sym.details.is_none(),
-            "empty enum should have no details"
-        );
+        assert!(sym.details.is_none(), "empty enum should have no details");
     }
 
     #[test]
@@ -1548,7 +1617,9 @@ pub mod outer {
 ";
         let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
         assert!(
-            symbols.iter().any(|s| s.name == "outer" && s.kind == SymbolKind::Mod),
+            symbols
+                .iter()
+                .any(|s| s.name == "outer" && s.kind == SymbolKind::Mod),
             "should extract mod symbol"
         );
         // Parser does not recurse into mod_item bodies (only impl_item
@@ -1565,10 +1636,7 @@ pub mod outer {
 pub use crate::inner::Symbol;
 ";
         let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
-        let sym = symbols
-            .iter()
-            .find(|s| s.kind == SymbolKind::Use)
-            .unwrap();
+        let sym = symbols.iter().find(|s| s.kind == SymbolKind::Use).unwrap();
         assert_eq!(sym.visibility, Visibility::Public);
     }
 
