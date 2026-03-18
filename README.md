@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="illu — Code intelligence for AI agents" width="700"/>
+  <img src="docs/assets/banner.svg" alt="illu — Code intelligence for AI agents" width="400"/>
 </p>
 
 <p align="center">

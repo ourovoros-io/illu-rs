@@ -1,41 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 340" width="400" height="340">
   <defs>
-    <filter id="neonCyan" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b1"/>
-      <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="b2"/>
-      <feFlood flood-color="#00fff2" flood-opacity="0.6" result="color"/>
-      <feComposite in="color" in2="b1" operator="in" result="glow"/>
-      <feMerge>
-        <feMergeNode in="glow"/>
-        <feMergeNode in="b2"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <filter id="neonMagenta" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="b1"/>
-      <feFlood flood-color="#ff00ff" flood-opacity="0.4" result="color"/>
-      <feComposite in="color" in2="b1" operator="in" result="glow"/>
-      <feMerge>
-        <feMergeNode in="glow"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <filter id="bloom" x="-100%" y="-100%" width="300%" height="300%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="20"/>
-    </filter>
-    <filter id="textNeon" x="-20%" y="-30%" width="140%" height="160%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b1"/>
-      <feFlood flood-color="#00fff2" flood-opacity="0.6" result="color"/>
-      <feComposite in="color" in2="b1" operator="in" result="glow"/>
-      <feMerge>
-        <feMergeNode in="glow"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
     <linearGradient id="cyanMagenta" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#00fff2"/>
       <stop offset="100%" stop-color="#d946ef"/>
     </linearGradient>
+    <radialGradient id="bloomCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00fff2" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#00fff2" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bloomMagenta" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d946ef" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#d946ef" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
   <!-- Background -->
@@ -56,31 +32,18 @@
   <!-- Border -->
   <rect width="400" height="340" rx="12" fill="none" stroke="url(#cyanMagenta)" stroke-width="1" opacity="0.3"/>
 
-  <!-- ================================================ -->
-  <!--  Vertical rhythm: 26px padding, 26px gaps        -->
-  <!--                                                  -->
-  <!--  y=26   top circuit node          (26px pad)     -->
-  <!--  y=44   diamond top                              -->
-  <!--  y=100  icon center                              -->
-  <!--  y=156  diamond bottom                           -->
-  <!--  y=174  bottom circuit node                      -->
-  <!--         --- 26px visual gap ---                  -->
-  <!--  y=200  "illu" visual top (~cap height)          -->
-  <!--  y=248  "illu" baseline                          -->
-  <!--         --- 26px gap ---                         -->
-  <!--  y=274  tagline baseline                         -->
-  <!--         --- 20px gap ---                         -->
-  <!--  y=294  badges top                               -->
-  <!--  y=314  badges bottom             (26px pad)     -->
-  <!-- ================================================ -->
+  <!-- Bloom (baked as radial gradient circles) -->
+  <circle cx="200" cy="100" r="90" fill="url(#bloomCyan)"/>
+  <circle cx="200" cy="100" r="60" fill="url(#bloomMagenta)"/>
 
-  <!-- Bloom -->
-  <circle cx="200" cy="100" r="45" fill="#00fff2" opacity="0.06" filter="url(#bloom)"/>
-  <circle cx="200" cy="100" r="28" fill="#d946ef" opacity="0.05" filter="url(#bloom)"/>
-
-  <!-- Diamond: center y=100, half=56 -->
+  <!-- Diamond glow layer (thicker, lower opacity = fake blur) -->
   <polygon points="200,44 256,100 200,156 144,100"
-           fill="none" stroke="#00fff2" stroke-width="1.5" filter="url(#neonCyan)" opacity="0.6"/>
+           fill="none" stroke="#00fff2" stroke-width="6" opacity="0.12"/>
+  <polygon points="200,44 256,100 200,156 144,100"
+           fill="none" stroke="#00fff2" stroke-width="3" opacity="0.25"/>
+  <!-- Diamond crisp -->
+  <polygon points="200,44 256,100 200,156 144,100"
+           fill="none" stroke="#00fff2" stroke-width="1.5" opacity="0.7"/>
 
   <!-- Circuit traces -->
   <g fill="none" stroke="#00fff2" stroke-width="0.8" opacity="0.25" stroke-linecap="round">
@@ -102,34 +65,49 @@
     <circle cx="200" cy="174" r="2"/>
   </g>
 
-  <!-- Code brackets < / > -->
-  <g transform="translate(200, 100)" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-    <polyline points="-22,-20 -35,0 -22,20" stroke="#00fff2" filter="url(#neonCyan)"/>
-    <polyline points="22,-20 35,0 22,20" stroke="#d946ef" filter="url(#neonMagenta)"/>
+  <!-- Code brackets — glow layers (fake neon via stacked strokes) -->
+  <g transform="translate(200, 100)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- < glow -->
+    <polyline points="-22,-20 -35,0 -22,20" stroke="#00fff2" stroke-width="10" opacity="0.1"/>
+    <polyline points="-22,-20 -35,0 -22,20" stroke="#00fff2" stroke-width="5" opacity="0.2"/>
+    <polyline points="-22,-20 -35,0 -22,20" stroke="#00fff2" stroke-width="3" opacity="0.9"/>
+    <!-- > glow -->
+    <polyline points="22,-20 35,0 22,20" stroke="#d946ef" stroke-width="10" opacity="0.1"/>
+    <polyline points="22,-20 35,0 22,20" stroke="#d946ef" stroke-width="5" opacity="0.2"/>
+    <polyline points="22,-20 35,0 22,20" stroke="#d946ef" stroke-width="3" opacity="0.9"/>
+    <!-- / -->
     <line x1="-8" y1="22" x2="8" y2="-22" stroke="#ffffff" stroke-width="2" opacity="0.85"/>
   </g>
 
-  <!-- "illu" — baseline at 248, visual top ~200 (26px below node at 174) -->
+  <!-- "illu" text — glow layers -->
   <text x="200" y="248" text-anchor="middle"
-        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', monospace"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
         font-weight="800" font-size="68" letter-spacing="6"
-        fill="#00fff2" filter="url(#textNeon)">illu</text>
+        fill="#00fff2" opacity="0.08" stroke="#00fff2" stroke-width="8" paint-order="stroke"/>
+  <text x="200" y="248" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="68" letter-spacing="6"
+        fill="#00fff2" opacity="0.2" stroke="#00fff2" stroke-width="4" paint-order="stroke"/>
+  <text x="200" y="248" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="68" letter-spacing="6"
+        fill="#00fff2"/>
 
-  <!-- Tagline — 26px below "illu" baseline -->
+  <!-- Tagline -->
   <text x="200" y="274" text-anchor="middle"
-        font-family="'Inter', 'Helvetica Neue', sans-serif"
+        font-family="'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
         font-weight="300" font-size="15" letter-spacing="1"
         fill="#a78bfa">Code intelligence for AI agents</text>
 
-  <!-- Tech badges — 20px below tagline, bottom at 314 (26px from edge) -->
+  <!-- Tech badges -->
   <g transform="translate(200, 294)">
     <rect x="-88" y="0" width="52" height="20" rx="3" fill="none" stroke="#00fff2" stroke-width="0.7" opacity="0.4"/>
-    <text x="-62" y="14" text-anchor="middle" font-family="monospace" font-size="10" fill="#00fff2" opacity="0.7">Rust</text>
+    <text x="-62" y="14" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#00fff2" opacity="0.7">Rust</text>
 
     <rect x="-24" y="0" width="48" height="20" rx="3" fill="none" stroke="#d946ef" stroke-width="0.7" opacity="0.4"/>
-    <text x="0" y="14" text-anchor="middle" font-family="monospace" font-size="10" fill="#d946ef" opacity="0.7">MCP</text>
+    <text x="0" y="14" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#d946ef" opacity="0.7">MCP</text>
 
     <rect x="36" y="0" width="52" height="20" rx="3" fill="none" stroke="#7c3aed" stroke-width="0.7" opacity="0.4"/>
-    <text x="62" y="14" text-anchor="middle" font-family="monospace" font-size="10" fill="#7c3aed" opacity="0.7">SQLite</text>
+    <text x="62" y="14" text-anchor="middle" font-family="Consolas, monospace" font-size="10" fill="#7c3aed" opacity="0.7">SQLite</text>
   </g>
 </svg>

@@ -1,59 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <!-- Neon cyan glow -->
-    <filter id="neonCyan" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b1"/>
-      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b2"/>
-      <feFlood flood-color="#00fff2" flood-opacity="0.6" result="color"/>
-      <feComposite in="color" in2="b1" operator="in" result="glow1"/>
-      <feMerge>
-        <feMergeNode in="glow1"/>
-        <feMergeNode in="b2"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <!-- Neon magenta glow -->
-    <filter id="neonMagenta" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b1"/>
-      <feFlood flood-color="#ff00ff" flood-opacity="0.5" result="color"/>
-      <feComposite in="color" in2="b1" operator="in" result="glow1"/>
-      <feMerge>
-        <feMergeNode in="glow1"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <!-- Big soft bloom for the center -->
-    <filter id="bloom" x="-100%" y="-100%" width="300%" height="300%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="30"/>
-    </filter>
-    <!-- Text neon glow -->
-    <filter id="textNeon" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b1"/>
-      <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="b2"/>
-      <feFlood flood-color="#00fff2" flood-opacity="0.7" result="color"/>
-      <feComposite in="color" in2="b1" operator="in" result="glow"/>
-      <feMerge>
-        <feMergeNode in="glow"/>
-        <feMergeNode in="b2"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-    <!-- Gradients -->
     <linearGradient id="cyanMagenta" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#00fff2"/>
       <stop offset="100%" stop-color="#d946ef"/>
     </linearGradient>
-    <linearGradient id="circuitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00fff2" stop-opacity="0.4"/>
-      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0.15"/>
-    </linearGradient>
+    <radialGradient id="bloomCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00fff2" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#00fff2" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bloomMagenta" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d946ef" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#d946ef" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
-  <!-- Deep dark background -->
+  <!-- Background -->
   <rect width="512" height="512" rx="40" fill="#050510"/>
 
-  <!-- Faint grid lines (Tron floor) -->
-  <g stroke="#00fff2" stroke-width="0.3" opacity="0.12">
+  <!-- Faint grid -->
+  <g stroke="#00fff2" stroke-width="0.3" opacity="0.1">
     <line x1="0" y1="128" x2="512" y2="128"/>
     <line x1="0" y1="256" x2="512" y2="256"/>
     <line x1="0" y1="384" x2="512" y2="384"/>
@@ -62,34 +27,31 @@
     <line x1="384" y1="0" x2="384" y2="512"/>
   </g>
 
-  <!-- Central bloom / energy core -->
-  <circle cx="256" cy="210" r="70" fill="#00fff2" opacity="0.08" filter="url(#bloom)"/>
-  <circle cx="256" cy="210" r="40" fill="#d946ef" opacity="0.06" filter="url(#bloom)"/>
+  <!-- Bloom -->
+  <circle cx="256" cy="210" r="120" fill="url(#bloomCyan)"/>
+  <circle cx="256" cy="210" r="80" fill="url(#bloomMagenta)"/>
 
-  <!-- Outer hexagonal ring -->
+  <!-- Outer hexagonal ring — glow layers -->
+  <polygon points="256,60 370,120 370,300 256,360 142,300 142,120"
+           fill="none" stroke="#00fff2" stroke-width="4" opacity="0.06"/>
   <polygon points="256,60 370,120 370,300 256,360 142,300 142,120"
            fill="none" stroke="url(#cyanMagenta)" stroke-width="1.5" opacity="0.25"/>
 
-  <!-- Circuit traces — angular Tron lines -->
+  <!-- Circuit traces -->
   <g fill="none" stroke="#00fff2" stroke-width="1.2" opacity="0.3" stroke-linecap="round">
-    <!-- Top left traces -->
     <polyline points="142,120 110,120 110,80"/>
     <polyline points="142,120 120,140 80,140"/>
-    <!-- Top right traces -->
     <polyline points="370,120 402,120 402,80"/>
     <polyline points="370,120 392,140 432,140"/>
-    <!-- Bottom left -->
     <polyline points="142,300 110,300 110,340"/>
     <polyline points="142,300 120,280 80,280"/>
-    <!-- Bottom right -->
     <polyline points="370,300 402,300 402,340"/>
     <polyline points="370,300 392,280 432,280"/>
-    <!-- Vertical spine -->
     <line x1="256" y1="60" x2="256" y2="30"/>
     <line x1="256" y1="360" x2="256" y2="390"/>
   </g>
 
-  <!-- Circuit nodes (dots at junctions) -->
+  <!-- Circuit nodes -->
   <g fill="#00fff2" opacity="0.5">
     <circle cx="110" cy="80" r="3"/>
     <circle cx="80" cy="140" r="3"/>
@@ -103,29 +65,45 @@
     <circle cx="256" cy="390" r="3"/>
   </g>
 
-  <!-- Inner diamond frame -->
+  <!-- Inner diamond — glow layers -->
   <polygon points="256,110 340,210 256,310 172,210"
-           fill="none" stroke="#00fff2" stroke-width="2" filter="url(#neonCyan)" opacity="0.7"/>
+           fill="none" stroke="#00fff2" stroke-width="8" opacity="0.06"/>
+  <polygon points="256,110 340,210 256,310 172,210"
+           fill="none" stroke="#00fff2" stroke-width="3" opacity="0.2"/>
+  <polygon points="256,110 340,210 256,310 172,210"
+           fill="none" stroke="#00fff2" stroke-width="1.5" opacity="0.7"/>
 
-  <!-- Code brackets < / > as the central icon -->
-  <g transform="translate(256, 210)" fill="none" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
-    <!-- < bracket — cyan -->
-    <polyline points="-38,-32 -60,0 -38,32" stroke="#00fff2" filter="url(#neonCyan)"/>
-    <!-- > bracket — magenta -->
-    <polyline points="38,-32 60,0 38,32" stroke="#d946ef" filter="url(#neonMagenta)"/>
-    <!-- / slash — white -->
+  <!-- Code brackets — glow layers -->
+  <g transform="translate(256, 210)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- < -->
+    <polyline points="-38,-32 -60,0 -38,32" stroke="#00fff2" stroke-width="14" opacity="0.08"/>
+    <polyline points="-38,-32 -60,0 -38,32" stroke="#00fff2" stroke-width="7" opacity="0.18"/>
+    <polyline points="-38,-32 -60,0 -38,32" stroke="#00fff2" stroke-width="4" opacity="0.9"/>
+    <!-- > -->
+    <polyline points="38,-32 60,0 38,32" stroke="#d946ef" stroke-width="14" opacity="0.08"/>
+    <polyline points="38,-32 60,0 38,32" stroke="#d946ef" stroke-width="7" opacity="0.18"/>
+    <polyline points="38,-32 60,0 38,32" stroke="#d946ef" stroke-width="4" opacity="0.9"/>
+    <!-- / -->
     <line x1="-12" y1="35" x2="12" y2="-35" stroke="#ffffff" stroke-width="3" opacity="0.9"/>
   </g>
 
-  <!-- "illu" text -->
+  <!-- "illu" text — glow layers -->
   <text x="256" y="430" text-anchor="middle"
-        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', monospace"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
         font-weight="800" font-size="76" letter-spacing="6"
-        fill="#00fff2" filter="url(#textNeon)">illu</text>
+        fill="#00fff2" opacity="0.07" stroke="#00fff2" stroke-width="10" paint-order="stroke"/>
+  <text x="256" y="430" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="76" letter-spacing="6"
+        fill="#00fff2" opacity="0.15" stroke="#00fff2" stroke-width="5" paint-order="stroke"/>
+  <text x="256" y="430" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="76" letter-spacing="6"
+        fill="#00fff2"/>
 
   <!-- Subtitle -->
   <text x="256" y="465" text-anchor="middle"
-        font-family="'Inter', 'Helvetica Neue', sans-serif"
+        font-family="'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
         font-weight="300" font-size="16" letter-spacing="6"
         fill="#7c3aed" opacity="0.8">CODE INTELLIGENCE</text>
 </svg>
