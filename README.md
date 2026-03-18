@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <a href="#supported-clients"><img src="https://img.shields.io/badge/Claude_Code-5A29E4?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Code"/></a>
-  <a href="#supported-clients"><img src="https://img.shields.io/badge/Gemini_CLI-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini CLI"/></a>
+  <a href="#works-with"><img src="https://img.shields.io/badge/Claude_Code-5A29E4?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Code"/></a>
+  <a href="#works-with"><img src="https://img.shields.io/badge/Gemini_CLI-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini CLI"/></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-818cf8?style=for-the-badge" alt="MCP"/></a>
 </p>
 
@@ -20,31 +20,119 @@
 
 ---
 
-**illu** (from *illumination*) is an [MCP](https://modelcontextprotocol.io/) server that gives AI agents deep understanding of Rust codebases. Instead of reading entire files or grepping blindly, your AI gets instant access to symbol definitions, call graphs, impact analysis, and version-pinned dependency docs.
+## Get Started
 
-## Setup (2 commands)
+Install and set up in your Rust project:
 
 ```bash
 cargo install --path .
-illu-rs init .
+cd your-project
+illu-rs init
 ```
 
-Done. illu indexes your codebase, writes the MCP config, and starts automatically the next time you open **Claude Code** or **Gemini CLI** in the repo.
+That's it. Open **Claude Code** or **Gemini CLI** in the repo — illu is already running.
+
+`init` indexes your codebase, writes the MCP config for both clients, and adds usage instructions to `CLAUDE.md` and `GEMINI.md`. Every time the server starts, it detects changed files and re-indexes only what's needed (sub-second).
 
 <details>
-<summary>What <code>init</code> does behind the scenes</summary>
+<summary>Manual setup (without <code>init</code>)</summary>
 
-1. Parses every `.rs` file with tree-sitter
-2. Stores symbols, references, and trait impls in `.illu/index.db` (SQLite)
-3. Writes `.mcp.json` (Claude Code) and `.gemini/settings.json` (Gemini CLI)
-4. Appends usage instructions to `CLAUDE.md` and `GEMINI.md`
-5. Adds `.illu/` to `.gitignore`
+Add to `.mcp.json` (Claude Code) or `.gemini/settings.json` (Gemini CLI):
 
-On subsequent runs, only changed files are re-indexed (content-hashed, sub-second).
+```json
+{
+  "mcpServers": {
+    "illu": {
+      "command": "/path/to/illu-rs",
+      "args": ["--repo", "/path/to/your/project", "serve"],
+      "env": { "RUST_LOG": "warn" }
+    }
+  }
+}
+```
 
 </details>
 
-## Supported Clients
+## What Your AI Gets
+
+illu gives your AI agent 6 tools through the [Model Context Protocol](https://modelcontextprotocol.io/):
+
+### Find symbols instantly — `query`
+
+Instead of grepping, the AI searches an indexed database with full-text search and exact-match priority.
+
+```
+query: "Config"                                    → symbols + docs matching Config
+query: "Config", scope: "symbols", kind: "struct"  → just the struct
+```
+
+### Understand a symbol completely — `context`
+
+One call returns everything: signature, doc comments, source body, struct fields, trait impls, callees, and related dependency docs. No need to read the whole file.
+
+```
+symbol_name: "Database"                      → full definition + who calls it
+symbol_name: "parse_config", full_body: true → untruncated source for large functions
+```
+
+### Know what breaks before changing it — `impact`
+
+Before modifying a symbol, the AI sees every function, struct, and crate that depends on it — up to 5 levels deep, with the dependency chain explained.
+
+```
+symbol_name: "Config"
+```
+
+```markdown
+## Impact Analysis: Config
+
+### Affected Crates
+- **core** (defined here)
+- **api**
+- **cli**
+
+### Depth 1
+- **parse_config** (src/lib.rs)
+
+### Depth 2
+- **run_server** (src/main.rs) — via parse_config
+```
+
+### Get accurate dependency docs — `docs`
+
+The AI looks up documentation for your exact dependency versions (from `Cargo.lock`), so it never hallucinates API signatures.
+
+```
+dependency: "serde"                    → full API summary
+dependency: "tokio", topic: "runtime"  → filtered by keyword
+```
+
+<details>
+<summary>How docs are fetched</summary>
+
+Three sources, tried in order:
+
+1. **`cargo +nightly doc`** — parses rustdoc JSON locally. Structured, version-accurate, works offline.
+2. **docs.rs** — fetches the HTML page for the exact version, extracts text.
+3. **GitHub README** — discovers repo URL via crates.io, fetches raw README.
+
+Results are cached in the database. Subsequent lookups are instant.
+
+</details>
+
+### See project structure — `overview` and `tree`
+
+The AI can explore the codebase layout without reading files:
+
+- **`overview`** — public symbols under a path, grouped by file, with signatures and doc snippets
+- **`tree`** — file/module hierarchy with symbol counts per file
+
+```
+path: "src/server/"   → public API in the server module
+path: "src/"          → full project layout
+```
+
+## Works With
 
 <table>
 <tr>
@@ -69,134 +157,47 @@ Tools: `@illu query`, `@illu context`, etc.
 </tr>
 </table>
 
-Any MCP client that supports stdio transport will work — illu speaks standard MCP.
+Any MCP client with stdio transport support works — illu speaks standard MCP.
 
-<details>
-<summary>Manual MCP config (if not using <code>init</code>)</summary>
+## Features
 
-Add to `.mcp.json` (Claude Code) or `.gemini/settings.json` (Gemini CLI):
+| Feature | What it does |
+|---------|-------------|
+| **Zero-config setup** | `illu-rs init` configures everything for both Claude and Gemini |
+| **Incremental indexing** | Content-hashed — only re-parses files that changed |
+| **Workspace support** | Multi-crate workspaces with inter-crate dependency tracking |
+| **Full-text search** | FTS5 prefix matching + trigram-indexed substring search |
+| **Call graph** | Symbol cross-references with local variable scope filtering |
+| **Trait impl tracking** | Maps which types implement which traits |
+| **Impact analysis** | Recursive CTE walks the reference graph up to depth 5 |
+| **Version-pinned docs** | `cargo doc` JSON, docs.rs, and GitHub README fallback |
+| **Full body on demand** | `full_body: true` reads untruncated source from disk |
+
+## Statusline Extension
+
+illu writes real-time status to `.illu/status`. See what it's doing in your terminal:
+
+```
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: indexing ▸ refs [12/40]
+```
+
+| Color | Meaning |
+|-------|---------|
+| Green `◆ illu` | Ready — index is current |
+| Yellow `◆ illu: indexing ...` | Parsing source files |
+| Cyan `◆ illu: fetching docs ...` | Downloading dependency docs |
+
+```bash
+cp extensions/statusline/combined-statusline.sh ~/.claude/statusline.sh
+chmod +x ~/.claude/statusline.sh
+```
 
 ```json
-{
-  "mcpServers": {
-    "illu": {
-      "command": "/path/to/illu-rs",
-      "args": ["--repo", "/path/to/your/project", "serve"],
-      "env": { "RUST_LOG": "warn" }
-    }
-  }
-}
+{ "statusLine": { "command": "~/.claude/statusline.sh" } }
 ```
 
-</details>
-
-## Tools
-
-illu provides 6 tools, each designed for a specific AI agent workflow:
-
-### `query` — Find anything in the codebase
-
-Search symbols, docs, or files by name. Full-text search with exact-match priority.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `query` | string | Search term |
-| `scope` | string? | `symbols`, `docs`, `files`, or `all` (default) |
-| `kind` | string? | `function`, `struct`, `enum`, `trait`, `impl`, `const`, `static`, `type_alias`, `macro` |
-
-```
-"Config"                              → everything matching Config
-"Config", scope: "symbols", kind: "struct"  → just the struct definition
-```
-
-### `context` — Get full details for a symbol
-
-Returns everything the AI needs to work with a symbol: signature, doc comments, source body, struct fields/enum variants, trait implementations, callees, and related dependency docs.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `symbol_name` | string | Symbol to look up |
-| `full_body` | bool? | Return untruncated source (default: false) |
-
-```
-"Database"                    → definition, fields, trait impls, callees
-"parse_config", full_body: true  → full source even for large functions
-```
-
-### `impact` — See what breaks before you change it
-
-Walks the reference graph up to depth 5 to find all transitive dependents. Shows the chain so the AI knows *why* something is affected. In workspaces, also shows affected crates.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `symbol_name` | string | Symbol to analyze |
-
-Example output:
-```markdown
-## Impact Analysis: Config
-
-### Affected Crates
-- **core** (defined here)
-- **api**
-- **cli**
-
-### Depth 1
-- **parse_config** (src/lib.rs)
-
-### Depth 2
-- **run_server** (src/main.rs) — via parse_config
-```
-
-### `docs` — Look up dependency documentation
-
-Get docs for any dependency at the exact version pinned in your `Cargo.lock`. Uses `cargo +nightly doc` (structured JSON) when available, falls back to docs.rs and GitHub READMEs.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `dependency` | string | Crate name (e.g. `serde`, `tokio`) |
-| `topic` | string? | Filter docs by keyword |
-
-```
-"serde"                       → full API summary for serde
-"tokio", topic: "runtime"     → only docs mentioning "runtime"
-```
-
-<details>
-<summary>How dependency docs are fetched</summary>
-
-1. **`cargo +nightly doc`** (preferred) — Runs locally, parses the rustdoc JSON output. Structured, version-accurate, works offline after first build.
-2. **docs.rs** — Fetches the HTML page for the exact version, extracts text.
-3. **GitHub README** — Discovers repo URL via crates.io API, fetches raw README.
-
-Results are cached in the index database. Subsequent queries are instant.
-
-</details>
-
-### `overview` — Understand project structure at a glance
-
-Lists all public symbols under a path prefix, grouped by file, with signatures and doc comment snippets.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | string | File path prefix (e.g. `src/server/`) |
-
-```
-"src/server/"    → all public types and functions in the server module
-"src/"           → full project API surface
-```
-
-### `tree` — See the file layout with symbol counts
-
-Shows the file/module hierarchy with how many public symbols each file exports. Helps the AI orient before diving into code.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | string | File path prefix |
-
-```
-"src/"           → full module tree
-"src/indexer/"   → just the indexer subtree
-```
+See [`extensions/statusline/`](extensions/statusline/) for standalone and add-to-existing options.
 
 ## How It Works
 
@@ -207,7 +208,7 @@ Shows the file/module hierarchy with how many public symbols each file exports. 
             └─────────────────┬────────────────────┘
                               │
                      ┌────────▼────────┐
-                     │   tree-sitter    │  parse ASTs
+                     │   tree-sitter    │  parse every .rs file
                      └────────┬────────┘
                               │
           symbols, refs, trait impls, deps, docs
@@ -217,7 +218,7 @@ Shows the file/module hierarchy with how many public symbols each file exports. 
                      └────────┬────────┘
                               │
                      ┌────────▼────────┐
-                     │   MCP server     │  stdio
+                     │   MCP server     │  stdio transport
                      └────────┬────────┘
                               │
           ┌───────────────────┼───────────────────┐
@@ -225,54 +226,8 @@ Shows the file/module hierarchy with how many public symbols each file exports. 
     Claude Code         Gemini CLI          Any MCP client
 ```
 
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **2-command setup** | `cargo install` + `illu-rs init .` — works immediately |
-| **Incremental indexing** | Content-hashed — only re-parses changed files |
-| **Workspace support** | Multi-crate workspaces with inter-crate dependency tracking |
-| **Full-text search** | FTS5 prefix matching + trigram substring search |
-| **Call graph** | Symbol references with scope-aware local variable filtering |
-| **Trait impl tracking** | Maps which types implement which traits |
-| **Impact analysis** | Recursive CTE walks references up to depth 5 |
-| **Dependency docs** | `cargo doc` JSON (nightly) with docs.rs/GitHub fallback |
-| **Full body access** | `full_body: true` reads untruncated source from disk |
-| **Dual client support** | Auto-configures Claude Code and Gemini CLI |
-
-## Statusline Extension
-
-illu writes real-time status to `.illu/status` so you can see what it's doing in your terminal.
-
-```
-▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu
-▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: indexing ▸ refs [12/40]
-```
-
-- **Green `◆ illu`** — ready, index is up to date
-- **Yellow `◆ illu: indexing ...`** — parsing source files
-- **Cyan `◆ illu: fetching docs ...`** — downloading dependency docs
-
-Install the combined statusline (model + repo + context + illu):
-
-```bash
-cp extensions/statusline/combined-statusline.sh ~/.claude/statusline.sh
-chmod +x ~/.claude/statusline.sh
-```
-
-Then in `~/.claude/settings.json`:
-
-```json
-{
-  "statusLine": {
-    "command": "~/.claude/statusline.sh"
-  }
-}
-```
-
-See [`extensions/statusline/`](extensions/statusline/) for standalone and add-to-existing options.
-
-## Architecture
+<details>
+<summary>Architecture</summary>
 
 ```
 src/
@@ -292,7 +247,10 @@ src/
     └── tools/           # query, context, impact, docs, overview, tree
 ```
 
-## Development
+</details>
+
+<details>
+<summary>Development</summary>
 
 ```bash
 cargo test                                                    # 243 tests
@@ -301,12 +259,14 @@ cargo fmt --all -- --check                                    # formatting
 RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
 ```
 
-| Test Suite | Count | Purpose |
-|------------|-------|---------|
+| Test Suite | Count | What it guards |
+|------------|-------|----------------|
 | Unit | 144 | Parser, DB, indexer, tool handlers |
 | Data integrity | 38 | Line numbers, signatures, refs, search correctness |
 | Data quality | 42 | End-to-end tool output format and content |
 | Integration | 19 | Full pipeline: index, query, verify |
+
+</details>
 
 ## License
 
