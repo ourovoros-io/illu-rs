@@ -292,6 +292,15 @@ fn format_fn_signature(name: &str, inner: &serde_json::Map<String, serde_json::V
     }
 }
 
+/// Parse rustdoc JSON and return formatted API summary.
+/// Exposed for integration testing.
+pub fn parse_rustdoc_json_public(
+    json_str: &str,
+    crate_name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    parse_rustdoc_json(json_str, crate_name)
+}
+
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
