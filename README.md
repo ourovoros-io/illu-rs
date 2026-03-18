@@ -50,7 +50,7 @@ On subsequent runs, only changed files are re-indexed (content-hashed, sub-secon
 <tr>
 <td width="50%" align="center">
 
-### <img src="https://img.shields.io/badge/-5A29E4?style=flat-square&logo=anthropic&logoColor=white" height="20"/> Claude Code
+### <img src="https://img.shields.io/badge/-5A29E4?style=flat-square&logo=anthropic&logoColor=white" height="20" align="center"/> &nbsp;Claude Code
 
 Auto-configured via `.mcp.json` and `CLAUDE.md`
 
@@ -59,7 +59,7 @@ Tools: `mcp__illu__query`, `mcp__illu__context`, etc.
 </td>
 <td width="50%" align="center">
 
-### <img src="https://img.shields.io/badge/-4285F4?style=flat-square&logo=google&logoColor=white" height="20"/> Gemini CLI
+### <img src="https://img.shields.io/badge/-4285F4?style=flat-square&logo=google&logoColor=white" height="20" align="center"/> &nbsp;Gemini CLI
 
 Auto-configured via `.gemini/settings.json` and `GEMINI.md`
 
