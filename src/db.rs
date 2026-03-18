@@ -26,6 +26,12 @@ newtype_id!(SymbolId);
 newtype_id!(CrateId);
 newtype_id!(DepId);
 
+fn is_fts_safe(query: &str) -> bool {
+    !query
+        .chars()
+        .any(|c| matches!(c, '"' | '%' | '\'' | '\\' | '*' | '(' | ')'))
+}
+
 fn parse_kind(s: &str) -> rusqlite::Result<SymbolKind> {
     s.parse().map_err(|e: String| {
         rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, e.into())
@@ -654,13 +660,7 @@ impl Database {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
-        // FTS5 MATCH cannot handle certain characters even when quoted.
-        // Skip FTS entirely for queries containing problematic chars and
-        // fall back to trigram or LIKE only.
-        // FTS5 MATCH cannot handle certain metacharacters
-        let fts_safe = !query
-            .chars()
-            .any(|c| matches!(c, '"' | '%' | '\'' | '\\' | '*' | '(' | ')'));
+        let fts_safe = is_fts_safe(query);
         let use_trigram = query.len() >= 3;
 
         if fts_safe {
@@ -804,10 +804,7 @@ impl Database {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let fts_safe = !query
-            .chars()
-            .any(|c| matches!(c, '"' | '%' | '\'' | '\\' | '*' | '(' | ')'));
-        if !fts_safe {
+        if !is_fts_safe(query) {
             return Ok(Vec::new());
         }
         let fts_query = format!("\"{query}\"*");
@@ -845,24 +842,31 @@ impl Database {
     }
 
     pub fn get_trait_impls_for_type(&self, type_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
-        self.query_trait_impls("ti.type_name", type_name)
-    }
-
-    pub fn get_trait_impls_for_trait(&self, trait_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
-        self.query_trait_impls("ti.trait_name", trait_name)
-    }
-
-    fn query_trait_impls(&self, column: &str, value: &str) -> SqlResult<Vec<StoredTraitImpl>> {
-        let sql = format!(
+        let mut stmt = self.conn.prepare(
             "SELECT ti.type_name, ti.trait_name, f.path, \
                     ti.line_start, ti.line_end \
              FROM trait_impls ti \
              JOIN files f ON f.id = ti.file_id \
-             WHERE {column} = ?1"
-        );
-        let mut stmt = self.conn.prepare(&sql)?;
+             WHERE ti.type_name = ?1",
+        )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![value])?;
+        let mut rows = stmt.query(params![type_name])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_trait_impl(row)?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_trait_impls_for_trait(&self, trait_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ti.type_name, ti.trait_name, f.path, \
+                    ti.line_start, ti.line_end \
+             FROM trait_impls ti \
+             JOIN files f ON f.id = ti.file_id \
+             WHERE ti.trait_name = ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![trait_name])?;
         while let Some(row) = rows.next()? {
             results.push(row_to_stored_trait_impl(row)?);
         }
@@ -953,6 +957,17 @@ impl Database {
 
     pub fn commit(&self) -> SqlResult<()> {
         self.conn.execute_batch("COMMIT")
+    }
+
+    pub fn with_transaction<T>(&self, f: impl FnOnce(&Self) -> SqlResult<T>) -> SqlResult<T> {
+        self.conn.execute_batch("BEGIN")?;
+        let result = f(self);
+        if result.is_ok() {
+            self.conn.execute_batch("COMMIT")?;
+        } else {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+        result
     }
 
     /// Insert symbol references from parsed refs, looking up IDs by name.

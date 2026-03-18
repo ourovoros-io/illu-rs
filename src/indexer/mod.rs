@@ -55,6 +55,13 @@ pub fn refresh_index(
     db: &Database,
     config: &IndexConfig,
 ) -> Result<usize, Box<dyn std::error::Error>> {
+    struct DirtyFile {
+        relative_path: String,
+        source: String,
+        hash: String,
+        crate_id: Option<crate::db::CrateId>,
+    }
+
     let file_count = db.file_count()?;
     if file_count == 0 {
         tracing::info!("Empty index — running full index");
@@ -69,7 +76,7 @@ pub fn refresh_index(
         .map(|f| (f.path, (f.content_hash, f.crate_id)))
         .collect();
 
-    let mut dirty_files: Vec<(String, String, String, Option<crate::db::CrateId>)> = Vec::new();
+    let mut dirty_files: Vec<DirtyFile> = Vec::new();
 
     // Walk all .rs files in the repo
     for result in walkdir::WalkDir::new(&config.repo_path) {
@@ -104,7 +111,12 @@ pub fn refresh_index(
 
         if needs_update {
             let crate_id = existing.get(&relative).and_then(|(_, cid)| *cid);
-            dirty_files.push((relative, source, hash, crate_id));
+            dirty_files.push(DirtyFile {
+                relative_path: relative,
+                source,
+                hash,
+                crate_id,
+            });
         }
     }
 
@@ -124,15 +136,15 @@ pub fn refresh_index(
     tracing::info!(files = count, "Re-indexing changed files");
     crate::status::set(&format!("refreshing ▸ {count} files"));
 
-    for (i, (relative, source, hash, crate_id)) in dirty_files.iter().enumerate() {
-        tracing::debug!("[{}/{}] Re-indexing {relative}", i + 1, count);
-        db.delete_file_data(relative)?;
-        let file_id = if let Some(cid) = crate_id {
-            db.insert_file_with_crate(relative, hash, *cid)?
+    for (i, df) in dirty_files.iter().enumerate() {
+        tracing::debug!("[{}/{}] Re-indexing {}", i + 1, count, df.relative_path);
+        db.delete_file_data(&df.relative_path)?;
+        let file_id = if let Some(cid) = df.crate_id {
+            db.insert_file_with_crate(&df.relative_path, &df.hash, cid)?
         } else {
-            db.insert_file(relative, hash)?
+            db.insert_file(&df.relative_path, &df.hash)?
         };
-        let (symbols, trait_impls) = parser::parse_rust_source(source, relative)
+        let (symbols, trait_impls) = parser::parse_rust_source(&df.source, &df.relative_path)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         store::store_symbols(db, file_id, &symbols)?;
         store::store_trait_impls(db, file_id, &trait_impls)?;
@@ -142,8 +154,8 @@ pub fn refresh_index(
     let known_symbols = db.get_all_symbol_names()?;
     if !known_symbols.is_empty() {
         db.begin_transaction()?;
-        for (relative, source, _, _) in &dirty_files {
-            let refs = parser::extract_refs(source, relative, &known_symbols)
+        for df in &dirty_files {
+            let refs = parser::extract_refs(&df.source, &df.relative_path, &known_symbols)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             db.store_symbol_refs(&refs)?;
         }
