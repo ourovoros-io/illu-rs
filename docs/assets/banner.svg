@@ -83,15 +83,15 @@
   <text x="200" y="248" text-anchor="middle"
         font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
         font-weight="800" font-size="68" letter-spacing="6"
-        fill="#00fff2" opacity="0.08" stroke="#00fff2" stroke-width="8" paint-order="stroke"/>
+        fill="#00fff2" opacity="0.08" stroke="#00fff2" stroke-width="8">illu</text>
   <text x="200" y="248" text-anchor="middle"
         font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
         font-weight="800" font-size="68" letter-spacing="6"
-        fill="#00fff2" opacity="0.2" stroke="#00fff2" stroke-width="4" paint-order="stroke"/>
+        fill="#00fff2" opacity="0.2" stroke="#00fff2" stroke-width="4">illu</text>
   <text x="200" y="248" text-anchor="middle"
         font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
         font-weight="800" font-size="68" letter-spacing="6"
-        fill="#00fff2"/>
+        fill="#00fff2">illu</text>
 
   <!-- Tagline -->
   <text x="200" y="274" text-anchor="middle"
