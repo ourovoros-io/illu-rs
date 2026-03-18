@@ -64,7 +64,10 @@ enum Command {
     Init,
 }
 
-fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn write_mcp_server_config(
+    repo_path: &Path,
+    config_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let binary = std::env::current_exe()?
         .canonicalize()?
         .to_string_lossy()
@@ -77,52 +80,34 @@ fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> 
         "env": { "RUST_LOG": "warn" }
     });
 
-    let mcp_path = repo_path.join(".mcp.json");
-    let mut config: serde_json::Value = std::fs::read_to_string(&mcp_path)
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut config: serde_json::Value = std::fs::read_to_string(config_path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
 
     config["mcpServers"]["illu"] = illu_entry;
 
-    std::fs::write(&mcp_path, serde_json::to_string_pretty(&config)?)?;
-    tracing::info!("Wrote MCP config to {}", mcp_path.display());
+    std::fs::write(config_path, serde_json::to_string_pretty(&config)?)?;
+    tracing::info!("Wrote MCP config to {}", config_path.display());
     Ok(())
 }
 
+fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    write_mcp_server_config(repo_path, &repo_path.join(".mcp.json"))
+}
+
 fn write_gemini_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let binary = std::env::current_exe()?
-        .canonicalize()?
-        .to_string_lossy()
-        .into_owned();
-    let repo = repo_path.canonicalize()?.to_string_lossy().into_owned();
-
-    let illu_entry = serde_json::json!({
-        "command": binary,
-        "args": ["--repo", repo, "serve"],
-        "env": { "RUST_LOG": "warn" }
-    });
-
-    let gemini_dir = repo_path.join(".gemini");
-    std::fs::create_dir_all(&gemini_dir)?;
-    let settings_path = gemini_dir.join("settings.json");
-
-    let mut config: serde_json::Value = std::fs::read_to_string(&settings_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
-
-    config["mcpServers"]["illu"] = illu_entry;
-
-    std::fs::write(&settings_path, serde_json::to_string_pretty(&config)?)?;
-    tracing::info!("Wrote Gemini config to {}", settings_path.display());
-    Ok(())
+    write_mcp_server_config(repo_path, &repo_path.join(".gemini/settings.json"))
 }
 
 const ILLU_SECTION_START: &str = "<!-- illu:start -->";
 const ILLU_SECTION_END: &str = "<!-- illu:end -->";
 
-fn illu_claude_section() -> String {
+fn illu_agent_section(cmd_prefix: &str, tool_prefix: &str) -> String {
     format!(
         "{ILLU_SECTION_START}
 ## Code Intelligence (illu)
@@ -132,114 +117,68 @@ before grep, before guessing at code structure.
 
 ### When to use illu
 
-- **Starting any task**: `illu query` the relevant symbols to understand what exists
-- **Before modifying a function/struct/trait**: `illu impact` to see what depends on it
-- **Debugging or tracing issues**: `illu context` to get the full definition and references
-- **Using an external crate**: `illu docs` to check how it's used in this project
+- **Starting any task**: `{cmd_prefix} query` the relevant symbols to understand what exists
+- **Before modifying a function/struct/trait**: `{cmd_prefix} impact` to see what depends on it
+- **Debugging or tracing issues**: `{cmd_prefix} context` to get the full definition and references
+- **Using an external crate**: `{cmd_prefix} docs` to check how it's used in this project
 - **Before reading files**: query first — illu tells you exactly where things are
 
 ### Commands
 
 | User types | MCP tool | Params |
 |------------|----------|--------|
-| `illu query <term>` | `mcp__illu__query` | `query: \"<term>\"` |
-| `illu query <term> --scope <s>` | `mcp__illu__query` | `query: \"<term>\", scope: \"<s>\"` |
-| `illu context <symbol>` | `mcp__illu__context` | `symbol_name: \"<symbol>\"` |
-| `illu impact <symbol>` | `mcp__illu__impact` | `symbol_name: \"<symbol>\"` |
-| `illu docs <dep>` | `mcp__illu__docs` | `dependency: \"<dep>\"` |
-| `illu docs <dep> --topic <t>` | `mcp__illu__docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
+| `{cmd_prefix} query <term>` | `{tool_prefix}query` | `query: \"<term>\"` |
+| `{cmd_prefix} query <term> --scope <s>` | `{tool_prefix}query` | `query: \"<term>\", scope: \"<s>\"` |
+| `{cmd_prefix} context <symbol>` | `{tool_prefix}context` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} impact <symbol>` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} docs <dep>` | `{tool_prefix}docs` | `dependency: \"<dep>\"` |
+| `{cmd_prefix} docs <dep> --topic <t>` | `{tool_prefix}docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
 
 ### Workflow rules
 
-1. **Locate before you read**: `illu query` or `illu context` to find the right file:line, then Read only what you need
-2. **Impact before you change**: always run `illu impact` before modifying any public symbol
-3. **Chain tools**: `illu query` to find candidates → `illu context` for the one you need → `illu impact` before changing it
+1. **Locate before you read**: `{cmd_prefix} query` or `{cmd_prefix} context` to find the right file:line, then Read only what you need
+2. **Impact before you change**: always run `{cmd_prefix} impact` before modifying any public symbol
+3. **Chain tools**: `{cmd_prefix} query` to find candidates → `{cmd_prefix} context` for the one you need → `{cmd_prefix} impact` before changing it
 {ILLU_SECTION_END}"
     )
+}
+
+fn write_md_section(
+    repo_path: &Path,
+    file_name: &str,
+    heading: &str,
+    section: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let md_path = repo_path.join(file_name);
+
+    let content = std::fs::read_to_string(&md_path).unwrap_or_default();
+
+    let new_content = if let Some(start) = content.find(ILLU_SECTION_START) {
+        if let Some(end) = content.find(ILLU_SECTION_END) {
+            let end = end + ILLU_SECTION_END.len();
+            format!("{}{section}{}", &content[..start], &content[end..])
+        } else {
+            format!("{}{section}{}", &content[..start], &content[start..])
+        }
+    } else if content.is_empty() {
+        format!("{heading}\n\n{section}\n")
+    } else {
+        format!("{content}\n{section}\n")
+    };
+
+    std::fs::write(&md_path, new_content)?;
+    tracing::info!("Updated {file_name} with illu section");
+    Ok(())
 }
 
 fn write_claude_md_section(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let claude_md_path = repo_path.join("CLAUDE.md");
-    let section = illu_claude_section();
-
-    let content = std::fs::read_to_string(&claude_md_path).unwrap_or_default();
-
-    let new_content = if let Some(start) = content.find(ILLU_SECTION_START) {
-        if let Some(end) = content.find(ILLU_SECTION_END) {
-            let end = end + ILLU_SECTION_END.len();
-            format!("{}{section}{}", &content[..start], &content[end..])
-        } else {
-            format!("{}{section}{}", &content[..start], &content[start..])
-        }
-    } else if content.is_empty() {
-        format!("# CLAUDE.md\n\n{section}\n")
-    } else {
-        format!("{content}\n{section}\n")
-    };
-
-    std::fs::write(&claude_md_path, new_content)?;
-    tracing::info!("Updated CLAUDE.md with illu section");
-    Ok(())
-}
-
-fn illu_gemini_section() -> String {
-    format!(
-        "{ILLU_SECTION_START}
-## Code Intelligence (illu)
-
-This repo is indexed by illu. **Use illu tools as your first step** — before reading files, \
-before grep, before guessing at code structure.
-
-### When to use illu
-
-- **Starting any task**: `@illu query` the relevant symbols to understand what exists
-- **Before modifying a function/struct/trait**: `@illu impact` to see what depends on it
-- **Debugging or tracing issues**: `@illu context` to get the full definition and references
-- **Using an external crate**: `@illu docs` to check how it's used in this project
-- **Before reading files**: query first — illu tells you exactly where things are
-
-### Commands
-
-| User types | MCP tool | Params |
-|------------|----------|--------|
-| `@illu query <term>` | `mcp_illu_query` | `query: \"<term>\"` |
-| `@illu query <term> --scope <s>` | `mcp_illu_query` | `query: \"<term>\", scope: \"<s>\"` |
-| `@illu context <symbol>` | `mcp_illu_context` | `symbol_name: \"<symbol>\"` |
-| `@illu impact <symbol>` | `mcp_illu_impact` | `symbol_name: \"<symbol>\"` |
-| `@illu docs <dep>` | `mcp_illu_docs` | `dependency: \"<dep>\"` |
-| `@illu docs <dep> --topic <t>` | `mcp_illu_docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
-
-### Workflow rules
-
-1. **Locate before you read**: `@illu query` or `@illu context` to find the right file:line, then Read only what you need
-2. **Impact before you change**: always run `@illu impact` before modifying any public symbol
-3. **Chain tools**: `@illu query` to find candidates → `@illu context` for the one you need → `@illu impact` before changing it
-{ILLU_SECTION_END}"
-    )
+    let section = illu_agent_section("illu", "mcp__illu__");
+    write_md_section(repo_path, "CLAUDE.md", "# CLAUDE.md", &section)
 }
 
 fn write_gemini_md_section(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let gemini_md_path = repo_path.join("GEMINI.md");
-    let section = illu_gemini_section();
-
-    let content = std::fs::read_to_string(&gemini_md_path).unwrap_or_default();
-
-    let new_content = if let Some(start) = content.find(ILLU_SECTION_START) {
-        if let Some(end) = content.find(ILLU_SECTION_END) {
-            let end = end + ILLU_SECTION_END.len();
-            format!("{}{section}{}", &content[..start], &content[end..])
-        } else {
-            format!("{}{section}{}", &content[..start], &content[start..])
-        }
-    } else if content.is_empty() {
-        format!("# GEMINI.md\n\n{section}\n")
-    } else {
-        format!("{content}\n{section}\n")
-    };
-
-    std::fs::write(&gemini_md_path, new_content)?;
-    tracing::info!("Updated GEMINI.md with illu section");
-    Ok(())
+    let section = illu_agent_section("@illu", "mcp_illu_");
+    write_md_section(repo_path, "GEMINI.md", "# GEMINI.md", &section)
 }
 
 fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error>> {

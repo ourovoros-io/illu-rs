@@ -4,86 +4,68 @@ use crate::indexer::parser::Symbol;
 use rusqlite::params;
 
 pub fn store_dependencies(db: &Database, deps: &[ResolvedDep]) -> rusqlite::Result<()> {
-    db.conn.execute_batch("BEGIN")?;
-    let result = store_dependencies_inner(db, deps);
-    if result.is_ok() {
-        db.conn.execute_batch("COMMIT")?;
-    } else {
-        let _ = db.conn.execute_batch("ROLLBACK");
-    }
-    result
-}
-
-fn store_dependencies_inner(db: &Database, deps: &[ResolvedDep]) -> rusqlite::Result<()> {
-    let mut stmt = db.conn.prepare(
-        "INSERT INTO dependencies \
-         (name, version, is_direct, repository_url, features) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-    )?;
-    for dep in deps {
-        let features = dep.features.join(",");
-        stmt.execute(params![
-            dep.name,
-            dep.version,
-            dep.is_direct,
-            dep.repository_url,
-            features,
-        ])?;
-    }
-    Ok(())
+    db.with_transaction(|db| {
+        let mut stmt = db.conn.prepare(
+            "INSERT INTO dependencies \
+             (name, version, is_direct, repository_url, features) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for dep in deps {
+            let features = dep.features.join(",");
+            stmt.execute(params![
+                dep.name,
+                dep.version,
+                dep.is_direct,
+                dep.repository_url,
+                features,
+            ])?;
+        }
+        Ok(())
+    })
 }
 
 pub fn store_symbols(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusqlite::Result<()> {
-    db.conn.execute_batch("BEGIN")?;
-    let result = store_symbols_inner(db, file_id, symbols);
-    if result.is_ok() {
-        db.conn.execute_batch("COMMIT")?;
-    } else {
-        let _ = db.conn.execute_batch("ROLLBACK");
-    }
-    result
-}
-
-fn store_symbols_inner(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusqlite::Result<()> {
-    let mut sym_stmt = db.conn.prepare(
-        "INSERT INTO symbols \
-         (file_id, name, kind, visibility, \
-          line_start, line_end, signature, \
-          doc_comment, body, details, attributes) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
-                 ?8, ?9, ?10, ?11)",
-    )?;
-    let mut fts_stmt = db.conn.prepare(
-        "INSERT INTO symbols_fts \
-         (rowid, name, signature, doc_comment) \
-         VALUES (?1, ?2, ?3, ?4)",
-    )?;
-    let mut trigram_stmt = db.conn.prepare(
-        "INSERT INTO symbols_trigram (rowid, name) \
-         VALUES (?1, ?2)",
-    )?;
-    for sym in symbols {
-        let line_start = i64::try_from(sym.line_start).unwrap_or(i64::MAX);
-        let line_end = i64::try_from(sym.line_end).unwrap_or(i64::MAX);
-        sym_stmt.execute(params![
-            file_id,
-            sym.name,
-            sym.kind.to_string(),
-            sym.visibility.to_string(),
-            line_start,
-            line_end,
-            sym.signature,
-            sym.doc_comment,
-            sym.body,
-            sym.details,
-            sym.attributes,
-        ])?;
-        let rowid = db.conn.last_insert_rowid();
-        let doc_for_fts = sym.doc_comment.as_deref().unwrap_or("");
-        fts_stmt.execute(params![rowid, sym.name, sym.signature, doc_for_fts])?;
-        trigram_stmt.execute(params![rowid, sym.name])?;
-    }
-    Ok(())
+    db.with_transaction(|db| {
+        let mut sym_stmt = db.conn.prepare(
+            "INSERT INTO symbols \
+             (file_id, name, kind, visibility, \
+              line_start, line_end, signature, \
+              doc_comment, body, details, attributes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
+                     ?8, ?9, ?10, ?11)",
+        )?;
+        let mut fts_stmt = db.conn.prepare(
+            "INSERT INTO symbols_fts \
+             (rowid, name, signature, doc_comment) \
+             VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        let mut trigram_stmt = db.conn.prepare(
+            "INSERT INTO symbols_trigram (rowid, name) \
+             VALUES (?1, ?2)",
+        )?;
+        for sym in symbols {
+            let line_start = i64::try_from(sym.line_start).unwrap_or(i64::MAX);
+            let line_end = i64::try_from(sym.line_end).unwrap_or(i64::MAX);
+            sym_stmt.execute(params![
+                file_id,
+                sym.name,
+                sym.kind.to_string(),
+                sym.visibility.to_string(),
+                line_start,
+                line_end,
+                sym.signature,
+                sym.doc_comment,
+                sym.body,
+                sym.details,
+                sym.attributes,
+            ])?;
+            let rowid = db.conn.last_insert_rowid();
+            let doc_for_fts = sym.doc_comment.as_deref().unwrap_or("");
+            fts_stmt.execute(params![rowid, sym.name, sym.signature, doc_for_fts])?;
+            trigram_stmt.execute(params![rowid, sym.name])?;
+        }
+        Ok(())
+    })
 }
 
 pub fn store_trait_impls(
@@ -94,38 +76,25 @@ pub fn store_trait_impls(
     if trait_impls.is_empty() {
         return Ok(());
     }
-    db.conn.execute_batch("BEGIN")?;
-    let result = store_trait_impls_inner(db, file_id, trait_impls);
-    if result.is_ok() {
-        db.conn.execute_batch("COMMIT")?;
-    } else {
-        let _ = db.conn.execute_batch("ROLLBACK");
-    }
-    result
-}
-
-fn store_trait_impls_inner(
-    db: &Database,
-    file_id: FileId,
-    trait_impls: &[crate::indexer::parser::TraitImpl],
-) -> rusqlite::Result<()> {
-    let mut stmt = db.conn.prepare(
-        "INSERT OR IGNORE INTO trait_impls \
-         (type_name, trait_name, file_id, line_start, line_end) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-    )?;
-    for ti in trait_impls {
-        let line_start = i64::try_from(ti.line_start).unwrap_or(i64::MAX);
-        let line_end = i64::try_from(ti.line_end).unwrap_or(i64::MAX);
-        stmt.execute(params![
-            ti.type_name,
-            ti.trait_name,
-            file_id,
-            line_start,
-            line_end
-        ])?;
-    }
-    Ok(())
+    db.with_transaction(|db| {
+        let mut stmt = db.conn.prepare(
+            "INSERT OR IGNORE INTO trait_impls \
+             (type_name, trait_name, file_id, line_start, line_end) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for ti in trait_impls {
+            let line_start = i64::try_from(ti.line_start).unwrap_or(i64::MAX);
+            let line_end = i64::try_from(ti.line_end).unwrap_or(i64::MAX);
+            stmt.execute(params![
+                ti.type_name,
+                ti.trait_name,
+                file_id,
+                line_start,
+                line_end
+            ])?;
+        }
+        Ok(())
+    })
 }
 
 #[cfg(test)]
