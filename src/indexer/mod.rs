@@ -77,9 +77,19 @@ pub fn refresh_index(
         .collect();
 
     let mut dirty_files: Vec<DirtyFile> = Vec::new();
+    crate::status::set("refreshing ▸ scanning files");
 
-    // Walk all .rs files in the repo
-    for result in walkdir::WalkDir::new(&config.repo_path) {
+    // Walk all .rs files in the repo, skipping target/ and hidden dirs
+    let walker = walkdir::WalkDir::new(&config.repo_path)
+        .into_iter()
+        .filter_entry(|e| {
+            if !e.file_type().is_dir() || e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            name != "target" && !name.starts_with('.')
+        });
+    for result in walker {
         let entry = match result {
             Ok(e) => e,
             Err(e) => {
@@ -91,15 +101,11 @@ pub fn refresh_index(
         if path.extension().is_none_or(|ext| ext != "rs") {
             continue;
         }
-        // Skip hidden dirs and target/
         let relative = path
             .strip_prefix(&config.repo_path)
             .unwrap_or(path)
             .to_string_lossy()
             .to_string();
-        if relative.starts_with("target/") || relative.starts_with('.') {
-            continue;
-        }
 
         let source = std::fs::read_to_string(path)?;
         let hash = content_hash(&source);
@@ -270,6 +276,13 @@ fn index_crate_sources(
     // Collect files first so we can report progress
     let rs_files: Vec<_> = walkdir::WalkDir::new(src_dir)
         .into_iter()
+        .filter_entry(|e| {
+            if !e.file_type().is_dir() || e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            name != "target" && !name.starts_with('.')
+        })
         .filter_map(|r| match r {
             Ok(e) if e.path().extension().is_some_and(|ext| ext == "rs") => Some(e.into_path()),
             Err(e) => {
