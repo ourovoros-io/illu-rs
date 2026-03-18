@@ -90,6 +90,35 @@ fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+fn write_gemini_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let binary = std::env::current_exe()?
+        .canonicalize()?
+        .to_string_lossy()
+        .into_owned();
+    let repo = repo_path.canonicalize()?.to_string_lossy().into_owned();
+
+    let illu_entry = serde_json::json!({
+        "command": binary,
+        "args": ["--repo", repo, "serve"],
+        "env": { "RUST_LOG": "warn" }
+    });
+
+    let gemini_dir = repo_path.join(".gemini");
+    std::fs::create_dir_all(&gemini_dir)?;
+    let settings_path = gemini_dir.join("settings.json");
+
+    let mut config: serde_json::Value = std::fs::read_to_string(&settings_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
+
+    config["mcpServers"]["illu"] = illu_entry;
+
+    std::fs::write(&settings_path, serde_json::to_string_pretty(&config)?)?;
+    tracing::info!("Wrote Gemini config to {}", settings_path.display());
+    Ok(())
+}
+
 const ILLU_SECTION_START: &str = "<!-- illu:start -->";
 const ILLU_SECTION_END: &str = "<!-- illu:end -->";
 
@@ -153,6 +182,66 @@ fn write_claude_md_section(repo_path: &Path) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+fn illu_gemini_section() -> String {
+    format!(
+        "{ILLU_SECTION_START}
+## Code Intelligence (illu)
+
+This repo is indexed by illu. **Use illu tools as your first step** — before reading files, \
+before grep, before guessing at code structure.
+
+### When to use illu
+
+- **Starting any task**: `@illu query` the relevant symbols to understand what exists
+- **Before modifying a function/struct/trait**: `@illu impact` to see what depends on it
+- **Debugging or tracing issues**: `@illu context` to get the full definition and references
+- **Using an external crate**: `@illu docs` to check how it's used in this project
+- **Before reading files**: query first — illu tells you exactly where things are
+
+### Commands
+
+| User types | MCP tool | Params |
+|------------|----------|--------|
+| `@illu query <term>` | `mcp_illu_query` | `query: \"<term>\"` |
+| `@illu query <term> --scope <s>` | `mcp_illu_query` | `query: \"<term>\", scope: \"<s>\"` |
+| `@illu context <symbol>` | `mcp_illu_context` | `symbol_name: \"<symbol>\"` |
+| `@illu impact <symbol>` | `mcp_illu_impact` | `symbol_name: \"<symbol>\"` |
+| `@illu docs <dep>` | `mcp_illu_docs` | `dependency: \"<dep>\"` |
+| `@illu docs <dep> --topic <t>` | `mcp_illu_docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
+
+### Workflow rules
+
+1. **Locate before you read**: `@illu query` or `@illu context` to find the right file:line, then Read only what you need
+2. **Impact before you change**: always run `@illu impact` before modifying any public symbol
+3. **Chain tools**: `@illu query` to find candidates → `@illu context` for the one you need → `@illu impact` before changing it
+{ILLU_SECTION_END}"
+    )
+}
+
+fn write_gemini_md_section(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let gemini_md_path = repo_path.join("GEMINI.md");
+    let section = illu_gemini_section();
+
+    let content = std::fs::read_to_string(&gemini_md_path).unwrap_or_default();
+
+    let new_content = if let Some(start) = content.find(ILLU_SECTION_START) {
+        if let Some(end) = content.find(ILLU_SECTION_END) {
+            let end = end + ILLU_SECTION_END.len();
+            format!("{}{section}{}", &content[..start], &content[end..])
+        } else {
+            format!("{}{section}{}", &content[..start], &content[start..])
+        }
+    } else if content.is_empty() {
+        format!("# GEMINI.md\n\n{section}\n")
+    } else {
+        format!("{content}\n{section}\n")
+    };
+
+    std::fs::write(&gemini_md_path, new_content)?;
+    tracing::info!("Updated GEMINI.md with illu section");
+    Ok(())
+}
+
 fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error>> {
     let db_path = repo_path.join(".illu/index.db");
     if db_path.exists() {
@@ -202,13 +291,17 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Setting up illu in {}", repo_path.display());
 
-    // 1. Write .mcp.json
+    // 1. Write MCP configs for both Claude Code and Gemini CLI
     write_mcp_config(&repo_path)?;
-    println!("  wrote .mcp.json");
+    println!("  wrote .mcp.json (Claude Code)");
+    write_gemini_config(&repo_path)?;
+    println!("  wrote .gemini/settings.json (Gemini CLI)");
 
-    // 2. Update CLAUDE.md
+    // 2. Update instruction files for both
     write_claude_md_section(&repo_path)?;
     println!("  updated CLAUDE.md");
+    write_gemini_md_section(&repo_path)?;
+    println!("  updated GEMINI.md");
 
     // 3. Build initial index
     println!("  indexing...");
@@ -220,7 +313,7 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         println!("  added .illu/ to .gitignore");
     }
 
-    println!("\nDone. Start Claude Code in this repo and illu will run automatically.");
+    println!("\nDone. Start Claude Code or Gemini CLI in this repo — illu will run automatically.");
     Ok(())
 }
 
@@ -263,6 +356,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             illu_rs::status::set("starting");
             write_mcp_config(repo_path)?;
             write_claude_md_section(repo_path)?;
+            write_gemini_config(repo_path)?;
+            write_gemini_md_section(repo_path)?;
 
             let config = IndexConfig {
                 repo_path: repo_path.clone(),
