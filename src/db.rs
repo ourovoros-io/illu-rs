@@ -83,12 +83,16 @@ fn row_to_doc_result(row: &rusqlite::Row) -> SqlResult<DocResult> {
 
 pub struct Database {
     pub(crate) conn: Connection,
+    repo_root: Option<std::path::PathBuf>,
 }
 
 impl Database {
     pub fn open_in_memory() -> SqlResult<Self> {
         let conn = Connection::open_in_memory()?;
-        let db = Self { conn };
+        let db = Self {
+            conn,
+            repo_root: None,
+        };
         db.migrate()?;
         Ok(db)
     }
@@ -103,9 +107,19 @@ impl Database {
              PRAGMA temp_store = MEMORY;
              PRAGMA foreign_keys = ON;",
         )?;
-        let db = Self { conn };
+        // DB path is {repo}/.illu/index.db — derive repo root
+        let repo_root = path
+            .parent()
+            .filter(|p| p.file_name().is_some_and(|n| n == ".illu"))
+            .and_then(|p| p.parent())
+            .map(std::path::Path::to_path_buf);
+        let db = Self { conn, repo_root };
         db.migrate()?;
         Ok(db)
+    }
+
+    pub fn repo_root(&self) -> Option<&std::path::Path> {
+        self.repo_root.as_deref()
     }
 
     fn migrate(&self) -> SqlResult<()> {
@@ -188,6 +202,11 @@ impl Database {
                 content_rowid=id
             );
 
+            CREATE VIRTUAL TABLE IF NOT EXISTS symbols_trigram USING fts5(
+                name, tokenize='trigram', content=symbols,
+                content_rowid=id
+            );
+
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
                 content, content=docs, content_rowid=id
             );
@@ -214,8 +233,8 @@ impl Database {
         self.migrate_fts_schema()
     }
 
-    /// Detect old FTS schema missing `doc_comment` column and
-    /// rebuild if needed. Safe to call on fresh databases too.
+    /// Detect old FTS schema and rebuild if needed.
+    /// Handles: missing `doc_comment` column, missing trigram table.
     pub fn migrate_fts_schema(&self) -> SqlResult<()> {
         let sql: String = self.conn.query_row(
             "SELECT sql FROM sqlite_master \
@@ -234,6 +253,23 @@ impl Database {
                      SELECT id, name, signature, doc_comment FROM symbols;",
             )?;
         }
+
+        let has_trigram: bool = self.conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master \
+             WHERE type='table' AND name='symbols_trigram'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_trigram {
+            self.conn.execute_batch(
+                "CREATE VIRTUAL TABLE symbols_trigram USING fts5(
+                     name, tokenize='trigram',
+                     content=symbols, content_rowid=id
+                 );
+                 INSERT INTO symbols_trigram(rowid, name)
+                     SELECT id, name FROM symbols;",
+            )?;
+        }
         Ok(())
     }
 
@@ -241,6 +277,7 @@ impl Database {
         self.conn.execute_batch(
             "DELETE FROM docs_fts;
              DELETE FROM symbols_fts;
+             DELETE FROM symbols_trigram;
              DELETE FROM docs;
              DELETE FROM symbol_refs;
              DELETE FROM trait_impls;
@@ -521,10 +558,8 @@ impl Database {
         let Some(fid) = file_id else {
             return Ok(());
         };
-        self.conn.execute(
-            "DELETE FROM trait_impls WHERE file_id = ?1",
-            params![fid],
-        )?;
+        self.conn
+            .execute("DELETE FROM trait_impls WHERE file_id = ?1", params![fid])?;
         self.conn.execute(
             "DELETE FROM symbol_refs WHERE source_symbol_id IN \
              (SELECT id FROM symbols WHERE file_id = ?1) \
@@ -534,6 +569,11 @@ impl Database {
         )?;
         self.conn.execute(
             "DELETE FROM symbols_fts WHERE rowid IN \
+             (SELECT id FROM symbols WHERE file_id = ?1)",
+            params![fid],
+        )?;
+        self.conn.execute(
+            "DELETE FROM symbols_trigram WHERE rowid IN \
              (SELECT id FROM symbols WHERE file_id = ?1)",
             params![fid],
         )?;
@@ -569,7 +609,8 @@ impl Database {
             )
             SELECT DISTINCT name, file_path, depth, via FROM deps
             WHERE depth > 0
-            ORDER BY depth, name",
+            ORDER BY depth, name
+            LIMIT 100",
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name])?;
@@ -614,35 +655,69 @@ impl Database {
             return Ok(Vec::new());
         }
         let fts_query = format!("{query}*");
-        let like_pattern = format!("%{query}%");
-        let mut stmt = self.conn.prepare(
-            "WITH fts_results AS ( \
-                SELECT fts.rowid AS sid \
-                FROM symbols_fts fts \
-                WHERE symbols_fts MATCH ?1 \
-            ), \
-            like_results AS ( \
-                SELECT s.id AS sid \
-                FROM symbols s \
-                WHERE s.name LIKE ?3 \
-                  AND s.id NOT IN (SELECT sid FROM fts_results) \
-            ), \
-            combined AS ( \
-                SELECT sid, 0 AS source FROM fts_results \
-                UNION ALL \
-                SELECT sid, 1 AS source FROM like_results \
-            ) \
-            SELECT s.name, s.kind, s.visibility, f.path, \
-                   s.line_start, s.line_end, s.signature, \
-                   s.doc_comment, s.body, s.details, s.attributes \
-            FROM combined c \
-            JOIN symbols s ON s.id = c.sid \
-            JOIN files f ON f.id = s.file_id \
-            ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
-                     c.source, s.name",
-        )?;
+        let use_trigram = query.len() >= 3;
+
+        // The two SQL variants differ only in the fallback CTE
+        let (sql, substr_param) = if use_trigram {
+            (
+                "WITH fts_results AS ( \
+                    SELECT fts.rowid AS sid FROM symbols_fts fts \
+                    WHERE symbols_fts MATCH ?1 \
+                ), \
+                fallback AS ( \
+                    SELECT tri.rowid AS sid FROM symbols_trigram tri \
+                    WHERE symbols_trigram MATCH ?3 \
+                      AND tri.rowid NOT IN (SELECT sid FROM fts_results) \
+                ), \
+                combined AS ( \
+                    SELECT sid, 0 AS source FROM fts_results \
+                    UNION ALL \
+                    SELECT sid, 1 AS source FROM fallback \
+                ) \
+                SELECT s.name, s.kind, s.visibility, f.path, \
+                       s.line_start, s.line_end, s.signature, \
+                       s.doc_comment, s.body, s.details, s.attributes \
+                FROM combined c \
+                JOIN symbols s ON s.id = c.sid \
+                JOIN files f ON f.id = s.file_id \
+                ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
+                         c.source, s.name \
+                LIMIT 50",
+                query.to_string(),
+            )
+        } else {
+            let escaped = query.replace('%', r"\%").replace('_', r"\_");
+            (
+                "WITH fts_results AS ( \
+                    SELECT fts.rowid AS sid FROM symbols_fts fts \
+                    WHERE symbols_fts MATCH ?1 \
+                ), \
+                fallback AS ( \
+                    SELECT s.id AS sid FROM symbols s \
+                    WHERE s.name LIKE ?3 ESCAPE '\\' \
+                      AND s.id NOT IN (SELECT sid FROM fts_results) \
+                ), \
+                combined AS ( \
+                    SELECT sid, 0 AS source FROM fts_results \
+                    UNION ALL \
+                    SELECT sid, 1 AS source FROM fallback \
+                ) \
+                SELECT s.name, s.kind, s.visibility, f.path, \
+                       s.line_start, s.line_end, s.signature, \
+                       s.doc_comment, s.body, s.details, s.attributes \
+                FROM combined c \
+                JOIN symbols s ON s.id = c.sid \
+                JOIN files f ON f.id = s.file_id \
+                ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
+                         c.source, s.name \
+                LIMIT 50",
+                format!("%{escaped}%"),
+            )
+        };
+
+        let mut stmt = self.conn.prepare_cached(sql)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![fts_query, query, like_pattern])?;
+        let mut rows = stmt.query(params![fts_query, query, substr_param])?;
         while let Some(row) = rows.next()? {
             results.push(row_to_stored_symbol(row)?);
         }
@@ -708,7 +783,8 @@ impl Database {
              FROM docs_fts fts \
              JOIN docs d ON d.id = fts.rowid \
              JOIN dependencies dep ON dep.id = d.dependency_id \
-             WHERE docs_fts MATCH ?1",
+             WHERE docs_fts MATCH ?1 \
+             LIMIT 20",
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![fts_query])?;
@@ -1171,7 +1247,10 @@ mod tests {
         )
         .unwrap();
         // Wrap in Database and run migration
-        let db = Database { conn };
+        let db = Database {
+            conn,
+            repo_root: None,
+        };
         db.migrate_fts_schema().unwrap();
         // Verify new FTS schema has doc_comment
         let sql: String = db
@@ -1377,6 +1456,13 @@ mod tests {
                 params![sym_id],
             )
             .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_trigram (rowid, name) \
+                 VALUES (?1, 'Foo')",
+                params![sym_id],
+            )
+            .unwrap();
         db.insert_trait_impl("Foo", "Display", file_id, 10, 20)
             .unwrap();
 
@@ -1493,12 +1579,55 @@ mod tests {
                 params![rowid],
             )
             .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_trigram (rowid, name) \
+                 VALUES (?1, 'AppConfigLoader')",
+                params![rowid],
+            )
+            .unwrap();
         // FTS5 prefix "onfig*" won't match "AppConfigLoader"
         // since the tokenizer treats the whole name as one token.
-        // The LIKE fallback (%onfig%) should catch it.
+        // The trigram index catches substring matches.
         let results = db.search_symbols("onfig").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "AppConfigLoader");
+    }
+
+    #[test]
+    fn test_search_symbols_escapes_like_metacharacters() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        // Insert symbol whose name contains a LIKE wildcard character
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'my_func', 'function', 'public', \
+                         1, 5, 'pub fn my_func()')",
+                params![file_id],
+            )
+            .unwrap();
+        let rowid = db.conn.last_insert_rowid();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts (rowid, name, signature, doc_comment) \
+                 VALUES (?1, 'my_func', 'pub fn my_func()', '')",
+                params![rowid],
+            )
+            .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols_trigram (rowid, name) VALUES (?1, 'my_func')",
+                params![rowid],
+            )
+            .unwrap();
+        // Searching for "y_f" should NOT match via unescaped "_" wildcard
+        // matching any character — it should match only because of trigram
+        let results = db.search_symbols("y_f").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "my_func");
     }
 
     #[test]

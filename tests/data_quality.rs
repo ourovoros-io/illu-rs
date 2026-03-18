@@ -47,9 +47,7 @@ fn index_source(lib_rs: &str) -> (tempfile::TempDir, Database) {
 
 /// Index a multi-file single-crate project.
 /// `files` is a list of (`relative_path`, content) pairs under `src/`.
-fn index_multi_file(
-    files: &[(&str, &str)],
-) -> (tempfile::TempDir, Database) {
+fn index_multi_file(files: &[(&str, &str)]) -> (tempfile::TempDir, Database) {
     let dir = tempfile::TempDir::new().unwrap();
 
     std::fs::write(
@@ -80,12 +78,7 @@ fn index_multi_file(
     (dir, db)
 }
 
-fn write_crate(
-    base: &std::path::Path,
-    name: &str,
-    cargo_toml: &str,
-    lib_rs: &str,
-) {
+fn write_crate(base: &std::path::Path, name: &str, cargo_toml: &str, lib_rs: &str) {
     let crate_dir = base.join(name);
     std::fs::create_dir_all(crate_dir.join("src")).unwrap();
     std::fs::write(crate_dir.join("Cargo.toml"), cargo_toml).unwrap();
@@ -110,11 +103,8 @@ where
 }
 ",
     );
-    let result = context::handle_context(&db, "collect_items").unwrap();
-    assert!(
-        result.contains("collect_items"),
-        "should find the function"
-    );
+    let result = context::handle_context(&db, "collect_items", false).unwrap();
+    assert!(result.contains("collect_items"), "should find the function");
     assert!(
         result.contains("<T, I>") || result.contains("<T,I>"),
         "signature must include generic params: {result}"
@@ -134,7 +124,7 @@ pub async fn fetch_data(url: &str) -> Result<String, Box<dyn std::error::Error>>
 }
 ",
     );
-    let result = context::handle_context(&db, "fetch_data").unwrap();
+    let result = context::handle_context(&db, "fetch_data", false).unwrap();
     assert!(
         result.contains("async"),
         "signature must include async keyword: {result}"
@@ -156,7 +146,7 @@ pub struct BorrowedSlice<'a, T: Clone> {
 }
 ",
     );
-    let result = context::handle_context(&db, "BorrowedSlice").unwrap();
+    let result = context::handle_context(&db, "BorrowedSlice", false).unwrap();
     assert!(
         result.contains("'a") && result.contains('T'),
         "signature must include lifetime and generic: {result}"
@@ -190,7 +180,7 @@ pub enum Value {
 }
 ",
     );
-    let result = context::handle_context(&db, "Value").unwrap();
+    let result = context::handle_context(&db, "Value", false).unwrap();
     for variant in &["Null", "Bool(bool)", "Int(i64)", "Text(String)", "Map("] {
         assert!(
             result.contains(variant),
@@ -217,7 +207,7 @@ pub trait Store {
 }
 ",
     );
-    let result = context::handle_context(&db, "Store").unwrap();
+    let result = context::handle_context(&db, "Store", false).unwrap();
     assert!(
         result.contains("data store abstraction"),
         "trait doc comment: {result}"
@@ -261,7 +251,7 @@ fn type_alias_preserved() {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 ",
     );
-    let result = context::handle_context(&db, "BoxError").unwrap();
+    let result = context::handle_context(&db, "BoxError", false).unwrap();
     assert!(
         result.contains("type_alias"),
         "should be identified as type_alias: {result}"
@@ -315,7 +305,7 @@ impl Default for Point {
 }
 "#,
     );
-    let result = context::handle_context(&db, "Point").unwrap();
+    let result = context::handle_context(&db, "Point", false).unwrap();
     assert!(
         result.contains("Display"),
         "Display impl must be shown: {result}"
@@ -340,19 +330,19 @@ pub fn beta() {}
 pub fn gamma() {}
 ";
     let (_dir, db) = index_source(source);
-    let result = context::handle_context(&db, "alpha").unwrap();
+    let result = context::handle_context(&db, "alpha", false).unwrap();
     assert!(
         result.contains("1-1") || result.contains(":1-"),
         "alpha should start at line 1: {result}"
     );
 
-    let result = context::handle_context(&db, "beta").unwrap();
+    let result = context::handle_context(&db, "beta", false).unwrap();
     assert!(
         result.contains(":3-"),
         "beta should start at line 3: {result}"
     );
 
-    let result = context::handle_context(&db, "gamma").unwrap();
+    let result = context::handle_context(&db, "gamma", false).unwrap();
     assert!(
         result.contains(":5-"),
         "gamma should start at line 5: {result}"
@@ -375,7 +365,7 @@ fn multiline_doc_comment_fully_captured() {
 pub fn documented() {}
 ",
     );
-    let result = context::handle_context(&db, "documented").unwrap();
+    let result = context::handle_context(&db, "documented", false).unwrap();
     assert!(
         result.contains("First line of docs"),
         "first line: {result}"
@@ -399,7 +389,7 @@ pub struct Packet {
 }
 ",
     );
-    let result = context::handle_context(&db, "Packet").unwrap();
+    let result = context::handle_context(&db, "Packet", false).unwrap();
     assert!(
         result.contains("derive(Debug, Clone)"),
         "derive attribute: {result}"
@@ -422,7 +412,7 @@ pub fn caller() -> u32 {
 }
 ",
     );
-    let result = context::handle_context(&db, "caller").unwrap();
+    let result = context::handle_context(&db, "caller", false).unwrap();
     assert!(
         result.contains("helper"),
         "caller should reference helper in callees: {result}"
@@ -448,7 +438,7 @@ pub fn make_config() -> Config {
 }
 ",
     );
-    let result = context::handle_context(&db, "make_config").unwrap();
+    let result = context::handle_context(&db, "make_config", false).unwrap();
     assert!(
         result.contains("Config"),
         "make_config should reference Config: {result}"
@@ -467,14 +457,8 @@ pub fn top() -> i32 { mid() + 1 }
 ",
     );
     let result = impact::handle_impact(&db, "base").unwrap();
-    assert!(
-        result.contains("mid"),
-        "direct dependent: {result}"
-    );
-    assert!(
-        result.contains("top"),
-        "transitive dependent: {result}"
-    );
+    assert!(result.contains("mid"), "direct dependent: {result}");
+    assert!(result.contains("top"), "transitive dependent: {result}");
     assert!(
         result.contains("Depth 1") && result.contains("Depth 2"),
         "should show depth levels: {result}"
@@ -524,10 +508,7 @@ pub struct Config {}
     let result = query::handle_query(&db, "Config", Some("symbols"), None).unwrap();
     let config_pos = result.find("**Config**");
     let configure_pos = result.find("configure");
-    assert!(
-        config_pos.is_some(),
-        "exact match must appear: {result}"
-    );
+    assert!(config_pos.is_some(), "exact match must appear: {result}");
     if let (Some(c), Some(cf)) = (config_pos, configure_pos) {
         assert!(
             c < cf,
@@ -545,13 +526,7 @@ pub struct Process {}
 pub trait Processable {}
 ",
     );
-    let result = query::handle_query(
-        &db,
-        "Process",
-        Some("symbols"),
-        Some("struct"),
-    )
-    .unwrap();
+    let result = query::handle_query(&db, "Process", Some("symbols"), Some("struct")).unwrap();
     assert!(result.contains("Process"), "struct should appear: {result}");
     assert!(
         !result.contains("(function)"),
@@ -602,7 +577,7 @@ pub fn tokenize(input: &str) -> Vec<String> {
 }
 ",
     );
-    let result = context::handle_context(&db, "tokenize").unwrap();
+    let result = context::handle_context(&db, "tokenize", false).unwrap();
 
     assert!(
         result.contains("## tokenize (function)"),
@@ -612,10 +587,7 @@ pub fn tokenize(input: &str) -> Vec<String> {
         result.contains("> Parse raw input into tokens"),
         "doc comment blockquote: {result}"
     );
-    assert!(
-        result.contains("**File:**"),
-        "file location: {result}"
-    );
+    assert!(result.contains("**File:**"), "file location: {result}");
     assert!(
         result.contains("**Visibility:** public"),
         "visibility: {result}"
@@ -624,14 +596,8 @@ pub fn tokenize(input: &str) -> Vec<String> {
         result.contains("**Signature:** `"),
         "signature in code span: {result}"
     );
-    assert!(
-        result.contains("### Source"),
-        "source section: {result}"
-    );
-    assert!(
-        result.contains("```rust"),
-        "source in code block: {result}"
-    );
+    assert!(result.contains("### Source"), "source section: {result}");
+    assert!(result.contains("```rust"), "source in code block: {result}");
 }
 
 #[test]
@@ -683,10 +649,7 @@ pub fn middle() -> i32 { leaf() }
         result.contains("## Impact Analysis: leaf"),
         "impact header: {result}"
     );
-    assert!(
-        result.contains("### Depth 1"),
-        "depth section: {result}"
-    );
+    assert!(result.contains("### Depth 1"), "depth section: {result}");
     assert!(
         result.contains("**middle**"),
         "dependent name bold: {result}"
@@ -711,10 +674,7 @@ fn private_helper() {}
     );
     let result = overview::handle_overview(&db, "src/").unwrap();
 
-    assert!(
-        result.contains("### src/lib.rs"),
-        "file header: {result}"
-    );
+    assert!(result.contains("### src/lib.rs"), "file header: {result}");
     assert!(
         result.contains("**Config** (struct)"),
         "struct entry: {result}"
@@ -727,10 +687,7 @@ fn private_helper() {}
         !result.contains("private_helper"),
         "private items must not appear: {result}"
     );
-    assert!(
-        result.contains("Summary:"),
-        "summary section: {result}"
-    );
+    assert!(result.contains("Summary:"), "summary section: {result}");
     assert!(
         result.contains("*A config struct.*"),
         "doc snippet: {result}"
@@ -753,14 +710,8 @@ fn tree_output_format() {
         result.contains("`src/lib.rs`"),
         "file in backticks: {result}"
     );
-    assert!(
-        result.contains("`src/models.rs`"),
-        "nested file: {result}"
-    );
-    assert!(
-        result.contains("Total:"),
-        "total summary: {result}"
-    );
+    assert!(result.contains("`src/models.rs`"), "nested file: {result}");
+    assert!(result.contains("Total:"), "total summary: {result}");
 }
 
 // =========================================================================
@@ -770,9 +721,7 @@ fn tree_output_format() {
 #[test]
 fn html_extraction_strips_tags_cleanly() {
     let db = Database::open_in_memory().unwrap();
-    let dep_id = db
-        .insert_dependency("tokio", "1.37.0", true, None)
-        .unwrap();
+    let dep_id = db.insert_dependency("tokio", "1.37.0", true, None).unwrap();
     let doc_content = concat!(
         "Tokio is an asynchronous runtime for Rust. ",
         "It provides async I/O, networking, scheduling, and timers. ",
@@ -787,10 +736,7 @@ fn html_extraction_strips_tags_cleanly() {
         result.contains("asynchronous runtime"),
         "core description: {result}"
     );
-    assert!(
-        result.contains("tokio::spawn"),
-        "API reference: {result}"
-    );
+    assert!(result.contains("tokio::spawn"), "API reference: {result}");
 
     let result = docs::handle_docs(&db, "tokio", Some("spawn")).unwrap();
     assert!(
@@ -807,8 +753,7 @@ fn docs_tool_distinguishes_known_vs_unknown_deps() {
 
     let result = docs::handle_docs(&db, "known_crate", None).unwrap();
     assert!(
-        result.contains("known dependency")
-            && result.contains("no docs were fetched"),
+        result.contains("known dependency") && result.contains("no docs were fetched"),
         "should explain docs not fetched: {result}"
     );
 
@@ -822,9 +767,7 @@ fn docs_tool_distinguishes_known_vs_unknown_deps() {
 #[test]
 fn docs_topic_search_with_known_dep_no_match() {
     let db = Database::open_in_memory().unwrap();
-    let dep_id = db
-        .insert_dependency("serde", "1.0.0", true, None)
-        .unwrap();
+    let dep_id = db.insert_dependency("serde", "1.0.0", true, None).unwrap();
     db.store_doc(dep_id, "docs.rs", "Serde serialization framework")
         .unwrap();
 
@@ -847,14 +790,8 @@ fn docs_multiple_sources_shown() {
         .unwrap();
 
     let result = docs::handle_docs(&db, "reqwest", None).unwrap();
-    assert!(
-        result.contains("docs.rs"),
-        "docs.rs source shown: {result}"
-    );
-    assert!(
-        result.contains("readme"),
-        "readme source shown: {result}"
-    );
+    assert!(result.contains("docs.rs"), "docs.rs source shown: {result}");
+    assert!(result.contains("readme"), "readme source shown: {result}");
 }
 
 // =========================================================================
@@ -864,10 +801,7 @@ fn docs_multiple_sources_shown() {
 #[test]
 fn cross_file_reference_in_impact() {
     let (_dir, db) = index_multi_file(&[
-        (
-            "lib.rs",
-            "pub mod models;\npub mod service;\n",
-        ),
+        ("lib.rs", "pub mod models;\npub mod service;\n"),
         (
             "models.rs",
             "pub struct User {\n    pub name: String,\n    pub email: String,\n}\n",
@@ -977,26 +911,20 @@ fn workspace_crate_impact_propagation() {
         result.contains("Affected Crates"),
         "workspace impact must show crate summary: {result}"
     );
-    assert!(
-        result.contains("core"),
-        "defining crate: {result}"
-    );
-    assert!(
-        result.contains("api"),
-        "direct dependent crate: {result}"
-    );
+    assert!(result.contains("core"), "defining crate: {result}");
+    assert!(result.contains("api"), "direct dependent crate: {result}");
 }
 
 #[test]
 fn workspace_context_shows_correct_file_paths() {
     let (_dir, db) = index_workspace();
-    let result = context::handle_context(&db, "User").unwrap();
+    let result = context::handle_context(&db, "User", false).unwrap();
     assert!(
         result.contains("core/src/lib.rs"),
         "file path should be crate-relative: {result}"
     );
 
-    let result = context::handle_context(&db, "create_user").unwrap();
+    let result = context::handle_context(&db, "create_user", false).unwrap();
     assert!(
         result.contains("api/src/lib.rs"),
         "api function path: {result}"
@@ -1032,10 +960,7 @@ fn workspace_overview_scoped_to_crate() {
     );
 
     let result = overview::handle_overview(&db, "api/").unwrap();
-    assert!(
-        result.contains("create_user"),
-        "api overview: {result}"
-    );
+    assert!(result.contains("create_user"), "api overview: {result}");
 }
 
 // =========================================================================
@@ -1046,17 +971,13 @@ fn workspace_overview_scoped_to_crate() {
 fn empty_source_file() {
     let (_dir, db) = index_source("");
     let result = overview::handle_overview(&db, "src/").unwrap();
-    assert!(
-        result.contains("No public symbols"),
-        "empty file: {result}"
-    );
+    assert!(result.contains("No public symbols"), "empty file: {result}");
 }
 
 #[test]
 fn source_with_only_private_items() {
-    let (_dir, db) = index_source(
-        "fn private_one() {}\nfn private_two() {}\nstruct InternalState {}\n",
-    );
+    let (_dir, db) =
+        index_source("fn private_one() {}\nfn private_two() {}\nstruct InternalState {}\n");
     let result = overview::handle_overview(&db, "src/").unwrap();
     assert!(
         result.contains("No public symbols"),
@@ -1072,10 +993,7 @@ fn deeply_nested_module_paths_in_tree() {
         ("a/b/mod.rs", "pub fn deep_fn() {}\n"),
     ]);
     let result = tree::handle_tree(&db, "src/").unwrap();
-    assert!(
-        result.contains("src/a/mod.rs"),
-        "nested module: {result}"
-    );
+    assert!(result.contains("src/a/mod.rs"), "nested module: {result}");
     assert!(
         result.contains("src/a/b/mod.rs"),
         "deeply nested module: {result}"
@@ -1103,13 +1021,7 @@ pub fn error() -> String {
         "should find both type definitions: {result}"
     );
 
-    let result = query::handle_query(
-        &db,
-        "Error",
-        Some("symbols"),
-        Some("function"),
-    )
-    .unwrap();
+    let result = query::handle_query(&db, "Error", Some("symbols"), Some("function")).unwrap();
     assert!(
         result.contains("error") && result.contains("function"),
         "function filter: {result}"
@@ -1118,10 +1030,8 @@ pub fn error() -> String {
 
 #[test]
 fn pub_crate_visibility_shown() {
-    let (_dir, db) = index_source(
-        "pub(crate) fn internal_api() -> u32 { 42 }\n",
-    );
-    let result = context::handle_context(&db, "internal_api").unwrap();
+    let (_dir, db) = index_source("pub(crate) fn internal_api() -> u32 { 42 }\n");
+    let result = context::handle_context(&db, "internal_api", false).unwrap();
     assert!(
         result.contains("pub(crate)"),
         "pub(crate) visibility: {result}"
@@ -1131,7 +1041,7 @@ fn pub_crate_visibility_shown() {
 #[test]
 fn context_no_symbol_gives_clear_message() {
     let (_dir, db) = index_source("pub fn something() {}");
-    let result = context::handle_context(&db, "nonexistent_symbol").unwrap();
+    let result = context::handle_context(&db, "nonexistent_symbol", false).unwrap();
     assert!(
         result.contains("No symbol found matching 'nonexistent_symbol'"),
         "clear error message: {result}"

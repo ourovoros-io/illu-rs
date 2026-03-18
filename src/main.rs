@@ -197,10 +197,7 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Verify it's a Rust project
     let cargo_toml = repo_path.join("Cargo.toml");
     if !cargo_toml.exists() {
-        return Err(format!(
-            "No Cargo.toml found in {}",
-            repo_path.display()
-        ).into());
+        return Err(format!("No Cargo.toml found in {}", repo_path.display()).into());
     }
 
     println!("Setting up illu in {}", repo_path.display());
@@ -231,7 +228,10 @@ fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>
     let gitignore_path = repo_path.join(".gitignore");
     let content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
 
-    if content.lines().any(|l| l.trim() == ".illu/" || l.trim() == ".illu") {
+    if content
+        .lines()
+        .any(|l| l.trim() == ".illu/" || l.trim() == ".illu")
+    {
         return Ok(false);
     }
 
@@ -285,11 +285,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let total = pending.len();
                 tracing::info!(count = total, "Fetching dependency docs");
                 illu_rs::status::set(&format!("fetching docs ▸ 0/{total}"));
-                let fetched = illu_rs::indexer::docs::fetch_docs(&pending).await;
+                let fetched = illu_rs::indexer::docs::fetch_docs(&pending, &config.repo_path).await;
                 if !fetched.is_empty() {
-                    let stored = illu_rs::indexer::docs::store_fetched_docs(
-                        &db, &fetched,
-                    )?;
+                    let stored = illu_rs::indexer::docs::store_fetched_docs(&db, &fetched)?;
                     tracing::info!(count = stored, "Stored dependency docs");
                 }
             }
@@ -315,7 +313,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Context { symbol }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_context(&db, &symbol)?;
+            let result = handle_context(&db, &symbol, false)?;
             print_result(&result);
         }
         Some(Command::Impact { symbol }) => {

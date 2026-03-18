@@ -84,15 +84,10 @@ fn parse_github_owner_repo(url: &str) -> Option<(&str, &str)> {
 
 /// Fetch the raw README from a GitHub repository.
 /// Tries `main` branch first, then `master`.
-async fn fetch_github_readme(
-    client: &reqwest::Client,
-    repo_url: &str,
-) -> Option<String> {
+async fn fetch_github_readme(client: &reqwest::Client, repo_url: &str) -> Option<String> {
     let (owner, repo) = parse_github_owner_repo(repo_url)?;
     for branch in &["main", "master"] {
-        let url = format!(
-            "https://raw.githubusercontent.com/{owner}/{repo}/{branch}/README.md"
-        );
+        let url = format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/README.md");
         let resp = match client.get(&url).send().await {
             Ok(r) if r.status().is_success() => r,
             _ => continue,
@@ -106,10 +101,7 @@ async fn fetch_github_readme(
 }
 
 /// Query the crates.io API for a crate's repository URL.
-async fn fetch_crates_io_repo_url(
-    client: &reqwest::Client,
-    name: &str,
-) -> Option<String> {
+async fn fetch_crates_io_repo_url(client: &reqwest::Client, name: &str) -> Option<String> {
     let url = format!("https://crates.io/api/v1/crates/{name}");
     let resp = client.get(&url).send().await.ok()?;
     if !resp.status().is_success() {
@@ -173,19 +165,69 @@ async fn fetch_single_doc(
     None
 }
 
-fn truncate_content(content: String) -> String {
-    if content.len() > 8000 {
-        format!("{}...", &content[..8000])
-    } else {
-        content
-    }
+fn truncate_content(content: &str) -> String {
+    crate::truncate_at(content, 8000).into_owned()
 }
 
 const MAX_CONCURRENT_FETCHES: usize = 8;
 
+/// Try `cargo +nightly doc` JSON output first, then fall back to network.
+/// Returns docs for as many pending deps as possible.
+pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> Vec<FetchedDoc> {
+    if pending.is_empty() {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+
+    // Phase 1: Try cargo doc (local, nightly, structured JSON)
+    {
+        let dep_names: Vec<String> = pending.iter().map(|p| p.name.clone()).collect();
+        match super::cargo_doc::generate_cargo_docs(repo_path, &dep_names) {
+            Ok(docs) => {
+                for (name, content) in docs {
+                    if let Some(p) = pending.iter().find(|p| p.name == name) {
+                        results.push(FetchedDoc {
+                            dep_id: p.dep_id,
+                            source: "cargo_doc",
+                            content: truncate_content(&content),
+                        });
+                    }
+                }
+                tracing::info!(count = results.len(), "Got docs from cargo doc");
+            }
+            Err(e) => {
+                tracing::info!("cargo doc failed, falling back to network: {e}");
+            }
+        }
+    }
+
+    // Phase 2: Network fetch for any deps cargo doc missed
+    let covered: std::collections::HashSet<&str> = results
+        .iter()
+        .filter_map(|r| pending.iter().find(|p| p.dep_id == r.dep_id))
+        .map(|p| p.name.as_str())
+        .collect();
+    let remaining: Vec<&PendingDoc> = pending
+        .iter()
+        .filter(|p| !covered.contains(p.name.as_str()))
+        .collect();
+
+    if !remaining.is_empty() {
+        tracing::info!(
+            count = remaining.len(),
+            "Fetching remaining docs from network"
+        );
+        let network_docs = fetch_docs_network(&remaining).await;
+        results.extend(network_docs);
+    }
+
+    results
+}
+
 /// Fetch docs over the network (async, no DB needed).
 /// Fetches up to `MAX_CONCURRENT_FETCHES` deps concurrently.
-pub async fn fetch_docs(pending: &[PendingDoc]) -> Vec<FetchedDoc> {
+async fn fetch_docs_network(pending: &[&PendingDoc]) -> Vec<FetchedDoc> {
     let client = match build_http_client() {
         Ok(c) => c,
         Err(e) => {
@@ -212,14 +254,11 @@ pub async fn fetch_docs(pending: &[PendingDoc]) -> Vec<FetchedDoc> {
         }
         while let Some(result) = set.join_next().await {
             if let Ok(Some(mut fetched)) = result {
-                fetched.content = truncate_content(fetched.content);
+                fetched.content = truncate_content(&fetched.content);
                 results.push(fetched);
             }
         }
-        crate::status::set(&format!(
-            "fetching docs ▸ {}/{total}",
-            results.len()
-        ));
+        crate::status::set(&format!("fetching docs ▸ {}/{total}", results.len()));
     }
     tracing::info!(fetched = results.len(), "Doc fetching complete");
     results
@@ -234,18 +273,6 @@ pub fn store_fetched_docs(
         db.store_doc(doc.dep_id, doc.source, &doc.content)?;
     }
     Ok(docs.len())
-}
-
-/// Convenience: fetch all missing docs in one call (async, holds DB reference).
-pub async fn fetch_dependency_docs(
-    db: &crate::db::Database,
-) -> Result<usize, Box<dyn std::error::Error>> {
-    let pending = pending_docs(db)?;
-    if pending.is_empty() {
-        return Ok(0);
-    }
-    let fetched = fetch_docs(&pending).await;
-    store_fetched_docs(db, &fetched)
 }
 
 fn extract_text_from_html(html: &str) -> String {
@@ -345,26 +372,22 @@ mod tests {
 
     #[test]
     fn test_parse_github_owner_repo() {
-        let (owner, repo) =
-            parse_github_owner_repo("https://github.com/serde-rs/serde").unwrap();
+        let (owner, repo) = parse_github_owner_repo("https://github.com/serde-rs/serde").unwrap();
         assert_eq!(owner, "serde-rs");
         assert_eq!(repo, "serde");
     }
 
     #[test]
     fn test_parse_github_owner_repo_with_git_suffix() {
-        let (owner, repo) =
-            parse_github_owner_repo("https://github.com/user/repo.git").unwrap();
+        let (owner, repo) = parse_github_owner_repo("https://github.com/user/repo.git").unwrap();
         assert_eq!(owner, "user");
         assert_eq!(repo, "repo");
     }
 
     #[test]
     fn test_parse_github_owner_repo_with_subpath() {
-        let (owner, repo) = parse_github_owner_repo(
-            "https://github.com/user/repo/tree/main/subcrate",
-        )
-        .unwrap();
+        let (owner, repo) =
+            parse_github_owner_repo("https://github.com/user/repo/tree/main/subcrate").unwrap();
         assert_eq!(owner, "user");
         assert_eq!(repo, "repo");
     }
@@ -376,14 +399,13 @@ mod tests {
 
     #[test]
     fn test_truncate_content_short() {
-        let short = "hello world".to_string();
-        assert_eq!(truncate_content(short), "hello world");
+        assert_eq!(truncate_content("hello world"), "hello world");
     }
 
     #[test]
     fn test_truncate_content_long() {
         let long = "a".repeat(9000);
-        let result = truncate_content(long);
+        let result = truncate_content(&long);
         assert!(result.ends_with("..."));
         assert!(result.len() < 8010);
     }
@@ -392,11 +414,7 @@ mod tests {
     #[ignore = "hits network"]
     async fn test_fetch_github_readme() {
         let client = build_http_client().unwrap();
-        let readme = fetch_github_readme(
-            &client,
-            "https://github.com/serde-rs/serde",
-        )
-        .await;
+        let readme = fetch_github_readme(&client, "https://github.com/serde-rs/serde").await;
         assert!(readme.is_some());
         assert!(readme.unwrap().contains("serde"));
     }
