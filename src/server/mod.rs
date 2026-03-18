@@ -28,6 +28,11 @@ impl IlluServer {
         }
     }
 
+    #[must_use]
+    pub fn db(&self) -> std::sync::Arc<Mutex<Database>> {
+        self.db.clone()
+    }
+
     fn lock_db(&self) -> Result<MutexGuard<'_, Database>, McpError> {
         self.db
             .lock()
