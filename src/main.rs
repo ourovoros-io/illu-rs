@@ -182,6 +182,7 @@ fn write_gemini_md_section(repo_path: &Path) -> Result<(), Box<dyn std::error::E
 }
 
 fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error>> {
+    illu_rs::status::init(repo_path);
     let db_path = repo_path.join(".illu/index.db");
     if db_path.exists() {
         let db = Database::open(&db_path)?;
@@ -244,6 +245,7 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Build initial index
     println!("  indexing...");
+    illu_rs::status::init(&repo_path);
     ensure_indexed(&repo_path)?;
     println!("  index built");
 
