@@ -182,6 +182,8 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
 
     // Phase 1: Try cargo doc (local, nightly, structured JSON)
     {
+        let total = pending.len();
+        crate::status::set(&format!("fetching docs ▸ cargo doc [0/{total}]"));
         let dep_names: Vec<String> = pending.iter().map(|p| p.name.clone()).collect();
         match super::cargo_doc::generate_cargo_docs(repo_path, &dep_names) {
             Ok(docs) => {
