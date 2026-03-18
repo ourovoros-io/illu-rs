@@ -151,6 +151,34 @@ if [ "$cache_pct" -gt 0 ] 2>/dev/null; then
     line="${line}$(printf ' %b↻%s%%%b' "$D" "$cache_pct" "$R")"
 fi
 
+# ── illu progress bar helper ──
+
+illu_progress_bar() {
+    local status="$1" color="$2" width=8
+    local current total
+
+    if [[ "$status" =~ \[([0-9]+)/([0-9]+)\] ]]; then
+        current="${BASH_REMATCH[1]}"
+        total="${BASH_REMATCH[2]}"
+    elif [[ "$status" =~ ([0-9]+)/([0-9]+) ]]; then
+        current="${BASH_REMATCH[1]}"
+        total="${BASH_REMATCH[2]}"
+    else
+        return 1
+    fi
+
+    [ "$total" -eq 0 ] && return 1
+    local filled=$((current * width / total))
+    local empty=$((width - filled))
+    local bar="${color}"
+    for ((j=0; j<filled; j++)); do bar="${bar}▰"; done
+    bar="${bar}${D}"
+    for ((j=0; j<empty; j++)); do bar="${bar}▱"; done
+    bar="${bar}${R}"
+    printf '%b' "$bar"
+    return 0
+}
+
 # ── illu status (appended at the end) ──
 
 if [ -n "$illu_status" ]; then
@@ -158,11 +186,17 @@ if [ -n "$illu_status" ]; then
         ready)
             line="${line}$(printf '  %b◆%b%b illu%b' "$G" "$R" "$D" "$R")"
             ;;
-        indexing*)
+        indexing*|refreshing*)
             line="${line}$(printf '  %b◆ illu: %s%b' "$Y" "$illu_status" "$R")"
+            if illu_bar=$(illu_progress_bar "$illu_status" "$Y"); then
+                line="${line} ${illu_bar}"
+            fi
             ;;
         fetching*)
             line="${line}$(printf '  %b◆ illu: %s%b' "$C" "$illu_status" "$R")"
+            if illu_bar=$(illu_progress_bar "$illu_status" "$C"); then
+                line="${line} ${illu_bar}"
+            fi
             ;;
         *)
             line="${line}$(printf '  %b◆%b illu: %s' "$C" "$R" "$illu_status")"
