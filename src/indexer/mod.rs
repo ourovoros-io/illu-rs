@@ -137,6 +137,7 @@ pub fn refresh_index(
     crate::status::set(&format!("refreshing ▸ {count} files"));
 
     for (i, df) in dirty_files.iter().enumerate() {
+        crate::status::set(&format!("refreshing ▸ [{}/{}]", i + 1, count));
         tracing::debug!("[{}/{}] Re-indexing {}", i + 1, count, df.relative_path);
         db.delete_file_data(&df.relative_path)?;
         let file_id = if let Some(cid) = df.crate_id {
@@ -281,6 +282,7 @@ fn index_crate_sources(
 
     let total = rs_files.len();
     for (i, path) in rs_files.iter().enumerate() {
+        crate::status::set(&format!("indexing ▸ parsing [{}/{}]", i + 1, total));
         let source = std::fs::read_to_string(path)?;
         let relative = path
             .strip_prefix(&config.repo_path)
@@ -320,9 +322,9 @@ fn extract_all_symbol_refs(
 
     db.begin_transaction()?;
     for (i, relative) in files.iter().enumerate() {
+        crate::status::set(&format!("indexing ▸ refs [{}/{}]", i + 1, total));
         if total > 20 && (i + 1) % 20 == 0 {
             tracing::info!("[{}/{}] Extracting refs...", i + 1, total);
-            crate::status::set(&format!("indexing ▸ refs [{}/{}]", i + 1, total));
         }
         let full_path = config.repo_path.join(relative);
         let source = match std::fs::read_to_string(&full_path) {
