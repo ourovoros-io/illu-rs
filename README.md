@@ -25,7 +25,11 @@
 Install and set up in your Rust project:
 
 ```bash
-cargo install --path .
+# Install (works on macOS and Linux)
+git clone https://github.com/GeorgiosDelkos/illu-rs.git
+cargo install --path illu-rs
+
+# Set up in your Rust project
 cd your-project
 illu-rs init
 ```
@@ -33,6 +37,8 @@ illu-rs init
 That's it. Open **Claude Code** or **Gemini CLI** in the repo — illu is already running.
 
 `init` indexes your codebase, writes the MCP config for both clients, and adds usage instructions to `CLAUDE.md` and `GEMINI.md`. Every time the server starts, it detects changed files and re-indexes only what's needed (sub-second).
+
+> **Requirements:** Rust toolchain and a C compiler (Xcode CLI tools on macOS, `build-essential` on Linux). All C dependencies (SQLite, tree-sitter) are compiled from source — no system libraries needed.
 
 <details>
 <summary>Manual setup (without <code>init</code>)</summary>
