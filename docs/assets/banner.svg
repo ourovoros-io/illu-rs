@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f0f1a;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#1a1a2e;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#f59e0b"/>
+      <stop offset="50%" style="stop-color:#f97316"/>
+      <stop offset="100%" style="stop-color:#ef4444"/>
+    </linearGradient>
+    <linearGradient id="bulb" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fde68a"/>
+      <stop offset="100%" style="stop-color:#f59e0b"/>
+    </linearGradient>
+    <radialGradient id="light" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#fef3c7;stop-opacity:0.6"/>
+      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="textGlow">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0.6 0 0 0  0.6 0.4 0 0 0  0 0 0 0 0  0 0 0 0.5 0"/>
+      <feComposite in="SourceGraphic"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="200" rx="12" fill="url(#bg)"/>
+  <rect width="800" height="200" rx="12" fill="none" stroke="url(#glow)" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Light aura around bulb -->
+  <ellipse cx="120" cy="90" rx="60" ry="55" fill="url(#light)"/>
+
+  <!-- Light rays -->
+  <g opacity="0.35" stroke="#fbbf24" stroke-width="2" stroke-linecap="round">
+    <line x1="120" y1="25" x2="120" y2="42"/>
+    <line x1="70" y1="48" x2="82" y2="60"/>
+    <line x1="170" y1="48" x2="158" y2="60"/>
+    <line x1="52" y1="90" x2="68" y2="90"/>
+    <line x1="188" y1="90" x2="172" y2="90"/>
+  </g>
+
+  <!-- Lightbulb -->
+  <path d="M 100 100 C 100 72, 106 58, 120 52 C 134 58, 140 72, 140 100 C 140 112, 133 118, 131 122 L 109 122 C 107 118, 100 112, 100 100 Z"
+        fill="url(#bulb)" opacity="0.9"/>
+
+  <!-- Code brackets inside bulb -->
+  <g transform="translate(120, 88)" fill="none" stroke="#92400e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="-12,-10 -20,0 -12,10"/>
+    <line x1="-4" y1="12" x2="4" y2="-12"/>
+    <polyline points="12,-10 20,0 12,10"/>
+  </g>
+
+  <!-- Bulb base -->
+  <rect x="107" y="122" width="26" height="4" rx="1" fill="#d97706"/>
+  <rect x="109" y="127" width="22" height="3" rx="1" fill="#b45309"/>
+  <rect x="112" y="131" width="16" height="3" rx="3" fill="#92400e"/>
+
+  <!-- "illu" text -->
+  <text x="240" y="108" font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', monospace" font-weight="800" font-size="80" fill="url(#glow)" filter="url(#textGlow)" letter-spacing="-3">illu</text>
+
+  <!-- Tagline -->
+  <text x="242" y="140" font-family="'Inter', 'Helvetica Neue', sans-serif" font-weight="400" font-size="18" fill="#9ca3af" letter-spacing="1">Code intelligence for AI agents</text>
+
+  <!-- Badges area -->
+  <g transform="translate(242, 155)">
+    <!-- Rust badge -->
+    <rect x="0" y="0" width="56" height="22" rx="4" fill="#282828"/>
+    <text x="28" y="15" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#dea584" font-weight="600">Rust</text>
+    <!-- MCP badge -->
+    <rect x="64" y="0" width="50" height="22" rx="4" fill="#282828"/>
+    <text x="89" y="15" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#818cf8" font-weight="600">MCP</text>
+    <!-- SQLite badge -->
+    <rect x="122" y="0" width="58" height="22" rx="4" fill="#282828"/>
+    <text x="151" y="15" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#60a5fa" font-weight="600">SQLite</text>
+  </g>
+</svg>
