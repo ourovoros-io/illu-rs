@@ -942,6 +942,38 @@ impl Database {
         Ok(results)
     }
 
+    /// Find symbols whose line range overlaps any of the given ranges.
+    pub fn get_symbols_at_lines(
+        &self,
+        file_path: &str,
+        line_ranges: &[(i64, i64)],
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        if line_ranges.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut results = Vec::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE f.path = ?1 AND s.line_start <= ?3 AND s.line_end >= ?2",
+        )?;
+        for &(range_start, range_end) in line_ranges {
+            let mut rows = stmt.query(params![file_path, range_start, range_end])?;
+            while let Some(row) = rows.next()? {
+                let sym = row_to_stored_symbol(row)?;
+                let key = (sym.name.clone(), sym.line_start);
+                if seen.insert(key) {
+                    results.push(sym);
+                }
+            }
+        }
+        Ok(results)
+    }
+
     pub fn get_symbols_by_path_prefix(&self, path_prefix: &str) -> SqlResult<Vec<StoredSymbol>> {
         let pattern = format!("{path_prefix}%");
         let mut stmt = self.conn.prepare(
@@ -1877,5 +1909,54 @@ mod tests {
             )
             .unwrap();
         assert_eq!(dep_count, 1);
+    }
+
+    #[test]
+    fn test_get_symbols_at_lines() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        // Insert symbols at different line ranges
+        for (name, start, end) in [("alpha", 1, 10), ("beta", 15, 25), ("gamma", 30, 40)] {
+            db.conn
+                .execute(
+                    "INSERT INTO symbols \
+                     (file_id, name, kind, visibility, \
+                      line_start, line_end, signature) \
+                     VALUES (?1, ?2, 'function', 'public', ?3, ?4, ?5)",
+                    params![file_id, name, start, end, format!("fn {name}()")],
+                )
+                .unwrap();
+        }
+
+        // Range overlapping alpha only
+        let results = db.get_symbols_at_lines("src/lib.rs", &[(5, 8)]).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "alpha");
+
+        // Range overlapping beta and gamma
+        let results = db.get_symbols_at_lines("src/lib.rs", &[(20, 35)]).unwrap();
+        assert_eq!(results.len(), 2);
+        let names: Vec<&str> = results.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"beta"));
+        assert!(names.contains(&"gamma"));
+
+        // Multiple ranges with deduplication
+        let results = db
+            .get_symbols_at_lines("src/lib.rs", &[(1, 5), (3, 8)])
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "alpha");
+
+        // No overlap
+        let results = db.get_symbols_at_lines("src/lib.rs", &[(11, 14)]).unwrap();
+        assert!(results.is_empty());
+
+        // Empty ranges
+        let results = db.get_symbols_at_lines("src/lib.rs", &[]).unwrap();
+        assert!(results.is_empty());
+
+        // Wrong file
+        let results = db.get_symbols_at_lines("src/other.rs", &[(1, 50)]).unwrap();
+        assert!(results.is_empty());
     }
 }

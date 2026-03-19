@@ -430,6 +430,11 @@ pub(crate) fn generate_claude_skill(direct_dep_names: &[&str]) -> String {
     );
     let _ = writeln!(
         out,
+        "- **diff_impact** — Analyze impact of git changes. \
+         Shows modified symbols and their downstream dependents."
+    );
+    let _ = writeln!(
+        out,
         "- **docs** — Get documentation for a dependency, \
          optionally filtered by topic."
     );
@@ -534,6 +539,7 @@ pub fn hello() -> &'static str { "hello" }
         assert!(skill.contains("context"));
         assert!(skill.contains("query"));
         assert!(skill.contains("impact"));
+        assert!(skill.contains("diff_impact"));
         assert!(skill.contains("overview"));
     }
 

@@ -106,6 +106,12 @@ struct TreeParams {
     path: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct DiffImpactParams {
+    /// Git ref range (e.g. "HEAD~3..HEAD", "main"). Omit for unstaged changes.
+    git_ref: Option<String>,
+}
+
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
     McpError::internal_error(e.to_string(), None)
 }
@@ -229,6 +235,25 @@ impl IlluServer {
         let result = tools::tree::handle_tree(&db, &params.path).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
+
+    #[tool(
+        name = "diff_impact",
+        description = "Analyze impact of code changes from a git diff. Shows which symbols were modified and their downstream dependents."
+    )]
+    async fn diff_impact(
+        &self,
+        Parameters(params): Parameters<DiffImpactParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(git_ref = ?params.git_ref, "Tool call: diff_impact");
+        let _guard = crate::status::StatusGuard::new("diff_impact");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let repo_path = &self.config.repo_path;
+        let result =
+            tools::diff_impact::handle_diff_impact(&db, repo_path, params.git_ref.as_deref())
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
 }
 
 #[tool_handler]
@@ -239,8 +264,10 @@ impl ServerHandler for IlluServer {
                 "illu-rs: Code intelligence server for Rust projects. \
                  Use 'query' to search, 'context' for symbol details \
                  (includes source body, doc comments, struct fields, \
-                 trait impls, and callees), 'impact' for change analysis, \
-                 'docs' for dependency docs, 'overview' for structural maps."
+                 trait impls, and callees), 'impact' for single-symbol \
+                 change analysis, 'diff_impact' for git diff-based \
+                 batch impact analysis, 'docs' for dependency docs, \
+                 'overview' for structural maps."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
