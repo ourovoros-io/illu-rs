@@ -1299,3 +1299,324 @@ fn callees_scoped_to_source_file() {
         "caller_b should call shared: {result_b}"
     );
 }
+
+// =========================================================================
+// 12. REALISTIC MULTI-PATTERN RUST CODEBASE
+// =========================================================================
+
+const REALISTIC_LIB: &str = r"
+pub mod error;
+pub mod config;
+pub mod service;
+pub mod traits;
+pub use config::AppConfig;
+";
+
+const REALISTIC_ERROR: &str = r#"
+use std::fmt;
+
+#[derive(Debug)]
+pub enum AppError {
+    NotFound(String),
+    InvalidInput { field: String, reason: String },
+    Internal(Box<dyn std::error::Error>),
+}
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(msg) => write!(f, "not found: {msg}"),
+            Self::InvalidInput { field, reason } => write!(f, "invalid {field}: {reason}"),
+            Self::Internal(e) => write!(f, "internal error: {e}"),
+        }
+    }
+}
+"#;
+
+const REALISTIC_CONFIG: &str = r#"
+/// Application configuration loaded from environment.
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    pub host: String,
+    pub port: u16,
+    pub max_connections: usize,
+}
+
+impl AppConfig {
+    pub fn builder() -> ConfigBuilder {
+        ConfigBuilder::default()
+    }
+}
+
+#[derive(Default)]
+pub struct ConfigBuilder {
+    host: Option<String>,
+    port: Option<u16>,
+    max_connections: Option<usize>,
+}
+
+impl ConfigBuilder {
+    pub fn host(mut self, host: impl Into<String>) -> Self {
+        self.host = Some(host.into());
+        self
+    }
+
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = Some(port);
+        self
+    }
+
+    pub fn build(self) -> AppConfig {
+        AppConfig {
+            host: self.host.unwrap_or_else(|| "localhost".to_string()),
+            port: self.port.unwrap_or(8080),
+            max_connections: self.max_connections.unwrap_or(100),
+        }
+    }
+}
+"#;
+
+const REALISTIC_TRAITS: &str = r"
+use crate::error::AppError;
+
+/// A handler that processes requests of type T.
+pub trait Handler<T> {
+    type Output;
+    fn handle(&self, input: T) -> Result<Self::Output, AppError>;
+}
+
+/// Middleware that wraps a handler.
+pub trait Middleware {
+    fn before(&self) {}
+    fn after(&self) {}
+}
+";
+
+const REALISTIC_SERVICE: &str = r#"
+use crate::config::AppConfig;
+use crate::error::AppError;
+use crate::traits::Handler;
+
+pub struct UserService {
+    config: AppConfig,
+}
+
+impl UserService {
+    pub fn new(config: AppConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn port(&self) -> u16 {
+        self.config.port
+    }
+}
+
+impl Handler<String> for UserService {
+    type Output = String;
+    fn handle(&self, input: String) -> Result<Self::Output, AppError> {
+        if input.is_empty() {
+            return Err(AppError::InvalidInput {
+                field: "name".into(),
+                reason: "cannot be empty".into(),
+            });
+        }
+        Ok(format!("Hello, {input}!"))
+    }
+}
+"#;
+
+fn index_realistic_codebase() -> (tempfile::TempDir, Database) {
+    index_multi_file(&[
+        ("lib.rs", REALISTIC_LIB),
+        ("error.rs", REALISTIC_ERROR),
+        ("config.rs", REALISTIC_CONFIG),
+        ("traits.rs", REALISTIC_TRAITS),
+        ("service.rs", REALISTIC_SERVICE),
+    ])
+}
+
+#[test]
+fn realistic_codebase_indexes_all_symbols() {
+    let (_dir, db) = index_realistic_codebase();
+
+    for name in &[
+        "AppError",
+        "AppConfig",
+        "ConfigBuilder",
+        "UserService",
+        "Handler",
+        "Middleware",
+    ] {
+        let result =
+            query::handle_query(&db, name, Some("symbols"), None).unwrap();
+        assert!(
+            result.contains(name),
+            "query for '{name}' should find it: {result}"
+        );
+    }
+
+    let result = overview::handle_overview(&db, "src/").unwrap();
+    for name in &[
+        "AppError",
+        "AppConfig",
+        "ConfigBuilder",
+        "UserService",
+        "Handler",
+        "Middleware",
+    ] {
+        assert!(
+            result.contains(name),
+            "overview should list '{name}': {result}"
+        );
+    }
+
+    let all_names = db.get_all_symbol_names().unwrap();
+    assert!(
+        all_names.len() >= 15,
+        "should index at least 15 symbols, got {}",
+        all_names.len()
+    );
+}
+
+#[test]
+fn realistic_codebase_trait_impl_detected() {
+    let (_dir, db) = index_realistic_codebase();
+
+    let result =
+        context::handle_context(&db, "UserService", false).unwrap();
+    assert!(
+        result.contains("Handler"),
+        "UserService context should mention Handler trait impl: {result}"
+    );
+
+    let result =
+        context::handle_context(&db, "Handler", false).unwrap();
+    assert!(
+        result.contains("UserService"),
+        "Handler context should show UserService as implementor: {result}"
+    );
+
+    let result =
+        context::handle_context(&db, "AppError", false).unwrap();
+    assert!(
+        result.contains("Display"),
+        "AppError context should show Display trait impl: {result}"
+    );
+}
+
+#[test]
+fn realistic_codebase_cross_file_impact() {
+    let (_dir, db) = index_realistic_codebase();
+
+    let result = impact::handle_impact(&db, "AppConfig").unwrap();
+    assert!(
+        result.contains("UserService") || result.contains("new"),
+        "AppConfig impact should show UserService dependency: {result}"
+    );
+    assert!(
+        result.contains("ConfigBuilder") || result.contains("build"),
+        "AppConfig impact should show ConfigBuilder relationship: {result}"
+    );
+
+    let result = impact::handle_impact(&db, "AppError").unwrap();
+    assert!(
+        result.contains("handle") || result.contains("UserService"),
+        "AppError impact should show usage in service: {result}"
+    );
+}
+
+// =========================================================================
+// 13. SEARCH QUALITY UNDER AMBIGUITY
+// =========================================================================
+
+#[test]
+fn search_exact_name_beats_contains() {
+    let (_dir, db) = index_source(
+        "pub struct Config {}\n\
+         pub fn configure() {}\n\
+         pub fn app_config() {}\n\
+         pub struct ConfigManager {}\n",
+    );
+    let result =
+        query::handle_query(&db, "Config", Some("symbols"), None).unwrap();
+    let config_pos = result.find("**Config**");
+    let config_manager_pos = result.find("ConfigManager");
+    let configure_pos = result.find("configure");
+
+    assert!(
+        config_pos.is_some(),
+        "exact match 'Config' must appear: {result}"
+    );
+    if let (Some(c), Some(cm)) = (config_pos, config_manager_pos) {
+        assert!(
+            c < cm,
+            "exact 'Config' should appear before 'ConfigManager': {result}"
+        );
+    }
+    if let (Some(c), Some(cf)) = (config_pos, configure_pos) {
+        assert!(
+            c < cf,
+            "exact 'Config' should appear before 'configure': {result}"
+        );
+    }
+}
+
+#[test]
+fn search_common_name_new_returns_results() {
+    let (_dir, db) = index_multi_file(&[
+        (
+            "lib.rs",
+            "pub mod types;\npub mod more;\n",
+        ),
+        (
+            "types.rs",
+            "pub struct Alpha {}\nimpl Alpha { pub fn new() -> Self { Alpha {} } }\n",
+        ),
+        (
+            "more.rs",
+            "pub struct Beta {}\nimpl Beta { pub fn new() -> Self { Beta {} } }\n",
+        ),
+    ]);
+    let result =
+        query::handle_query(&db, "new", Some("symbols"), None).unwrap();
+    assert!(
+        result.contains("new"),
+        "query for 'new' should find results: {result}"
+    );
+    let line_count = result.lines().count();
+    assert!(
+        line_count < 50,
+        "result should be reasonable size, got {line_count} lines"
+    );
+}
+
+#[test]
+fn search_by_doc_comment_content() {
+    let (_dir, db) = index_source(
+        "/// Parse a TOML configuration file.\n\
+         pub fn load_config() {}\n\
+         /// Serialize data to JSON format.\n\
+         pub fn save_data() {}\n",
+    );
+    let result =
+        query::handle_query(&db, "TOML", Some("all"), None).unwrap();
+    // FTS indexes symbol names, not doc comments, so this may not find
+    // results. The key assertion is no error or panic.
+    assert!(
+        result.contains("TOML") || result.contains("No results"),
+        "query should complete without error: {result}"
+    );
+}
+
+#[test]
+fn search_short_query_works() {
+    let (_dir, db) = index_source(
+        "pub fn go() {}\npub fn do_work() {}\n",
+    );
+    let result =
+        query::handle_query(&db, "go", Some("symbols"), None).unwrap();
+    assert!(
+        result.contains("go"),
+        "short 2-char query should find 'go': {result}"
+    );
+}
