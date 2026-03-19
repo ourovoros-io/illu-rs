@@ -539,6 +539,62 @@ fn refresh_removes_deleted_file_refs() {
     );
 }
 
+#[test]
+fn refresh_cleans_stale_refs() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        "[[package]]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    // Two functions: caller calls target
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn target() -> i32 { 42 }\npub fn caller() -> i32 { target() }\n",
+    )
+    .unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    // Verify the ref exists
+    let result = impact::handle_impact(&db, "target").unwrap();
+    assert!(
+        result.contains("caller"),
+        "caller should depend on target before change: {result}"
+    );
+
+    // Remove the target function, keep only caller (with no call)
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn caller() -> i32 { 0 }\n",
+    )
+    .unwrap();
+    refresh_index(&db, &config).unwrap();
+
+    // target symbol is gone — stale refs should be cleaned
+    let syms = db.search_symbols("target").unwrap();
+    assert!(syms.is_empty(), "target must be gone after refresh");
+
+    // No dependents for a symbol that no longer exists
+    let result = impact::handle_impact(&db, "target").unwrap();
+    assert!(
+        !result.contains("caller"),
+        "stale ref from caller to target must be cleaned up: {result}"
+    );
+}
+
 // =========================================================================
 // 5. CROSS-TOOL CONSISTENCY
 //    Different tools showing different data for the same symbol → confusion

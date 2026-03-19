@@ -51,17 +51,17 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std
 /// Incrementally re-index only files whose content has changed.
 /// If the DB is empty, does a full index first.
 /// Returns the number of files that were re-indexed.
+struct DirtyFile {
+    relative_path: String,
+    source: String,
+    hash: String,
+    crate_id: Option<crate::db::CrateId>,
+}
+
 pub fn refresh_index(
     db: &Database,
     config: &IndexConfig,
 ) -> Result<usize, Box<dyn std::error::Error>> {
-    struct DirtyFile {
-        relative_path: String,
-        source: String,
-        hash: String,
-        crate_id: Option<crate::db::CrateId>,
-    }
-
     let file_count = db.file_count()?;
     if file_count == 0 {
         tracing::info!("Empty index — running full index");
@@ -167,6 +167,11 @@ pub fn refresh_index(
             db.store_symbol_refs(&refs)?;
         }
         db.commit()?;
+    }
+
+    let stale = db.delete_stale_refs()?;
+    if stale > 0 {
+        tracing::info!(deleted = stale, "Cleaned up stale symbol refs");
     }
 
     Ok(count)

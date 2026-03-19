@@ -617,6 +617,17 @@ impl Database {
         Ok(())
     }
 
+    /// Delete `symbol_refs` where source or target symbol no longer exists.
+    pub fn delete_stale_refs(&self) -> SqlResult<u64> {
+        let deleted = self.conn.execute(
+            "DELETE FROM symbol_refs \
+             WHERE source_symbol_id NOT IN (SELECT id FROM symbols) \
+                OR target_symbol_id NOT IN (SELECT id FROM symbols)",
+            [],
+        )?;
+        Ok(u64::try_from(deleted).unwrap_or(0))
+    }
+
     pub fn file_count(&self) -> SqlResult<i64> {
         self.conn
             .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
@@ -1958,5 +1969,75 @@ mod tests {
         // Wrong file
         let results = db.get_symbols_at_lines("src/other.rs", &[(1, 50)]).unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_delete_stale_refs() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create two symbols with a valid ref between them
+        let file1 = db.insert_file("src/a.rs", "hash1").unwrap();
+        let file2 = db.insert_file("src/b.rs", "hash2").unwrap();
+
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'alpha', 'function', 'public', 1, 3, 'fn alpha()')",
+                params![file1],
+            )
+            .unwrap();
+        let alpha_id = SymbolId(db.conn.last_insert_rowid());
+
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'beta', 'function', 'public', 1, 3, 'fn beta()')",
+                params![file2],
+            )
+            .unwrap();
+        let beta_id = SymbolId(db.conn.last_insert_rowid());
+
+        db.insert_symbol_ref(beta_id, alpha_id, "call").unwrap();
+
+        // Verify the ref exists
+        let count: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM symbol_refs",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Delete alpha's symbol directly (bypassing FK by disabling checks),
+        // simulating a scenario where the symbol row is gone but refs remain.
+        db.conn
+            .execute_batch("PRAGMA foreign_keys = OFF")
+            .unwrap();
+        db.conn
+            .execute("DELETE FROM symbols WHERE id = ?1", params![alpha_id])
+            .unwrap();
+        db.conn
+            .execute_batch("PRAGMA foreign_keys = ON")
+            .unwrap();
+
+        // The ref is now dangling (target_symbol_id points to nothing)
+        let deleted = db.delete_stale_refs().unwrap();
+        assert_eq!(deleted, 1, "should delete the dangling ref");
+
+        let remaining: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM symbol_refs",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 }
