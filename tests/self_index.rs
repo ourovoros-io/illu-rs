@@ -111,7 +111,7 @@ fn self_context_handle_query_shows_callees() {
     let result = context::handle_context(&db, "handle_query", false).unwrap();
     assert!(
         result.contains("format_symbols") || result.contains("format_docs"),
-        "handle_query should call format_symbols or format_docs: {result}"
+        "handle_query should show callees like format_symbols or format_docs: {result}"
     );
 }
 
@@ -135,7 +135,7 @@ fn self_impact_symbol_struct_has_dependents() {
     let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let result = impact::handle_impact(&db, "Symbol").unwrap();
     assert!(
-        result.contains("store") || result.contains("parser") || result.contains("index"),
+        result.contains("store") || result.contains("parser"),
         "Symbol should have dependents in store or parser: {result}"
     );
 }
