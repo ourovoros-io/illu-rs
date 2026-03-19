@@ -1045,7 +1045,12 @@ impl Database {
         let mut count = 0;
         for r in refs {
             let source_id = self.get_symbol_id(&r.source_name, &r.source_file)?;
-            let target_id = self.get_symbol_id_by_name(&r.target_name)?;
+            let target_id = if let Some(target_file) = &r.target_file {
+                self.get_symbol_id(&r.target_name, target_file)?
+                    .or(self.get_symbol_id_by_name(&r.target_name)?)
+            } else {
+                self.get_symbol_id_by_name(&r.target_name)?
+            };
             if let (Some(sid), Some(tid)) = (source_id, target_id) {
                 self.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
                 count += 1;

@@ -504,6 +504,12 @@ fn get_first_line(node: &Node, source: &str) -> String {
     text.lines().next().unwrap_or(&text).trim().to_string()
 }
 
+/// Resolved import path for a short name.
+#[derive(Debug, Clone)]
+pub struct ImportInfo {
+    pub qualified_path: String,
+}
+
 /// A reference from one symbol to another, identified by name.
 #[derive(Debug, Clone)]
 pub struct SymbolRef {
@@ -515,6 +521,8 @@ pub struct SymbolRef {
     pub target_name: String,
     /// Kind of reference
     pub kind: RefKind,
+    /// Resolved target file path from import map (if available)
+    pub target_file: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -574,6 +582,157 @@ impl std::fmt::Display for RefKind {
     }
 }
 
+/// Convert a `crate::` qualified path to a relative file path.
+fn qualified_path_to_file(qualified_path: &str) -> Option<String> {
+    let path = qualified_path.strip_prefix("crate::")?;
+    let segments: Vec<&str> = path.split("::").collect();
+    if segments.len() < 2 {
+        return None;
+    }
+    let module_segments = &segments[..segments.len() - 1];
+    Some(format!("src/{}.rs", module_segments.join("/")))
+}
+
+/// Build an import map from `use` declarations in the given AST root.
+///
+/// Maps short imported names to their fully qualified paths.
+/// Glob imports (`use foo::*`) are skipped.
+#[must_use]
+pub fn extract_import_map(
+    root: &Node,
+    source: &str,
+) -> std::collections::HashMap<String, ImportInfo> {
+    let mut map = std::collections::HashMap::new();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() != "use_declaration" {
+            continue;
+        }
+        let mut inner_cursor = child.walk();
+        for use_child in child.children(&mut inner_cursor) {
+            collect_use_entries(&use_child, source, "", &mut map);
+        }
+    }
+    map
+}
+
+fn collect_use_entries(
+    node: &Node,
+    source: &str,
+    prefix: &str,
+    map: &mut std::collections::HashMap<String, ImportInfo>,
+) {
+    match node.kind() {
+        "use_as_clause" => {
+            // `use path::Name as Alias;`
+            let mut cursor = node.walk();
+            let children: Vec<_> = node.children(&mut cursor).collect();
+            // The path is the first child (scoped_identifier or identifier),
+            // "as" keyword, then the alias identifier
+            let path_text = if let Some(first) = children.first() {
+                let text = node_text(first, source);
+                if prefix.is_empty() {
+                    text
+                } else {
+                    format!("{prefix}::{text}")
+                }
+            } else {
+                return;
+            };
+            if let Some(alias_node) = children.last()
+                && alias_node.kind() == "identifier"
+            {
+                let alias = node_text(alias_node, source);
+                map.insert(
+                    alias,
+                    ImportInfo {
+                        qualified_path: path_text,
+                    },
+                );
+            }
+        }
+        "scoped_identifier" => {
+            // Direct import like `use crate::config::Config;`
+            let text = node_text(node, source);
+            let full_path = if prefix.is_empty() {
+                text.clone()
+            } else {
+                format!("{prefix}::{text}")
+            };
+            if let Some(short_name) = text.rsplit("::").next() {
+                map.insert(
+                    short_name.to_string(),
+                    ImportInfo {
+                        qualified_path: full_path,
+                    },
+                );
+            }
+        }
+        "identifier" => {
+            // Bare identifier (inside a use_list or standalone)
+            let name = node_text(node, source);
+            let full_path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}::{name}")
+            };
+            map.insert(
+                name,
+                ImportInfo {
+                    qualified_path: full_path,
+                },
+            );
+        }
+        "scoped_use_list" => {
+            // `use path::{A, B};`
+            // Find the path prefix and the use_list
+            let mut cursor = node.walk();
+            let children: Vec<_> = node.children(&mut cursor).collect();
+            let mut path_prefix = String::new();
+            for c in &children {
+                match c.kind() {
+                    "identifier" | "scoped_identifier" | "self" => {
+                        let seg = node_text(c, source);
+                        path_prefix = if prefix.is_empty() {
+                            seg
+                        } else {
+                            format!("{prefix}::{seg}")
+                        };
+                    }
+                    "use_list" => {
+                        let mut list_cursor = c.walk();
+                        for item in c.children(&mut list_cursor) {
+                            collect_use_entries(&item, source, &path_prefix, map);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        "use_list" => {
+            // Top-level use_list (shouldn't normally happen at root)
+            let mut cursor = node.walk();
+            for item in node.children(&mut cursor) {
+                collect_use_entries(&item, source, prefix, map);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Convenience wrapper: parse source and extract the import map.
+pub fn extract_import_map_from_source(
+    source: &str,
+) -> Result<std::collections::HashMap<String, ImportInfo>, String> {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .map_err(|e| format!("Failed to set language: {e}"))?;
+    let tree = parser.parse(source, None).ok_or("Failed to parse source")?;
+    let root = tree.root_node();
+    Ok(extract_import_map(&root, source))
+}
+
 /// Extract references between symbols by scanning function/impl bodies
 /// for identifiers that match known symbol names.
 pub fn extract_refs<S: std::hash::BuildHasher>(
@@ -588,8 +747,16 @@ pub fn extract_refs<S: std::hash::BuildHasher>(
 
     let tree = parser.parse(source, None).ok_or("Failed to parse source")?;
     let root = tree.root_node();
+    let import_map = extract_import_map(&root, source);
     let mut refs = Vec::new();
-    collect_refs(&root, source, file_path, known_symbols, &mut refs);
+    collect_refs(
+        &root,
+        source,
+        file_path,
+        known_symbols,
+        &import_map,
+        &mut refs,
+    );
     Ok(refs)
 }
 
@@ -598,6 +765,7 @@ fn collect_refs<S: std::hash::BuildHasher>(
     source: &str,
     file_path: &str,
     known_symbols: &std::collections::HashSet<String, S>,
+    import_map: &std::collections::HashMap<String, ImportInfo>,
     refs: &mut Vec<SymbolRef>,
 ) {
     let mut cursor = node.walk();
@@ -608,10 +776,18 @@ fn collect_refs<S: std::hash::BuildHasher>(
                     continue;
                 };
                 let fn_name = node_text(&name_node, source);
-                collect_body_refs(&child, source, file_path, &fn_name, known_symbols, refs);
+                collect_body_refs(
+                    &child,
+                    source,
+                    file_path,
+                    &fn_name,
+                    known_symbols,
+                    import_map,
+                    refs,
+                );
             }
             "impl_item" | "declaration_list" => {
-                collect_refs(&child, source, file_path, known_symbols, refs);
+                collect_refs(&child, source, file_path, known_symbols, import_map, refs);
             }
             _ => {}
         }
@@ -657,6 +833,7 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
     file_path: &str,
     fn_name: &str,
     known_symbols: &std::collections::HashSet<String, S>,
+    import_map: &std::collections::HashMap<String, ImportInfo>,
     refs: &mut Vec<SymbolRef>,
 ) {
     let locals = collect_locals(fn_node, source);
@@ -680,11 +857,15 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
                         && known_symbols.contains(&name)
                         && seen.insert(name.clone())
                     {
+                        let target_file = import_map
+                            .get(&name)
+                            .and_then(|info| qualified_path_to_file(&info.qualified_path));
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
                             source_file: file_path.to_string(),
                             target_name: name,
                             kind: ref_kind,
+                            target_file,
                         });
                     }
                 }
@@ -1723,6 +1904,108 @@ pub fn documented_with_code() {}
         assert!(
             doc.contains("let x = MyType::new()"),
             "doc should preserve code content: {doc}"
+        );
+    }
+
+    // ── 7. Import Map Extraction ──
+
+    #[test]
+    fn test_extract_import_map_direct() {
+        let source = "use crate::config::Config;\n";
+        let map = extract_import_map_from_source(source).unwrap();
+        assert_eq!(map.len(), 1);
+        let info = map.get("Config").unwrap();
+        assert_eq!(info.qualified_path, "crate::config::Config");
+    }
+
+    #[test]
+    fn test_extract_import_map_alias() {
+        let source = "use anyhow::Result as AnyResult;\n";
+        let map = extract_import_map_from_source(source).unwrap();
+        assert_eq!(map.len(), 1);
+        let info = map.get("AnyResult").unwrap();
+        assert_eq!(info.qualified_path, "anyhow::Result");
+    }
+
+    #[test]
+    fn test_extract_import_map_nested() {
+        let source = "use std::collections::{HashMap, HashSet};\n";
+        let map = extract_import_map_from_source(source).unwrap();
+        assert_eq!(map.len(), 2);
+        let hm = map.get("HashMap").unwrap();
+        assert_eq!(hm.qualified_path, "std::collections::HashMap");
+        let hs = map.get("HashSet").unwrap();
+        assert_eq!(hs.qualified_path, "std::collections::HashSet");
+    }
+
+    #[test]
+    fn test_extract_import_map_skips_glob() {
+        let source = "use std::collections::*;\n";
+        let map = extract_import_map_from_source(source).unwrap();
+        assert!(
+            map.is_empty(),
+            "glob imports should be skipped, got: {map:?}"
+        );
+    }
+
+    #[test]
+    fn test_qualified_path_to_file_resolves() {
+        let result = qualified_path_to_file("crate::config::Config");
+        assert_eq!(result, Some("src/config.rs".to_string()));
+    }
+
+    #[test]
+    fn test_qualified_path_to_file_nested() {
+        let result = qualified_path_to_file("crate::server::tools::query");
+        assert_eq!(result, Some("src/server/tools.rs".to_string()));
+    }
+
+    #[test]
+    fn test_qualified_path_to_file_non_crate() {
+        let result = qualified_path_to_file("anyhow::Result");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_refs_include_target_file_from_import() {
+        let source = r"
+use crate::config::Config;
+
+pub fn make() -> Config {
+    Config { port: 8080 }
+}
+";
+        let known: std::collections::HashSet<String> = ["Config", "make"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let config_ref = refs.iter().find(|r| r.target_name == "Config").unwrap();
+        assert_eq!(
+            config_ref.target_file.as_deref(),
+            Some("src/config.rs"),
+            "should resolve target_file from import map"
+        );
+    }
+
+    #[test]
+    fn test_refs_no_target_file_without_import() {
+        let source = r"
+pub struct Config { pub port: u16 }
+
+pub fn make() -> Config {
+    Config { port: 8080 }
+}
+";
+        let known: std::collections::HashSet<String> = ["Config", "make"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let config_ref = refs.iter().find(|r| r.target_name == "Config").unwrap();
+        assert!(
+            config_ref.target_file.is_none(),
+            "should have no target_file without an import"
         );
     }
 }
