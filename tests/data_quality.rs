@@ -784,14 +784,24 @@ fn docs_multiple_sources_shown() {
     let dep_id = db
         .insert_dependency("reqwest", "0.12.0", true, None)
         .unwrap();
+    // Summary doc (module="")
     db.store_doc(dep_id, "docs.rs", "reqwest HTTP client library")
         .unwrap();
-    db.store_doc(dep_id, "readme", "# reqwest\nAn ergonomic HTTP Client")
+    // Module doc
+    db.store_doc_with_module(dep_id, "readme", "# reqwest\nAn ergonomic HTTP Client", "overview")
         .unwrap();
 
+    // No topic → summary shown, modules listed
     let result = docs::handle_docs(&db, "reqwest", None).unwrap();
     assert!(result.contains("docs.rs"), "docs.rs source shown: {result}");
-    assert!(result.contains("readme"), "readme source shown: {result}");
+    assert!(result.contains("overview"), "module listed: {result}");
+
+    // Topic "overview" → module doc content shown
+    let result = docs::handle_docs(&db, "reqwest", Some("overview")).unwrap();
+    assert!(
+        result.contains("ergonomic HTTP Client"),
+        "module content shown: {result}"
+    );
 }
 
 // =========================================================================
