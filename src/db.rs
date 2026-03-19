@@ -26,6 +26,10 @@ newtype_id!(SymbolId);
 newtype_id!(CrateId);
 newtype_id!(DepId);
 
+fn escape_like(s: &str) -> String {
+    s.replace('%', r"\%").replace('_', r"\_")
+}
+
 fn is_fts_safe(query: &str) -> bool {
     !query
         .chars()
@@ -774,7 +778,7 @@ impl Database {
                     query.to_string(),
                 )
             } else {
-                let escaped = query.replace('%', r"\%").replace('_', r"\_");
+                let escaped = escape_like(query);
                 (
                     "WITH fts_results AS ( \
                         SELECT fts.rowid AS sid FROM symbols_fts fts \
@@ -811,7 +815,7 @@ impl Database {
             Ok(results)
         } else {
             // Unsafe for FTS — use LIKE only (always safe)
-            let escaped = query.replace('%', r"\%").replace('_', r"\_");
+            let escaped = escape_like(query);
             let like_pattern = format!("%{escaped}%");
             let mut stmt = self.conn.prepare_cached(
                 "SELECT s.name, s.kind, s.visibility, f.path, \

@@ -103,17 +103,21 @@ pub struct Symbol {
     pub impl_type: Option<String>,
 }
 
-pub fn parse_rust_source(
-    source: &str,
-    file_path: &str,
-) -> Result<(Vec<Symbol>, Vec<TraitImpl>), String> {
+fn parse_source(source: &str) -> Result<tree_sitter::Tree, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_rust::LANGUAGE.into())
         .map_err(|e| format!("Failed to set language: {e}"))?;
+    parser
+        .parse(source, None)
+        .ok_or_else(|| "Failed to parse source".to_string())
+}
 
-    let tree = parser.parse(source, None).ok_or("Failed to parse source")?;
-
+pub fn parse_rust_source(
+    source: &str,
+    file_path: &str,
+) -> Result<(Vec<Symbol>, Vec<TraitImpl>), String> {
+    let tree = parse_source(source)?;
     let root = tree.root_node();
     let mut symbols = Vec::new();
     let mut trait_impls = Vec::new();
@@ -126,6 +130,10 @@ pub fn parse_rust_source(
         &mut trait_impls,
     );
     Ok((symbols, trait_impls))
+}
+
+fn line_range(node: &Node) -> (usize, usize) {
+    (node.start_position().row + 1, node.end_position().row + 1)
 }
 
 fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
@@ -214,13 +222,14 @@ fn extract_impl_block(
     if let Some(ti) = extract_trait_impl_info(node, source, file_path) {
         trait_impls.push(ti);
     }
+    let (line_start, line_end) = line_range(node);
     symbols.push(Symbol {
         name: type_name.clone().unwrap_or_default(),
         kind: SymbolKind::Impl,
         visibility: vis,
         file_path: file_path.to_string(),
-        line_start: node.start_position().row + 1,
-        line_end: node.end_position().row + 1,
+        line_start,
+        line_end,
         signature: sig,
         doc_comment: None,
         body: Some(extract_body(node, source)),
@@ -277,13 +286,14 @@ fn extract_symbols(
             }
             "use_declaration" => {
                 let text = node_text(&child, source);
+                let (line_start, line_end) = line_range(&child);
                 symbols.push(Symbol {
                     name: text.clone(),
                     kind: SymbolKind::Use,
                     visibility: get_visibility(&child, source),
                     file_path: file_path.to_string(),
-                    line_start: child.start_position().row + 1,
-                    line_end: child.end_position().row + 1,
+                    line_start,
+                    line_end,
                     signature: text,
                     doc_comment: None,
                     body: None,
@@ -341,14 +351,15 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
     let name_text = node_text(&name, source);
     let vis = get_visibility(node, source);
     let sig = get_first_line(node, source);
+    let (line_start, line_end) = line_range(node);
 
     Some(Symbol {
         name: name_text,
         kind: SymbolKind::Function,
         visibility: vis,
         file_path: file_path.to_string(),
-        line_start: node.start_position().row + 1,
-        line_end: node.end_position().row + 1,
+        line_start,
+        line_end,
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
@@ -427,14 +438,15 @@ fn extract_named_item(
         SymbolKind::Trait => extract_trait_details(node, source),
         _ => None,
     };
+    let (line_start, line_end) = line_range(node);
 
     Some(Symbol {
         name,
         kind,
         visibility: vis,
         file_path: file_path.to_string(),
-        line_start: node.start_position().row + 1,
-        line_end: node.end_position().row + 1,
+        line_start,
+        line_end,
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
@@ -448,14 +460,15 @@ fn extract_macro_def(node: &Node, source: &str, file_path: &str) -> Option<Symbo
     let name = find_child_by_kind(node, "identifier")?;
     let name_text = node_text(&name, source);
     let sig = get_first_line(node, source);
+    let (line_start, line_end) = line_range(node);
 
     Some(Symbol {
         name: name_text,
         kind: SymbolKind::Macro,
         visibility: Visibility::Public,
         file_path: file_path.to_string(),
-        line_start: node.start_position().row + 1,
-        line_end: node.end_position().row + 1,
+        line_start,
+        line_end,
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
@@ -499,12 +512,13 @@ fn extract_trait_impl_info(node: &Node, source: &str, file_path: &str) -> Option
         .iter()
         .find(|c| is_type_node(c.kind()))?;
 
+    let (line_start, line_end) = line_range(node);
     Some(TraitImpl {
         trait_name: extract_type_name(trait_node, source),
         type_name: extract_type_name(type_node, source),
         file_path: file_path.to_string(),
-        line_start: node.start_position().row + 1,
-        line_end: node.end_position().row + 1,
+        line_start,
+        line_end,
     })
 }
 
@@ -793,11 +807,7 @@ fn collect_use_entries(
 pub fn extract_import_map_from_source(
     source: &str,
 ) -> Result<std::collections::HashMap<String, ImportInfo>, String> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .map_err(|e| format!("Failed to set language: {e}"))?;
-    let tree = parser.parse(source, None).ok_or("Failed to parse source")?;
+    let tree = parse_source(source)?;
     let root = tree.root_node();
     Ok(extract_import_map(&root, source))
 }
@@ -820,12 +830,7 @@ pub fn extract_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     known_symbols: &std::collections::HashSet<String, S>,
     crate_map: &std::collections::HashMap<String, String, S2>,
 ) -> Result<Vec<SymbolRef>, String> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .map_err(|e| format!("Failed to set language: {e}"))?;
-
-    let tree = parser.parse(source, None).ok_or("Failed to parse source")?;
+    let tree = parse_source(source)?;
     let root = tree.root_node();
     let import_map = extract_import_map(&root, source);
     let ctx = RefContext {

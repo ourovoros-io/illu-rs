@@ -127,11 +127,7 @@ fn parse_rustdoc_json(
     }
 
     let items = collect_public_items(index);
-    render_section(&mut output, "Traits", &items.traits);
-    render_section(&mut output, "Structs", &items.structs);
-    render_section(&mut output, "Enums", &items.enums);
-    render_section(&mut output, "Functions", &items.functions);
-    render_section(&mut output, "Macros", &items.macros);
+    items.render(&mut output);
 
     Ok(truncate_doc(&output, 8000))
 }
@@ -144,6 +140,37 @@ struct CollectedItems<'a> {
     macros: Vec<ItemEntry<'a>>,
 }
 
+impl<'a> CollectedItems<'a> {
+    fn new() -> Self {
+        Self {
+            traits: Vec::new(),
+            structs: Vec::new(),
+            enums: Vec::new(),
+            functions: Vec::new(),
+            macros: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, entry: ItemEntry<'a>) {
+        match entry.kind {
+            "trait_" => self.traits.push(entry),
+            "struct" => self.structs.push(entry),
+            "enum" => self.enums.push(entry),
+            "function" => self.functions.push(entry),
+            "macro" => self.macros.push(entry),
+            _ => {}
+        }
+    }
+
+    fn render(&self, output: &mut String) {
+        render_section(output, "Traits", &self.traits);
+        render_section(output, "Structs", &self.structs);
+        render_section(output, "Enums", &self.enums);
+        render_section(output, "Functions", &self.functions);
+        render_section(output, "Macros", &self.macros);
+    }
+}
+
 struct ItemEntry<'a> {
     name: &'a str,
     docs: &'a str,
@@ -152,28 +179,13 @@ struct ItemEntry<'a> {
 }
 
 fn collect_public_items(index: &serde_json::Map<String, serde_json::Value>) -> CollectedItems<'_> {
-    let mut items = CollectedItems {
-        traits: Vec::new(),
-        structs: Vec::new(),
-        enums: Vec::new(),
-        functions: Vec::new(),
-        macros: Vec::new(),
-    };
-
+    let mut items = CollectedItems::new();
     for item in index.values() {
         let Some(inner) = item.get("inner").and_then(|i| i.as_object()) else {
             continue;
         };
-        let Some(entry) = classify_item(item, inner) else {
-            continue;
-        };
-        match entry.kind {
-            "trait_" => items.traits.push(entry),
-            "struct" => items.structs.push(entry),
-            "enum" => items.enums.push(entry),
-            "function" => items.functions.push(entry),
-            "macro" => items.macros.push(entry),
-            _ => {}
+        if let Some(entry) = classify_item(item, inner) {
+            items.push(entry);
         }
     }
     items
@@ -300,13 +312,7 @@ fn collect_items_from_ids<'a>(
     item_ids: &[serde_json::Value],
     index: &'a serde_json::Map<String, serde_json::Value>,
 ) -> CollectedItems<'a> {
-    let mut items = CollectedItems {
-        traits: Vec::new(),
-        structs: Vec::new(),
-        enums: Vec::new(),
-        functions: Vec::new(),
-        macros: Vec::new(),
-    };
+    let mut items = CollectedItems::new();
     for child_id in item_ids {
         let key = child_id.to_string().replace('"', "");
         let Some(child) = index.get(&key) else {
@@ -316,14 +322,7 @@ fn collect_items_from_ids<'a>(
             continue;
         };
         if let Some(entry) = classify_item(child, inner) {
-            match entry.kind {
-                "trait_" => items.traits.push(entry),
-                "struct" => items.structs.push(entry),
-                "enum" => items.enums.push(entry),
-                "function" => items.functions.push(entry),
-                "macro" => items.macros.push(entry),
-                _ => {}
-            }
+            items.push(entry);
         }
     }
     items
@@ -342,11 +341,7 @@ fn render_collected_items(
         let truncated = truncate_doc(docs, 500);
         let _ = writeln!(output, "{truncated}\n");
     }
-    render_section(&mut output, "Traits", &items.traits);
-    render_section(&mut output, "Structs", &items.structs);
-    render_section(&mut output, "Enums", &items.enums);
-    render_section(&mut output, "Functions", &items.functions);
-    render_section(&mut output, "Macros", &items.macros);
+    items.render(&mut output);
     truncate_doc(&output, max_len)
 }
 
