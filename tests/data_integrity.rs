@@ -1704,3 +1704,461 @@ fn refresh_handles_file_content_change() {
         "new symbol should appear after refresh"
     );
 }
+
+// =========================================================================
+// 15. CROSS-MODULE REFERENCE RESOLUTION
+//     use imports across files must create proper refs in the symbol graph
+// =========================================================================
+
+#[test]
+fn cross_module_use_creates_ref() {
+    let (_dir, db) = index_multi_file(&[
+        ("lib.rs", "pub mod utils;\npub mod app;\n"),
+        ("utils.rs", "pub fn helper() -> i32 { 42 }\n"),
+        (
+            "app.rs",
+            "use crate::utils::helper;\npub fn run() -> i32 { helper() }\n",
+        ),
+    ]);
+
+    let result = impact::handle_impact(&db, "helper").unwrap();
+    assert!(
+        result.contains("run"),
+        "run should depend on helper via cross-module use: {result}"
+    );
+}
+
+#[test]
+fn cross_module_diamond_dependency() {
+    let (_dir, db) = index_multi_file(&[
+        (
+            "lib.rs",
+            "pub mod base;\npub mod left;\npub mod right;\npub mod top;\n",
+        ),
+        ("base.rs", "pub fn foundation() -> i32 { 1 }\n"),
+        (
+            "left.rs",
+            "use crate::base::foundation;\npub fn left_path() -> i32 { foundation() + 10 }\n",
+        ),
+        (
+            "right.rs",
+            "use crate::base::foundation;\npub fn right_path() -> i32 { foundation() + 20 }\n",
+        ),
+        (
+            "top.rs",
+            "use crate::left::left_path;\nuse crate::right::right_path;\npub fn combine() -> i32 { left_path() + right_path() }\n",
+        ),
+    ]);
+
+    let result = impact::handle_impact(&db, "foundation").unwrap();
+    // Depth 1: both left_path and right_path depend directly on foundation
+    assert!(
+        result.contains("left_path"),
+        "left_path should depend on foundation at depth 1: {result}"
+    );
+    assert!(
+        result.contains("right_path"),
+        "right_path should depend on foundation at depth 1: {result}"
+    );
+    // Depth 2: combine depends transitively on foundation via left_path and right_path
+    assert!(
+        result.contains("combine"),
+        "combine should depend on foundation transitively at depth 2: {result}"
+    );
+}
+
+#[test]
+fn cross_module_type_reference() {
+    let (_dir, db) = index_multi_file(&[
+        ("lib.rs", "pub mod types;\npub mod service;\n"),
+        ("types.rs", "pub struct Config { pub port: u16 }\n"),
+        (
+            "service.rs",
+            "use crate::types::Config;\npub fn start(cfg: Config) -> u16 { cfg.port }\n",
+        ),
+    ]);
+
+    let result = impact::handle_impact(&db, "Config").unwrap();
+    assert!(
+        result.contains("start"),
+        "start should depend on Config via type usage: {result}"
+    );
+}
+
+// =========================================================================
+// 16. STALE DATA AFTER INCREMENTAL RE-INDEX
+//     refresh_index must leave no stale signatures, line numbers, or refs
+// =========================================================================
+
+#[test]
+fn refresh_updates_changed_signature() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        "[[package]]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn transform(x: i32) -> i32 { x + 1 }\n",
+    )
+    .unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    // Verify initial signature
+    let result = context::handle_context(&db, "transform", false).unwrap();
+    assert!(
+        result.contains("transform(x: i32) -> i32"),
+        "initial signature should have one param: {result}"
+    );
+
+    // Change signature to two params
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn transform(x: i32, y: i32) -> i32 { x + y }\n",
+    )
+    .unwrap();
+    refresh_index(&db, &config).unwrap();
+
+    let result = context::handle_context(&db, "transform", false).unwrap();
+    assert!(
+        result.contains("transform(x: i32, y: i32)"),
+        "refreshed signature should have two params: {result}"
+    );
+}
+
+#[test]
+fn refresh_updates_moved_line_numbers() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        "[[package]]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn first() {}\npub fn second() {}\n",
+    )
+    .unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    let syms = db.search_symbols("second").unwrap();
+    let old_line = syms[0].line_start;
+
+    // Prepend a new function, shifting second() down
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn zeroth() {}\npub fn first() {}\npub fn second() {}\n",
+    )
+    .unwrap();
+    refresh_index(&db, &config).unwrap();
+
+    let syms = db.search_symbols("second").unwrap();
+    assert!(
+        syms[0].line_start > old_line,
+        "second() should have shifted down: was {old_line}, now {}",
+        syms[0].line_start
+    );
+}
+
+#[test]
+fn refresh_removes_deleted_file_completely() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        "[[package]]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub mod helper;\npub fn main_fn() {}\n",
+    )
+    .unwrap();
+    std::fs::write(src_dir.join("helper.rs"), "pub fn help() {}\n").unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    // Verify help exists
+    let syms = db.search_symbols("help").unwrap();
+    assert!(!syms.is_empty(), "help should exist before deletion");
+
+    // Delete helper.rs, update lib.rs to remove mod declaration
+    std::fs::remove_file(src_dir.join("helper.rs")).unwrap();
+    std::fs::write(src_dir.join("lib.rs"), "pub fn main_fn() {}\n").unwrap();
+    refresh_index(&db, &config).unwrap();
+
+    // Verify help is gone from query
+    let syms = db.search_symbols("help").unwrap();
+    assert!(syms.is_empty(), "help must be removed after file deletion");
+
+    // Verify overview does not mention helper.rs
+    let ov = overview::handle_overview(&db, "src/").unwrap();
+    assert!(
+        !ov.contains("helper.rs"),
+        "overview must not mention deleted helper.rs: {ov}"
+    );
+
+    // Verify tree does not list helper.rs
+    let tr = tree::handle_tree(&db, "src/").unwrap();
+    assert!(
+        !tr.contains("helper.rs"),
+        "tree must not list deleted helper.rs: {tr}"
+    );
+}
+
+#[test]
+fn refresh_removes_deleted_reference() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        "[[package]]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn callee() {}\npub fn caller() { callee() }\n",
+    )
+    .unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    // Verify caller depends on callee
+    let result = impact::handle_impact(&db, "callee").unwrap();
+    assert!(
+        result.contains("caller"),
+        "caller should depend on callee initially: {result}"
+    );
+
+    // Remove the call from caller
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn callee() {}\npub fn caller() { /* no longer calls callee */ }\n",
+    )
+    .unwrap();
+    refresh_index(&db, &config).unwrap();
+
+    let result = impact::handle_impact(&db, "callee").unwrap();
+    assert!(
+        !result.contains("caller"),
+        "caller must NOT depend on callee after removing the call: {result}"
+    );
+}
+
+// =========================================================================
+// 17. OUTPUT FORMAT CONTRACTS
+//     Tool outputs must match documented markdown structure
+// =========================================================================
+
+#[test]
+fn context_output_has_required_markdown_structure() {
+    let (_dir, db) = index_source(
+        r"
+/// Application config.
+pub struct AppState {
+    pub port: u16,
+    pub host: String,
+}
+
+impl AppState {
+    pub fn new() -> AppState {
+        AppState { port: 8080, host: String::new() }
+    }
+}
+",
+    );
+
+    let result = context::handle_context(&db, "AppState", false).unwrap();
+
+    // Header: ## SymbolName (kind)
+    assert!(
+        result.contains("## AppState (struct)"),
+        "must start section with ## Name (kind): {result}"
+    );
+    // Doc comment prefixed with >
+    assert!(
+        result.contains("> Application config."),
+        "doc comment must be blockquoted with >: {result}"
+    );
+    // File line with path:start-end format
+    assert!(
+        result.contains("- **File:** "),
+        "must have File metadata line: {result}"
+    );
+    // Visibility
+    assert!(
+        result.contains("- **Visibility:** "),
+        "must have Visibility line: {result}"
+    );
+    // Signature in backticks
+    assert!(
+        result.contains("- **Signature:** `"),
+        "must have Signature in backticks: {result}"
+    );
+    // Fields/Variants section for a struct
+    assert!(
+        result.contains("### Fields/Variants"),
+        "struct context must include Fields/Variants section: {result}"
+    );
+}
+
+#[test]
+fn query_output_has_required_format() {
+    let (_dir, db) = index_source(
+        r"
+pub fn alpha_fn() -> i32 { 1 }
+pub fn beta_fn() -> i32 { 2 }
+",
+    );
+
+    let result = query::handle_query(&db, "fn", Some("symbols"), None).unwrap();
+
+    // Must start with ## Symbols header
+    assert!(
+        result.contains("## Symbols"),
+        "query output must have ## Symbols header: {result}"
+    );
+    // Each entry: - **name** (kind) at path:start-end
+    assert!(
+        result.contains("- **alpha_fn** (function) at "),
+        "must have formatted symbol entry for alpha_fn: {result}"
+    );
+    assert!(
+        result.contains("- **beta_fn** (function) at "),
+        "must have formatted symbol entry for beta_fn: {result}"
+    );
+    // Signature on the next line in backticks
+    assert!(
+        result.contains("`pub fn alpha_fn()"),
+        "signature must be wrapped in backticks: {result}"
+    );
+}
+
+#[test]
+fn impact_output_has_required_format() {
+    let (_dir, db) = index_source(
+        r"
+pub fn leaf_fn() -> i32 { 1 }
+pub fn mid_fn() -> i32 { leaf_fn() }
+pub fn top_fn() -> i32 { mid_fn() }
+",
+    );
+
+    let result = impact::handle_impact(&db, "leaf_fn").unwrap();
+
+    // Header
+    assert!(
+        result.contains("## Impact Analysis: leaf_fn"),
+        "must have impact analysis header: {result}"
+    );
+    // Depth sections
+    assert!(
+        result.contains("### Depth 1"),
+        "must have Depth 1 section: {result}"
+    );
+    assert!(
+        result.contains("### Depth 2"),
+        "must have Depth 2 section: {result}"
+    );
+    // Entry format: - **name** (path)
+    assert!(
+        result.contains("**mid_fn**"),
+        "must show mid_fn as dependent: {result}"
+    );
+    assert!(
+        result.contains("**top_fn**"),
+        "must show top_fn as dependent: {result}"
+    );
+    // Transitive entries have " — via " connector
+    assert!(
+        result.contains("— via"),
+        "transitive entries must show via chain: {result}"
+    );
+}
+
+#[test]
+fn overview_output_has_required_format() {
+    let (_dir, db) = index_source(
+        r"
+/// A public function.
+pub fn my_public_fn() -> i32 { 42 }
+
+pub struct MyPublicStruct {
+    pub field: String,
+}
+",
+    );
+
+    let result = overview::handle_overview(&db, "src/").unwrap();
+
+    // File section header: ### path/to/file.rs
+    assert!(
+        result.contains("### src/lib.rs"),
+        "must have file section header: {result}"
+    );
+    // Symbol format: - **name** (kind) `signature`
+    assert!(
+        result.contains("- **my_public_fn** (function) `"),
+        "must have formatted symbol for function: {result}"
+    );
+    assert!(
+        result.contains("- **MyPublicStruct** (struct) `"),
+        "must have formatted symbol for struct: {result}"
+    );
+    // Separator
+    assert!(result.contains("---"), "must have separator: {result}");
+    // Summary line
+    assert!(
+        result.contains("symbols across"),
+        "must have summary with 'symbols across': {result}"
+    );
+    assert!(
+        result.contains("files"),
+        "must have summary with 'files': {result}"
+    );
+}
