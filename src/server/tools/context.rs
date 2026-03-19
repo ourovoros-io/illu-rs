@@ -10,7 +10,10 @@ pub fn handle_context(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = db.search_symbols(symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!("No symbol found matching '{symbol_name}'."));
+        return Ok(format!(
+            "No symbol found matching '{symbol_name}'.\n\
+            Try a partial name or use `query` to search."
+        ));
     }
 
     let repo_root = db.repo_root();

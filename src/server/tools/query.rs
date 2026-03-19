@@ -19,12 +19,14 @@ pub fn handle_query(
             format_docs(db, query, &mut output)?;
         }
         other => {
-            return Err(format!("Unknown scope: {other}").into());
+            return Err(
+                format!("Unknown scope: '{other}'. Valid: symbols, docs, files, all").into(),
+            );
         }
     }
 
     if output.is_empty() {
-        output.push_str("No results found.");
+        output.push_str(&format!("No results found for '{query}'."));
     }
 
     Ok(output)
@@ -265,6 +267,6 @@ mod tests {
     fn test_query_no_results() {
         let db = Database::open_in_memory().unwrap();
         let result = handle_query(&db, "nonexistent", None, None).unwrap();
-        assert_eq!(result, "No results found.");
+        assert!(result.contains("No results found for 'nonexistent'"));
     }
 }

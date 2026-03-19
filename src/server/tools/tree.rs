@@ -5,7 +5,10 @@ pub fn handle_tree(db: &Database, path: &str) -> Result<String, Box<dyn std::err
     let file_counts = db.get_file_symbol_counts(path)?;
 
     if file_counts.is_empty() {
-        return Ok(format!("No files found under '{path}'."));
+        return Ok(format!(
+            "No files found under '{path}'. \
+             Try 'src/' for standard Rust layout."
+        ));
     }
 
     let mut output = String::new();

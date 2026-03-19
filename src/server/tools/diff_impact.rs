@@ -93,7 +93,12 @@ pub fn handle_diff_impact(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let diff_output = run_git_diff(repo_path, git_ref)?;
     if diff_output.trim().is_empty() {
-        return Ok("No changes detected in the diff.".to_string());
+        return Ok(
+            "No changes detected. Check the git ref \
+             (e.g., git_ref: \"HEAD~1..HEAD\" for last commit, \
+             or omit for unstaged changes)."
+                .to_string(),
+        );
     }
 
     let hunks = parse_diff(&diff_output);
@@ -125,7 +130,11 @@ pub fn handle_diff_impact(
 
     if changed_symbols.is_empty() {
         let _ = writeln!(output, "## Changed Symbols\n");
-        let _ = writeln!(output, "No indexed symbols found at the changed lines.");
+        let _ = writeln!(
+            output,
+            "No indexed symbols overlap the changed lines. \
+             Changes may be in comments, whitespace, or between function definitions."
+        );
         return Ok(output);
     }
 

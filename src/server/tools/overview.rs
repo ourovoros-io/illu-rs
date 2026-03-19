@@ -5,7 +5,10 @@ pub fn handle_overview(db: &Database, path: &str) -> Result<String, Box<dyn std:
     let symbols = db.get_symbols_by_path_prefix(path)?;
 
     if symbols.is_empty() {
-        return Ok(format!("No public symbols found under '{path}'."));
+        return Ok(format!(
+            "No public symbols found under '{path}'. \
+             Try a broader prefix like 'src/'."
+        ));
     }
 
     let mut output = String::new();
@@ -158,6 +161,6 @@ mod tests {
     fn test_overview_no_results() {
         let db = Database::open_in_memory().unwrap();
         let result = handle_overview(&db, "nonexistent/").unwrap();
-        assert_eq!(result, "No public symbols found under 'nonexistent/'.");
+        assert!(result.contains("No public symbols found under 'nonexistent/'"));
     }
 }

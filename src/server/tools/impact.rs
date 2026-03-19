@@ -7,7 +7,10 @@ pub fn handle_impact(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = db.search_symbols(symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!("No symbol found matching '{symbol_name}'."));
+        return Ok(format!(
+            "No symbol found matching '{symbol_name}'.\n\
+            Verify the symbol exists with `query`."
+        ));
     }
 
     let mut output = String::new();
@@ -52,8 +55,9 @@ pub fn handle_impact(
     if dependents.is_empty() {
         output.push_str("No dependents found.\n");
         output.push_str(
-            "Note: Symbol references are populated \
-             during indexing.\n",
+            "This symbol may be a leaf (not used by other code), \
+             or only used in ways the indexer cannot detect \
+             (e.g., macro-generated calls, dynamic dispatch).\n",
         );
     }
 

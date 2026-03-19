@@ -41,7 +41,8 @@ pub fn handle_docs(
         return match dep {
             Some(_) => Ok(format!(
                 "'{dep_name}' is a known dependency but no docs were \
-                 fetched. It may not be published on docs.rs."
+                 fetched. The crate may not be on docs.rs, or doc \
+                 fetching may have been skipped."
             )),
             None => Ok(format!(
                 "'{dep_name}' is not a known dependency of this project."
@@ -100,6 +101,8 @@ fn handle_docs_with_topic(
             for m in &modules {
                 let _ = write!(msg, "\n- `{m}`");
             }
+        } else {
+            msg.push_str("\n\nNo module-level docs available for this dependency.");
         }
         return Ok(msg);
     }
