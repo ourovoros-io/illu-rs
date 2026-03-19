@@ -1130,11 +1130,11 @@ impl Database {
     }
 
     /// Build an in-memory lookup table mapping symbol names to their DB IDs.
-    /// Three tiers: (name, file) -> id, (name, impl_type) -> id, name -> id.
+    /// Three tiers: (name, file), (name, impl type), and name-only.
     pub fn build_symbol_id_map(&self) -> SqlResult<SymbolIdMap> {
-        let mut by_name_and_file = std::collections::HashMap::new();
-        let mut by_name_and_impl = std::collections::HashMap::new();
-        let mut by_name = std::collections::HashMap::new();
+        let mut file_qualified = std::collections::HashMap::new();
+        let mut impl_qualified = std::collections::HashMap::new();
+        let mut name_only = std::collections::HashMap::new();
 
         let mut stmt = self.conn.prepare(
             "SELECT s.id, s.name, f.path, s.impl_type \
@@ -1148,21 +1148,21 @@ impl Database {
             let path: String = row.get(2)?;
             let impl_type: Option<String> = row.get(3)?;
 
-            by_name_and_file
+            file_qualified
                 .entry((name.clone(), path))
                 .or_insert(id);
             if let Some(it) = impl_type {
-                by_name_and_impl
+                impl_qualified
                     .entry((name.clone(), it))
                     .or_insert(id);
             }
-            by_name.entry(name).or_insert(id);
+            name_only.entry(name).or_insert(id);
         }
 
         Ok(SymbolIdMap {
-            by_name_and_file,
-            by_name_and_impl,
-            by_name,
+            file_qualified,
+            impl_qualified,
+            name_only,
         })
     }
 
@@ -1219,37 +1219,36 @@ impl Database {
 }
 
 pub struct SymbolIdMap {
-    by_name_and_file: std::collections::HashMap<(String, String), SymbolId>,
-    by_name_and_impl: std::collections::HashMap<(String, String), SymbolId>,
-    by_name: std::collections::HashMap<String, SymbolId>,
+    file_qualified: std::collections::HashMap<(String, String), SymbolId>,
+    impl_qualified: std::collections::HashMap<(String, String), SymbolId>,
+    name_only: std::collections::HashMap<String, SymbolId>,
 }
 
 impl SymbolIdMap {
     /// Resolve a symbol name to its DB ID using a three-tier lookup:
-    /// impl-qualified -> file-qualified -> name-only fallback.
+    /// impl-qualified, then file-qualified, then name-only fallback.
+    #[must_use]
     pub fn resolve(
         &self,
         name: &str,
         target_file: Option<&str>,
         target_context: Option<&str>,
     ) -> Option<SymbolId> {
-        if let Some(ctx) = target_context {
-            if let Some(id) = self
-                .by_name_and_impl
+        if let Some(ctx) = target_context
+            && let Some(id) = self
+                .impl_qualified
                 .get(&(name.to_string(), ctx.to_string()))
-            {
-                return Some(*id);
-            }
+        {
+            return Some(*id);
         }
-        if let Some(file) = target_file {
-            if let Some(id) = self
-                .by_name_and_file
+        if let Some(file) = target_file
+            && let Some(id) = self
+                .file_qualified
                 .get(&(name.to_string(), file.to_string()))
-            {
-                return Some(*id);
-            }
+        {
+            return Some(*id);
         }
-        self.by_name.get(name).copied()
+        self.name_only.get(name).copied()
     }
 }
 

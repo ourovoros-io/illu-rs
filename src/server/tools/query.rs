@@ -26,7 +26,7 @@ pub fn handle_query(
     }
 
     if output.is_empty() {
-        output.push_str(&format!("No results found for '{query}'."));
+        let _ = write!(output, "No results found for '{query}'.");
     }
 
     Ok(output)

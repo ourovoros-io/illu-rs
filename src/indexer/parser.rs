@@ -13,6 +13,7 @@ pub enum SymbolKind {
     Static,
     TypeAlias,
     Macro,
+    Union,
 }
 
 impl std::fmt::Display for SymbolKind {
@@ -29,6 +30,7 @@ impl std::fmt::Display for SymbolKind {
             Self::Static => "static",
             Self::TypeAlias => "type_alias",
             Self::Macro => "macro",
+            Self::Union => "union",
         };
         f.write_str(s)
     }
@@ -49,6 +51,7 @@ impl std::str::FromStr for SymbolKind {
             "static" => Ok(Self::Static),
             "type_alias" => Ok(Self::TypeAlias),
             "macro" => Ok(Self::Macro),
+            "union" => Ok(Self::Union),
             other => Err(format!("unknown symbol kind: {other}")),
         }
     }
@@ -264,20 +267,20 @@ fn extract_symbols(
                     symbols.push(sym);
                 }
             }
-            "struct_item" => {
-                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Struct)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "enum_item" => {
-                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Enum) {
-                    symbols.push(sym);
-                }
-            }
-            "trait_item" => {
-                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Trait)
-                {
+            "struct_item" | "enum_item" | "trait_item" | "mod_item" | "const_item"
+            | "static_item" | "type_item" | "union_item" => {
+                let kind = match child.kind() {
+                    "struct_item" => SymbolKind::Struct,
+                    "enum_item" => SymbolKind::Enum,
+                    "trait_item" => SymbolKind::Trait,
+                    "mod_item" => SymbolKind::Mod,
+                    "const_item" => SymbolKind::Const,
+                    "static_item" => SymbolKind::Static,
+                    "type_item" => SymbolKind::TypeAlias,
+                    "union_item" => SymbolKind::Union,
+                    _ => continue,
+                };
+                if let Some(sym) = extract_named_item(&child, source, file_path, kind) {
                     symbols.push(sym);
                 }
             }
@@ -302,27 +305,9 @@ fn extract_symbols(
                     impl_type: None,
                 });
             }
-            "mod_item" => {
-                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Mod) {
-                    symbols.push(sym);
-                }
-            }
-            "const_item" => {
-                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Const)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "static_item" => {
-                if let Some(sym) = extract_named_item(&child, source, file_path, SymbolKind::Static)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "type_item" => {
-                if let Some(sym) =
-                    extract_named_item(&child, source, file_path, SymbolKind::TypeAlias)
-                {
+            "function_signature_item" => {
+                if let Some(mut sym) = extract_function_signature(&child, source, file_path) {
+                    sym.impl_type = impl_type_name.map(String::from);
                     symbols.push(sym);
                 }
             }
@@ -331,7 +316,7 @@ fn extract_symbols(
                     symbols.push(sym);
                 }
             }
-            "declaration_list" => {
+            "foreign_mod_item" | "declaration_list" => {
                 extract_symbols(
                     &child,
                     source,
@@ -363,6 +348,29 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
         signature: sig,
         doc_comment: extract_doc_comment(node, source),
         body: Some(extract_body(node, source)),
+        details: None,
+        attributes: extract_attributes(node, source),
+        impl_type: None,
+    })
+}
+
+fn extract_function_signature(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
+    let name = find_child_by_kind(node, "identifier")?;
+    let name_text = node_text(&name, source);
+    let vis = get_visibility(node, source);
+    let sig = get_first_line(node, source);
+    let (line_start, line_end) = line_range(node);
+
+    Some(Symbol {
+        name: name_text,
+        kind: SymbolKind::Function,
+        visibility: vis,
+        file_path: file_path.to_string(),
+        line_start,
+        line_end,
+        signature: sig,
+        doc_comment: extract_doc_comment(node, source),
+        body: None,
         details: None,
         attributes: extract_attributes(node, source),
         impl_type: None,
@@ -433,7 +441,7 @@ fn extract_named_item(
     let sig = get_first_line(node, source);
 
     let details = match kind {
-        SymbolKind::Struct => extract_struct_details(node, source),
+        SymbolKind::Struct | SymbolKind::Union => extract_struct_details(node, source),
         SymbolKind::Enum => extract_enum_details(node, source),
         SymbolKind::Trait => extract_trait_details(node, source),
         _ => None,
@@ -2284,5 +2292,47 @@ impl MyStruct {
             Some("MyStruct"),
             "self.helper() should have target_context = MyStruct"
         );
+    }
+
+    #[test]
+    fn test_extract_union() {
+        let source = r"
+pub union MyUnion {
+    pub i: i32,
+    pub f: f32,
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let u = symbols.iter().find(|s| s.name == "MyUnion").unwrap();
+        assert_eq!(u.kind, SymbolKind::Union);
+        assert!(u.details.as_ref().is_some_and(|d| d.contains("i: i32")));
+    }
+
+    #[test]
+    fn test_extract_extern_block_functions() {
+        let source = "extern \"C\" {\n    \
+                       pub fn c_function(x: i32) -> i32;\n    \
+                       pub fn another_c_fn();\n\
+                       }\n";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let c_fn = symbols.iter().find(|s| s.name == "c_function");
+        assert!(
+            c_fn.is_some(),
+            "extern C functions should be extracted: {symbols:?}"
+        );
+        let another = symbols.iter().find(|s| s.name == "another_c_fn");
+        assert!(
+            another.is_some(),
+            "second extern C function should be extracted: {symbols:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_const_fn() {
+        let source = "pub const fn compute(x: u32) -> u32 { x + 1 }\n";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let f = symbols.iter().find(|s| s.name == "compute").unwrap();
+        assert_eq!(f.kind, SymbolKind::Function);
+        assert!(f.signature.contains("const fn"));
     }
 }

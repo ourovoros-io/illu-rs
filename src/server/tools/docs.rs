@@ -96,13 +96,13 @@ fn handle_docs_with_topic(
             }
         };
         let modules = db.get_doc_modules(dep_name)?;
-        if !modules.is_empty() {
+        if modules.is_empty() {
+            msg.push_str("\n\nNo module-level docs available for this dependency.");
+        } else {
             msg.push_str("\n\nAvailable modules:");
             for m in &modules {
                 let _ = write!(msg, "\n- `{m}`");
             }
-        } else {
-            msg.push_str("\n\nNo module-level docs available for this dependency.");
         }
         return Ok(msg);
     }
