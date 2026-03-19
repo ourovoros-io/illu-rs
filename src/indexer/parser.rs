@@ -100,6 +100,7 @@ pub struct Symbol {
     pub body: Option<String>,
     pub details: Option<String>,
     pub attributes: Option<String>,
+    pub impl_type: Option<String>,
 }
 
 pub fn parse_rust_source(
@@ -116,7 +117,14 @@ pub fn parse_rust_source(
     let root = tree.root_node();
     let mut symbols = Vec::new();
     let mut trait_impls = Vec::new();
-    extract_symbols(&root, source, file_path, &mut symbols, &mut trait_impls);
+    extract_symbols(
+        &root,
+        source,
+        file_path,
+        None,
+        &mut symbols,
+        &mut trait_impls,
+    );
     Ok((symbols, trait_impls))
 }
 
@@ -193,10 +201,48 @@ fn extract_body(node: &Node, source: &str) -> String {
     }
 }
 
+fn extract_impl_block(
+    node: &Node,
+    source: &str,
+    file_path: &str,
+    symbols: &mut Vec<Symbol>,
+    trait_impls: &mut Vec<TraitImpl>,
+) {
+    let type_name = extract_impl_type(node, source);
+    let vis = get_visibility(node, source);
+    let sig = get_first_line(node, source);
+    if let Some(ti) = extract_trait_impl_info(node, source, file_path) {
+        trait_impls.push(ti);
+    }
+    symbols.push(Symbol {
+        name: type_name.clone().unwrap_or_default(),
+        kind: SymbolKind::Impl,
+        visibility: vis,
+        file_path: file_path.to_string(),
+        line_start: node.start_position().row + 1,
+        line_end: node.end_position().row + 1,
+        signature: sig,
+        doc_comment: None,
+        body: Some(extract_body(node, source)),
+        details: None,
+        attributes: None,
+        impl_type: None,
+    });
+    extract_symbols(
+        node,
+        source,
+        file_path,
+        type_name.as_deref(),
+        symbols,
+        trait_impls,
+    );
+}
+
 fn extract_symbols(
     node: &Node,
     source: &str,
     file_path: &str,
+    impl_type_name: Option<&str>,
     symbols: &mut Vec<Symbol>,
     trait_impls: &mut Vec<TraitImpl>,
 ) {
@@ -204,7 +250,8 @@ fn extract_symbols(
     for child in node.children(&mut cursor) {
         match child.kind() {
             "function_item" => {
-                if let Some(sym) = extract_function(&child, source, file_path) {
+                if let Some(mut sym) = extract_function(&child, source, file_path) {
+                    sym.impl_type = impl_type_name.map(String::from);
                     symbols.push(sym);
                 }
             }
@@ -226,26 +273,7 @@ fn extract_symbols(
                 }
             }
             "impl_item" => {
-                let type_name = extract_impl_type(&child, source);
-                let vis = get_visibility(&child, source);
-                let sig = get_first_line(&child, source);
-                if let Some(ti) = extract_trait_impl_info(&child, source, file_path) {
-                    trait_impls.push(ti);
-                }
-                symbols.push(Symbol {
-                    name: type_name.clone().unwrap_or_default(),
-                    kind: SymbolKind::Impl,
-                    visibility: vis,
-                    file_path: file_path.to_string(),
-                    line_start: child.start_position().row + 1,
-                    line_end: child.end_position().row + 1,
-                    signature: sig,
-                    doc_comment: None,
-                    body: Some(extract_body(&child, source)),
-                    details: None,
-                    attributes: None,
-                });
-                extract_symbols(&child, source, file_path, symbols, trait_impls);
+                extract_impl_block(&child, source, file_path, symbols, trait_impls);
             }
             "use_declaration" => {
                 let text = node_text(&child, source);
@@ -261,6 +289,7 @@ fn extract_symbols(
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 });
             }
             "mod_item" => {
@@ -293,7 +322,14 @@ fn extract_symbols(
                 }
             }
             "declaration_list" => {
-                extract_symbols(&child, source, file_path, symbols, trait_impls);
+                extract_symbols(
+                    &child,
+                    source,
+                    file_path,
+                    impl_type_name,
+                    symbols,
+                    trait_impls,
+                );
             }
             _ => {}
         }
@@ -318,6 +354,7 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
         body: Some(extract_body(node, source)),
         details: None,
         attributes: extract_attributes(node, source),
+        impl_type: None,
     })
 }
 
@@ -403,6 +440,7 @@ fn extract_named_item(
         body: Some(extract_body(node, source)),
         details,
         attributes: extract_attributes(node, source),
+        impl_type: None,
     })
 }
 
@@ -423,6 +461,7 @@ fn extract_macro_def(node: &Node, source: &str, file_path: &str) -> Option<Symbo
         body: Some(extract_body(node, source)),
         details: None,
         attributes: extract_attributes(node, source),
+        impl_type: None,
     })
 }
 
@@ -523,6 +562,8 @@ pub struct SymbolRef {
     pub kind: RefKind,
     /// Resolved target file path from import map (if available)
     pub target_file: Option<String>,
+    /// Impl type context for `self.method()` calls
+    pub target_context: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -795,13 +836,14 @@ pub fn extract_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
         crate_map,
     };
     let mut refs = Vec::new();
-    collect_refs(&root, &ctx, &mut refs);
+    collect_refs(&root, &ctx, None, &mut refs);
     Ok(refs)
 }
 
 fn collect_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     node: &Node,
     ctx: &RefContext<'_, S, S2>,
+    impl_type: Option<&str>,
     refs: &mut Vec<SymbolRef>,
 ) {
     let mut cursor = node.walk();
@@ -812,10 +854,14 @@ fn collect_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                     continue;
                 };
                 let fn_name = node_text(&name_node, ctx.source);
-                collect_body_refs(&child, &fn_name, ctx, refs);
+                collect_body_refs(&child, &fn_name, impl_type, ctx, refs);
             }
-            "impl_item" | "declaration_list" => {
-                collect_refs(&child, ctx, refs);
+            "impl_item" => {
+                let type_name = extract_impl_type(&child, ctx.source);
+                collect_refs(&child, ctx, type_name.as_deref(), refs);
+            }
+            "declaration_list" => {
+                collect_refs(&child, ctx, impl_type, refs);
             }
             _ => {}
         }
@@ -858,6 +904,7 @@ fn collect_locals(node: &Node, source: &str) -> std::collections::HashSet<String
 fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     fn_node: &Node,
     fn_name: &str,
+    impl_type: Option<&str>,
     ctx: &RefContext<'_, S, S2>,
     refs: &mut Vec<SymbolRef>,
 ) {
@@ -891,6 +938,37 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                             target_name: name,
                             kind: ref_kind,
                             target_file,
+                            target_context: None,
+                        });
+                    }
+                }
+                "field_identifier" => {
+                    let name = node_text(&child, ctx.source);
+                    let is_self_call = child.parent().is_some_and(|p| {
+                        p.kind() == "field_expression"
+                            && p.child(0).is_some_and(|c| c.kind() == "self")
+                    });
+                    let target_context = if is_self_call {
+                        impl_type.map(String::from)
+                    } else {
+                        None
+                    };
+                    if name != fn_name
+                        && !is_noisy_symbol(&name)
+                        && !locals.contains(&name)
+                        && ctx.known_symbols.contains(&name)
+                        && seen.insert(name.clone())
+                    {
+                        let target_file = ctx.import_map.get(&name).and_then(|info| {
+                            qualified_path_to_file_with_crates(&info.qualified_path, ctx.crate_map)
+                        });
+                        refs.push(SymbolRef {
+                            source_name: fn_name.to_string(),
+                            source_file: ctx.file_path.to_string(),
+                            target_name: name,
+                            kind: RefKind::Call,
+                            target_file,
+                            target_context,
                         });
                     }
                 }
@@ -2146,6 +2224,60 @@ pub fn make() -> Config {
         assert!(
             config_ref.target_file.is_none(),
             "should have no target_file without an import"
+        );
+    }
+
+    #[test]
+    fn test_symbol_impl_type() {
+        let source = r"
+pub struct MyStruct;
+impl MyStruct {
+    pub fn method(&self) {}
+}
+pub fn free_function() {}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let method = symbols.iter().find(|s| s.name == "method").unwrap();
+        assert_eq!(method.impl_type.as_deref(), Some("MyStruct"));
+        let free_fn = symbols.iter().find(|s| s.name == "free_function").unwrap();
+        assert!(free_fn.impl_type.is_none());
+    }
+
+    #[test]
+    fn test_refs_self_method_has_target_context() {
+        let source = r"
+pub struct MyStruct;
+
+impl MyStruct {
+    pub fn do_work(&self) {
+        self.helper()
+    }
+
+    pub fn helper(&self) {}
+}
+";
+        let known: std::collections::HashSet<String> = ["do_work", "helper", "MyStruct"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let helper_ref = refs
+            .iter()
+            .find(|r| r.target_name == "helper" && r.source_name == "do_work");
+        assert!(
+            helper_ref.is_some(),
+            "should find helper call from do_work, refs: {refs:?}"
+        );
+        assert_eq!(
+            helper_ref.unwrap().target_context.as_deref(),
+            Some("MyStruct"),
+            "self.helper() should have target_context = MyStruct"
         );
     }
 }

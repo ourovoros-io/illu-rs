@@ -93,6 +93,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -122,6 +123,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
                 Symbol {
                     name: "caller_fn".into(),
@@ -135,6 +137,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
             ],
         )
@@ -172,6 +175,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
                 Symbol {
                     name: "mid_fn".into(),
@@ -185,6 +189,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
                 Symbol {
                     name: "top_fn".into(),
@@ -198,6 +203,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
             ],
         )
@@ -248,6 +254,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -267,6 +274,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();

@@ -232,6 +232,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -268,6 +269,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -300,6 +302,7 @@ mod tests {
                 body: Some("pub struct Config { pub port: u16 }".into()),
                 details: Some("port: u16".into()),
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -333,6 +336,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
                 Symbol {
                     name: "callee_fn".into(),
@@ -346,6 +350,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
             ],
         )
@@ -386,6 +391,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();

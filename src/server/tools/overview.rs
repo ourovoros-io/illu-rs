@@ -78,6 +78,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -96,6 +97,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -127,6 +129,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
                 Symbol {
                     name: "private_fn".into(),
@@ -140,6 +143,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
             ],
         )

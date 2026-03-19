@@ -132,6 +132,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -171,6 +172,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -198,6 +200,7 @@ mod tests {
                 body: None,
                 details: None,
                 attributes: None,
+                impl_type: None,
             }],
         )
         .unwrap();
@@ -227,6 +230,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
                 Symbol {
                     name: "configure".into(),
@@ -240,6 +244,7 @@ mod tests {
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
             ],
         )

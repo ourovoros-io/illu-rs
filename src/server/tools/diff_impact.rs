@@ -270,6 +270,7 @@ diff --git a/src/lib.rs b/src/lib.rs
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
                 Symbol {
                     name: "caller_fn".into(),
@@ -283,6 +284,7 @@ diff --git a/src/lib.rs b/src/lib.rs
                     body: None,
                     details: None,
                     attributes: None,
+                    impl_type: None,
                 },
             ],
         )

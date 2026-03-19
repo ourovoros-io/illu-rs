@@ -155,7 +155,8 @@ impl Database {
                 doc_comment TEXT,
                 body TEXT,
                 details TEXT,
-                attributes TEXT
+                attributes TEXT,
+                impl_type TEXT
             );
 
             CREATE TABLE IF NOT EXISTS trait_impls (
@@ -239,7 +240,8 @@ impl Database {
                 ON docs(dependency_id);",
         )?;
         self.migrate_fts_schema()?;
-        self.migrate_docs_module_column()
+        self.migrate_docs_module_column()?;
+        self.migrate_symbols_impl_type_column()
     }
 
     /// Detect old FTS schema and rebuild if needed.
@@ -293,6 +295,21 @@ impl Database {
         if !sql.contains("module") {
             self.conn
                 .execute_batch("ALTER TABLE docs ADD COLUMN module TEXT NOT NULL DEFAULT ''")?;
+        }
+        Ok(())
+    }
+
+    /// Add `impl_type` column to symbols table if missing (existing DBs).
+    fn migrate_symbols_impl_type_column(&self) -> SqlResult<()> {
+        let sql: String = self.conn.query_row(
+            "SELECT sql FROM sqlite_master \
+             WHERE type='table' AND name='symbols'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !sql.contains("impl_type") {
+            self.conn
+                .execute_batch("ALTER TABLE symbols ADD COLUMN impl_type TEXT")?;
         }
         Ok(())
     }
@@ -417,6 +434,22 @@ impl Database {
              LIMIT 1",
         )?;
         let mut rows = stmt.query(params![name, file_path])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Look up a symbol's DB id by name and impl type.
+    pub fn get_symbol_id_in_impl(
+        &self,
+        name: &str,
+        impl_type: &str,
+    ) -> SqlResult<Option<SymbolId>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM symbols WHERE name = ?1 AND impl_type = ?2 LIMIT 1")?;
+        let mut rows = stmt.query(params![name, impl_type])?;
         match rows.next()? {
             Some(row) => Ok(Some(row.get(0)?)),
             None => Ok(None),
@@ -1098,7 +1131,15 @@ impl Database {
         let mut count = 0;
         for r in refs {
             let source_id = self.get_symbol_id(&r.source_name, &r.source_file)?;
-            let target_id = if let Some(target_file) = &r.target_file {
+            let target_id = if let Some(ctx) = &r.target_context {
+                self.get_symbol_id_in_impl(&r.target_name, ctx)?
+                    .or(if let Some(tf) = &r.target_file {
+                        self.get_symbol_id(&r.target_name, tf)?
+                    } else {
+                        None
+                    })
+                    .or(self.get_symbol_id_by_name(&r.target_name)?)
+            } else if let Some(target_file) = &r.target_file {
                 self.get_symbol_id(&r.target_name, target_file)?
                     .or(self.get_symbol_id_by_name(&r.target_name)?)
             } else {
@@ -2037,5 +2078,48 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM symbol_refs", [], |row| row.get(0))
             .unwrap();
         assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn test_get_symbol_id_in_impl() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        // Insert a method with impl_type
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, impl_type) \
+                 VALUES (?1, 'method', 'function', 'public', \
+                         5, 10, 'pub fn method()', 'MyStruct')",
+                params![file_id],
+            )
+            .unwrap();
+
+        // Insert another method with same name, different impl_type
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, impl_type) \
+                 VALUES (?1, 'method', 'function', 'public', \
+                         15, 20, 'pub fn method()', 'OtherStruct')",
+                params![file_id],
+            )
+            .unwrap();
+
+        let my_id = db.get_symbol_id_in_impl("method", "MyStruct").unwrap();
+        assert!(my_id.is_some());
+
+        let other_id = db.get_symbol_id_in_impl("method", "OtherStruct").unwrap();
+        assert!(other_id.is_some());
+
+        // Different ids
+        assert_ne!(my_id, other_id);
+
+        // Non-existent impl type
+        let missing = db.get_symbol_id_in_impl("method", "Nonexistent").unwrap();
+        assert!(missing.is_none());
     }
 }
