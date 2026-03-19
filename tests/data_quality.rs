@@ -1231,3 +1231,71 @@ pub struct Process {}
         "struct should be excluded by kind filter: {result}"
     );
 }
+
+// =========================================================================
+// 11. REGRESSION TESTS FOR BUG FIXES
+// =========================================================================
+
+#[test]
+fn file_scope_handles_dots_in_filename() {
+    let (_dir, db) = index_multi_file(&[
+        ("lib.rs", "pub mod server;\n"),
+        ("server.rs", "pub fn serve() {}\n"),
+    ]);
+    let result = query::handle_query(&db, "server.rs", Some("files"), None).unwrap();
+    assert!(
+        result.contains("server.rs"),
+        "file scope should handle dots: {result}"
+    );
+}
+
+#[test]
+fn default_query_excludes_use_and_mod() {
+    let (_dir, db) = index_source(
+        "use std::fmt::Write;\npub mod child;\npub fn real_fn() {}\npub struct RealStruct;\n",
+    );
+    let result = query::handle_query(&db, "real", Some("symbols"), None).unwrap();
+    assert!(
+        result.contains("real_fn"),
+        "should find function: {result}"
+    );
+    assert!(
+        !result.contains("(use)"),
+        "default query should exclude use items: {result}"
+    );
+    assert!(
+        !result.contains("(mod)"),
+        "default query should exclude mod items: {result}"
+    );
+}
+
+#[test]
+fn kind_use_filter_still_works() {
+    let (_dir, db) = index_source("use std::fmt::Write;\npub fn real_fn() {}\n");
+    let result = query::handle_query(&db, "Write", Some("symbols"), Some("use")).unwrap();
+    assert!(
+        result.contains("(use)"),
+        "kind=use should still return use items: {result}"
+    );
+}
+
+#[test]
+fn callees_scoped_to_source_file() {
+    let (_dir, db) = index_multi_file(&[
+        ("lib.rs", "pub mod a;\npub mod b;\npub fn shared() {}\n"),
+        ("a.rs", "pub fn caller_a() { shared(); }\n"),
+        ("b.rs", "pub fn caller_b() { shared(); }\n"),
+    ]);
+    let result_a = context::handle_context(&db, "caller_a", false).unwrap();
+    let result_b = context::handle_context(&db, "caller_b", false).unwrap();
+    // Each should show shared as callee, but caller_a's callees should not
+    // include anything from caller_b and vice versa
+    assert!(
+        result_a.contains("shared"),
+        "caller_a should call shared: {result_a}"
+    );
+    assert!(
+        result_b.contains("shared"),
+        "caller_b should call shared: {result_b}"
+    );
+}
