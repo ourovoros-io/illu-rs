@@ -582,15 +582,43 @@ impl std::fmt::Display for RefKind {
     }
 }
 
-/// Convert a `crate::` qualified path to a relative file path.
-fn qualified_path_to_file(qualified_path: &str) -> Option<String> {
-    let path = qualified_path.strip_prefix("crate::")?;
-    let segments: Vec<&str> = path.split("::").collect();
+/// Convert a qualified path to a relative file path, resolving both
+/// `crate::` prefixes and workspace crate prefixes via `crate_map`.
+fn qualified_path_to_file_with_crates<S: std::hash::BuildHasher>(
+    qualified_path: &str,
+    crate_map: &std::collections::HashMap<String, String, S>,
+) -> Option<String> {
+    // crate:: prefix (current crate)
+    if let Some(path) = qualified_path.strip_prefix("crate::") {
+        let segments: Vec<&str> = path.split("::").collect();
+        if segments.len() < 2 {
+            return None;
+        }
+        let module_segments = &segments[..segments.len() - 1];
+        return Some(format!("src/{}.rs", module_segments.join("/")));
+    }
+
+    // Workspace crate prefixes
+    let segments: Vec<&str> = qualified_path.split("::").collect();
     if segments.len() < 2 {
         return None;
     }
-    let module_segments = &segments[..segments.len() - 1];
-    Some(format!("src/{}.rs", module_segments.join("/")))
+    let crate_name = segments[0];
+    let crate_path = crate_map.get(crate_name)?;
+
+    if segments.len() == 2 {
+        // shared::Config -> shared/src/lib.rs
+        return Some(format!("{crate_path}/src/lib.rs"));
+    }
+    // shared::config::Config -> shared/src/config.rs
+    let module_segments = &segments[1..segments.len() - 1];
+    Some(format!("{crate_path}/src/{}.rs", module_segments.join("/")))
+}
+
+/// Convert a `crate::` qualified path to a relative file path.
+#[cfg(test)]
+fn qualified_path_to_file(qualified_path: &str) -> Option<String> {
+    qualified_path_to_file_with_crates(qualified_path, &std::collections::HashMap::new())
 }
 
 /// Build an import map from `use` declarations in the given AST root.
@@ -733,12 +761,23 @@ pub fn extract_import_map_from_source(
     Ok(extract_import_map(&root, source))
 }
 
+/// Shared context for reference extraction, avoiding excessive
+/// parameter passing through the recursive call chain.
+struct RefContext<'a, S: std::hash::BuildHasher, S2: std::hash::BuildHasher> {
+    source: &'a str,
+    file_path: &'a str,
+    known_symbols: &'a std::collections::HashSet<String, S>,
+    import_map: std::collections::HashMap<String, ImportInfo>,
+    crate_map: &'a std::collections::HashMap<String, String, S2>,
+}
+
 /// Extract references between symbols by scanning function/impl bodies
 /// for identifiers that match known symbol names.
-pub fn extract_refs<S: std::hash::BuildHasher>(
+pub fn extract_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     source: &str,
     file_path: &str,
     known_symbols: &std::collections::HashSet<String, S>,
+    crate_map: &std::collections::HashMap<String, String, S2>,
 ) -> Result<Vec<SymbolRef>, String> {
     let mut parser = Parser::new();
     parser
@@ -748,24 +787,21 @@ pub fn extract_refs<S: std::hash::BuildHasher>(
     let tree = parser.parse(source, None).ok_or("Failed to parse source")?;
     let root = tree.root_node();
     let import_map = extract_import_map(&root, source);
-    let mut refs = Vec::new();
-    collect_refs(
-        &root,
+    let ctx = RefContext {
         source,
         file_path,
         known_symbols,
-        &import_map,
-        &mut refs,
-    );
+        import_map,
+        crate_map,
+    };
+    let mut refs = Vec::new();
+    collect_refs(&root, &ctx, &mut refs);
     Ok(refs)
 }
 
-fn collect_refs<S: std::hash::BuildHasher>(
+fn collect_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     node: &Node,
-    source: &str,
-    file_path: &str,
-    known_symbols: &std::collections::HashSet<String, S>,
-    import_map: &std::collections::HashMap<String, ImportInfo>,
+    ctx: &RefContext<'_, S, S2>,
     refs: &mut Vec<SymbolRef>,
 ) {
     let mut cursor = node.walk();
@@ -775,19 +811,11 @@ fn collect_refs<S: std::hash::BuildHasher>(
                 let Some(name_node) = find_child_by_kind(&child, "identifier") else {
                     continue;
                 };
-                let fn_name = node_text(&name_node, source);
-                collect_body_refs(
-                    &child,
-                    source,
-                    file_path,
-                    &fn_name,
-                    known_symbols,
-                    import_map,
-                    refs,
-                );
+                let fn_name = node_text(&name_node, ctx.source);
+                collect_body_refs(&child, &fn_name, ctx, refs);
             }
             "impl_item" | "declaration_list" => {
-                collect_refs(&child, source, file_path, known_symbols, import_map, refs);
+                collect_refs(&child, ctx, refs);
             }
             _ => {}
         }
@@ -827,16 +855,13 @@ fn collect_locals(node: &Node, source: &str) -> std::collections::HashSet<String
     locals
 }
 
-fn collect_body_refs<S: std::hash::BuildHasher>(
+fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     fn_node: &Node,
-    source: &str,
-    file_path: &str,
     fn_name: &str,
-    known_symbols: &std::collections::HashSet<String, S>,
-    import_map: &std::collections::HashMap<String, ImportInfo>,
+    ctx: &RefContext<'_, S, S2>,
     refs: &mut Vec<SymbolRef>,
 ) {
-    let locals = collect_locals(fn_node, source);
+    let locals = collect_locals(fn_node, ctx.source);
     let mut seen = std::collections::HashSet::new();
     let mut stack = vec![*fn_node];
 
@@ -845,7 +870,7 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
         for child in node.children(&mut cursor) {
             match child.kind() {
                 "type_identifier" | "identifier" => {
-                    let name = node_text(&child, source);
+                    let name = node_text(&child, ctx.source);
                     let ref_kind = if child.kind() == "type_identifier" {
                         RefKind::TypeRef
                     } else {
@@ -854,15 +879,15 @@ fn collect_body_refs<S: std::hash::BuildHasher>(
                     if name != fn_name
                         && !is_noisy_symbol(&name)
                         && !locals.contains(&name)
-                        && known_symbols.contains(&name)
+                        && ctx.known_symbols.contains(&name)
                         && seen.insert(name.clone())
                     {
-                        let target_file = import_map
-                            .get(&name)
-                            .and_then(|info| qualified_path_to_file(&info.qualified_path));
+                        let target_file = ctx.import_map.get(&name).and_then(|info| {
+                            qualified_path_to_file_with_crates(&info.qualified_path, ctx.crate_map)
+                        });
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
-                            source_file: file_path.to_string(),
+                            source_file: ctx.file_path.to_string(),
                             target_name: name,
                             kind: ref_kind,
                             target_file,
@@ -974,7 +999,13 @@ pub fn create_config() -> Config {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let config_ref = refs.iter().find(|r| r.target_name == "Config");
         assert!(config_ref.is_some(), "should find Config reference");
         assert_eq!(config_ref.unwrap().source_name, "create_config");
@@ -993,7 +1024,13 @@ pub fn caller() -> i32 {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let helper_ref = refs.iter().find(|r| r.target_name == "helper");
         assert!(helper_ref.is_some(), "should find helper call");
         assert_eq!(helper_ref.unwrap().source_name, "caller");
@@ -1006,7 +1043,13 @@ pub fn standalone() -> i32 { 42 }
 ";
         let known: std::collections::HashSet<String> =
             ["standalone"].iter().map(|s| (*s).to_string()).collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(refs.is_empty(), "should not create self-references");
     }
 
@@ -1181,7 +1224,13 @@ pub fn caller() -> Config {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(
             refs.iter().any(|r| r.target_name == "Config"),
             "should find Config as a target"
@@ -1625,7 +1674,13 @@ impl Foo {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let helper_ref = refs
             .iter()
             .find(|r| r.target_name == "helper" && r.source_name == "method");
@@ -1648,7 +1703,13 @@ fn caller() {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let target_ref = refs
             .iter()
             .find(|r| r.target_name == "target" && r.source_name == "caller");
@@ -1673,7 +1734,13 @@ fn make() -> Config {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let config_ref = refs
             .iter()
             .find(|r| r.target_name == "Config" && r.source_name == "make");
@@ -1696,7 +1763,13 @@ fn caller() -> String {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(
             refs.iter().any(|r| r.target_name == "setup"),
             "should find setup ref"
@@ -1720,7 +1793,13 @@ fn caller() -> i32 {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let target_refs: Vec<_> = refs.iter().filter(|r| r.target_name == "target").collect();
         assert_eq!(
             target_refs.len(),
@@ -1743,7 +1822,13 @@ fn builder() {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(
             !refs
                 .iter()
@@ -1765,7 +1850,13 @@ fn caller(target: i32) -> i32 {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(
             !refs
                 .iter()
@@ -1967,6 +2058,43 @@ pub fn documented_with_code() {}
     }
 
     #[test]
+    fn test_qualified_path_to_file_cross_crate() {
+        let mut crate_map = std::collections::HashMap::new();
+        crate_map.insert("shared".to_string(), "shared".to_string());
+        crate_map.insert("core_lib".to_string(), "libs/core".to_string());
+
+        // crate:: still works with crate_map present
+        assert_eq!(
+            qualified_path_to_file_with_crates("crate::config::Config", &crate_map),
+            Some("src/config.rs".to_string()),
+        );
+
+        // workspace crate, top-level symbol -> lib.rs
+        assert_eq!(
+            qualified_path_to_file_with_crates("shared::Config", &crate_map),
+            Some("shared/src/lib.rs".to_string()),
+        );
+
+        // workspace crate, nested module
+        assert_eq!(
+            qualified_path_to_file_with_crates("shared::config::Config", &crate_map),
+            Some("shared/src/config.rs".to_string()),
+        );
+
+        // workspace crate with non-trivial path
+        assert_eq!(
+            qualified_path_to_file_with_crates("core_lib::models::User", &crate_map),
+            Some("libs/core/src/models.rs".to_string()),
+        );
+
+        // unknown crate returns None
+        assert!(qualified_path_to_file_with_crates("unknown::Thing", &crate_map).is_none(),);
+
+        // single segment returns None
+        assert!(qualified_path_to_file_with_crates("Config", &crate_map).is_none(),);
+    }
+
+    #[test]
     fn test_refs_include_target_file_from_import() {
         let source = r"
 use crate::config::Config;
@@ -1979,7 +2107,13 @@ pub fn make() -> Config {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let config_ref = refs.iter().find(|r| r.target_name == "Config").unwrap();
         assert_eq!(
             config_ref.target_file.as_deref(),
@@ -2001,7 +2135,13 @@ pub fn make() -> Config {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let refs = extract_refs(source, "src/lib.rs", &known).unwrap();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let config_ref = refs.iter().find(|r| r.target_name == "Config").unwrap();
         assert!(
             config_ref.target_file.is_none(),

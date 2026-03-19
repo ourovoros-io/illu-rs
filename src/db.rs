@@ -470,6 +470,16 @@ impl Database {
         }
     }
 
+    pub fn get_all_crates(&self) -> SqlResult<Vec<StoredCrate>> {
+        let mut stmt = self.conn.prepare("SELECT id, name, path FROM crates")?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_crate(row)?);
+        }
+        Ok(results)
+    }
+
     pub fn get_crate_count(&self) -> SqlResult<i64> {
         self.conn
             .query_row("SELECT COUNT(*) FROM crates", [], |row| row.get(0))
@@ -2006,25 +2016,17 @@ mod tests {
         // Verify the ref exists
         let count: i64 = db
             .conn
-            .query_row(
-                "SELECT COUNT(*) FROM symbol_refs",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM symbol_refs", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
 
         // Delete alpha's symbol directly (bypassing FK by disabling checks),
         // simulating a scenario where the symbol row is gone but refs remain.
-        db.conn
-            .execute_batch("PRAGMA foreign_keys = OFF")
-            .unwrap();
+        db.conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
         db.conn
             .execute("DELETE FROM symbols WHERE id = ?1", params![alpha_id])
             .unwrap();
-        db.conn
-            .execute_batch("PRAGMA foreign_keys = ON")
-            .unwrap();
+        db.conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
 
         // The ref is now dangling (target_symbol_id points to nothing)
         let deleted = db.delete_stale_refs().unwrap();
@@ -2032,11 +2034,7 @@ mod tests {
 
         let remaining: i64 = db
             .conn
-            .query_row(
-                "SELECT COUNT(*) FROM symbol_refs",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM symbol_refs", [], |row| row.get(0))
             .unwrap();
         assert_eq!(remaining, 0);
     }

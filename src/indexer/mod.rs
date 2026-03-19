@@ -157,17 +157,7 @@ pub fn refresh_index(
         store::store_trait_impls(db, file_id, &trait_impls)?;
     }
 
-    // Rebuild refs for dirty files (need full symbol set)
-    let known_symbols = db.get_all_symbol_names()?;
-    if !known_symbols.is_empty() {
-        db.begin_transaction()?;
-        for df in &dirty_files {
-            let refs = parser::extract_refs(&df.source, &df.relative_path, &known_symbols)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-            db.store_symbol_refs(&refs)?;
-        }
-        db.commit()?;
-    }
+    rebuild_refs_for_files(db, &dirty_files)?;
 
     let stale = db.delete_stale_refs()?;
     if stale > 0 {
@@ -175,6 +165,31 @@ pub fn refresh_index(
     }
 
     Ok(count)
+}
+
+fn rebuild_refs_for_files(
+    db: &Database,
+    dirty_files: &[DirtyFile],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let known_symbols = db.get_all_symbol_names()?;
+    if known_symbols.is_empty() {
+        return Ok(());
+    }
+
+    let all_crates = db.get_all_crates()?;
+    let crate_map: std::collections::HashMap<String, String> = all_crates
+        .iter()
+        .map(|c| (c.name.clone(), c.path.clone()))
+        .collect();
+
+    db.begin_transaction()?;
+    for df in dirty_files {
+        let refs = parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        db.store_symbol_refs(&refs)?;
+    }
+    db.commit()?;
+    Ok(())
 }
 
 fn index_single_crate(
@@ -329,6 +344,12 @@ fn extract_all_symbol_refs(
         return Ok(());
     }
 
+    let all_crates = db.get_all_crates()?;
+    let crate_map: std::collections::HashMap<String, String> = all_crates
+        .iter()
+        .map(|c| (c.name.clone(), c.path.clone()))
+        .collect();
+
     let files = db.get_all_file_paths()?;
     let total = files.len();
     tracing::info!(
@@ -352,7 +373,7 @@ fn extract_all_symbol_refs(
                 continue;
             }
         };
-        let refs = parser::extract_refs(&source, relative, &known_symbols)
+        let refs = parser::extract_refs(&source, relative, &known_symbols, &crate_map)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         ref_count += db.store_symbol_refs(&refs)?;
     }
