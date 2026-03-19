@@ -15,7 +15,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-dea584?style=flat-square&logo=rust" alt="Rust 2024"/>
-  <img src="https://img.shields.io/badge/tests-243_passing-brightgreen?style=flat-square" alt="243 tests"/>
+  <img src="https://img.shields.io/badge/tests-284_passing-brightgreen?style=flat-square" alt="284 tests"/>
 </p>
 
 ---
@@ -61,7 +61,7 @@ Add to `.mcp.json` (Claude Code) or `.gemini/settings.json` (Gemini CLI):
 
 ## What Your AI Gets
 
-illu gives your AI agent 6 tools through the [Model Context Protocol](https://modelcontextprotocol.io/):
+illu gives your AI agent 7 tools through the [Model Context Protocol](https://modelcontextprotocol.io/):
 
 ### Find symbols instantly — `query`
 
@@ -126,6 +126,29 @@ Results are cached in the database. Subsequent lookups are instant.
 
 </details>
 
+### See what a change breaks — `diff_impact`
+
+Instead of querying one symbol at a time, the AI passes a git ref and gets batch impact analysis for every symbol touched by the diff.
+
+```
+git_ref: "HEAD~3..HEAD"   → impact of last 3 commits
+git_ref: "main"           → impact of current branch vs main
+(omit)                    → impact of unstaged changes
+```
+
+```markdown
+## Changed Symbols
+
+### src/db.rs
+- **search_symbols** (function, line 450-480)
+
+### Downstream Impact
+
+#### search_symbols
+- handle_query (src/server/tools/query.rs) — depth 1
+- handle_context (src/server/tools/context.rs) — depth 1
+```
+
 ### See project structure — `overview` and `tree`
 
 The AI can explore the codebase layout without reading files:
@@ -170,13 +193,15 @@ Any MCP client with stdio transport support works — illu speaks standard MCP.
 | Feature | What it does |
 |---------|-------------|
 | **Zero-config setup** | `illu-rs init` configures everything for both Claude and Gemini |
-| **Incremental indexing** | Content-hashed — only re-parses files that changed |
-| **Workspace support** | Multi-crate workspaces with inter-crate dependency tracking |
+| **Incremental indexing** | Content-hashed — only re-parses files that changed, cleans stale refs |
+| **Workspace support** | Multi-crate workspaces with cross-crate reference resolution |
 | **Full-text search** | FTS5 prefix matching + trigram-indexed substring search |
-| **Call graph** | Symbol cross-references with local variable scope filtering |
+| **Qualified refs** | Import-map-aware resolution — `use crate::foo::Bar` resolves to the right file |
+| **Method-level refs** | `self.method()` resolves to the correct impl type, not a global name match |
 | **Trait impl tracking** | Maps which types implement which traits |
 | **Impact analysis** | Recursive CTE walks the reference graph up to depth 5 |
-| **Version-pinned docs** | `cargo doc` JSON, docs.rs, and GitHub README fallback |
+| **Diff-based impact** | `diff_impact` maps git changes to symbols and shows batch downstream effects |
+| **Version-pinned docs** | Two-tier: crate summary + per-module detail from rustdoc JSON |
 | **Full body on demand** | `full_body: true` reads untruncated source from disk |
 
 ## Statusline Extension
@@ -250,7 +275,7 @@ src/
 │   └── docs.rs          # Doc fetching (cargo doc → docs.rs → GitHub)
 └── server/
     ├── mod.rs           # MCP server (rmcp, tool routing)
-    └── tools/           # query, context, impact, docs, overview, tree
+    └── tools/           # query, context, impact, diff_impact, docs, overview, tree
 ```
 
 </details>
@@ -259,7 +284,7 @@ src/
 <summary>Development</summary>
 
 ```bash
-cargo test                                                    # 243 tests
+cargo test                                                    # 284 tests
 cargo clippy --all-targets --all-features -- -D warnings      # strict lints
 cargo fmt --all -- --check                                    # formatting
 RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
@@ -267,8 +292,8 @@ RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
 
 | Test Suite | Count | What it guards |
 |------------|-------|----------------|
-| Unit | 144 | Parser, DB, indexer, tool handlers |
-| Data integrity | 38 | Line numbers, signatures, refs, search correctness |
+| Unit | 172 | Parser, DB, indexer, tool handlers |
+| Data integrity | 51 | Line numbers, refs, cross-crate resolution, stale cleanup |
 | Data quality | 42 | End-to-end tool output format and content |
 | Integration | 19 | Full pipeline: index, query, verify |
 
