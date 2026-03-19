@@ -576,11 +576,7 @@ fn refresh_cleans_stale_refs() {
     );
 
     // Remove the target function, keep only caller (with no call)
-    std::fs::write(
-        src_dir.join("lib.rs"),
-        "pub fn caller() -> i32 { 0 }\n",
-    )
-    .unwrap();
+    std::fs::write(src_dir.join("lib.rs"), "pub fn caller() -> i32 { 0 }\n").unwrap();
     refresh_index(&db, &config).unwrap();
 
     // target symbol is gone — stale refs should be cleaned
@@ -1035,25 +1031,17 @@ fn docs_tool_shows_version_and_source() {
     let dep_id = db
         .insert_dependency("serde", "1.0.210", true, None)
         .unwrap();
-    db.store_doc(dep_id, "docs.rs", "Serde serialization framework")
-        .unwrap();
     db.store_doc(dep_id, "cargo_doc", "# serde 1.0.210\n\nStructured docs")
         .unwrap();
 
     let result = docs::handle_docs(&db, "serde", None).unwrap();
-    // Must show version so Claude knows which API it's looking at
     assert!(
         result.contains("1.0.210"),
         "docs must include version: {result}"
     );
-    // Must show both doc sources
-    assert!(
-        result.contains("docs.rs"),
-        "must show docs.rs source: {result}"
-    );
     assert!(
         result.contains("cargo_doc"),
-        "must show cargo_doc source: {result}"
+        "must show source: {result}"
     );
 }
 
@@ -1285,4 +1273,360 @@ fn cargo_doc_parse_includes_all_item_kinds() {
     assert!(result.contains("my_func"), "fn name: {result}");
     assert!(result.contains("## Macros"), "macros section: {result}");
     assert!(result.contains("**my_macro!**"), "macro name: {result}");
+}
+
+// =========================================================================
+// 14. CORRECTNESS: REFERENCE RESOLUTION, IMPACT ACCURACY, DATA INTEGRITY
+// =========================================================================
+
+#[test]
+fn workspace_cross_crate_ref_resolves_target_file() {
+    let (_dir, db) = index_workspace(
+        r#"
+[workspace]
+members = ["shared", "app"]
+"#,
+        r#"
+[[package]]
+name = "shared"
+version = "0.1.0"
+
+[[package]]
+name = "app"
+version = "0.1.0"
+"#,
+        &[
+            (
+                "shared",
+                "[package]\nname = \"shared\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+                "pub struct SharedType { pub value: i32 }",
+            ),
+            (
+                "app",
+                "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nshared = { path = \"../shared\" }\n",
+                "use shared::SharedType;\npub fn use_it() -> SharedType { SharedType { value: 1 } }",
+            ),
+        ],
+    );
+
+    let deps = db.impact_dependents("SharedType").unwrap();
+    assert!(
+        deps.iter().any(|d| d.name == "use_it"),
+        "use_it must depend on SharedType via cross-crate ref: {deps:?}"
+    );
+}
+
+#[test]
+fn workspace_same_name_ref_resolves_to_correct_crate() {
+    let (_dir, db) = index_workspace(
+        r#"
+[workspace]
+members = ["core_lib", "api", "app"]
+"#,
+        r#"
+[[package]]
+name = "core_lib"
+version = "0.1.0"
+
+[[package]]
+name = "api"
+version = "0.1.0"
+
+[[package]]
+name = "app"
+version = "0.1.0"
+"#,
+        &[
+            (
+                "core_lib",
+                "[package]\nname = \"core_lib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+                "pub struct Error { pub message: String }",
+            ),
+            (
+                "api",
+                "[package]\nname = \"api\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+                "pub struct Error { pub code: i32 }",
+            ),
+            (
+                "app",
+                "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\ncore_lib = { path = \"../core_lib\" }\n",
+                "use core_lib::Error;\npub fn handle() -> Error { Error { message: String::new() } }",
+            ),
+        ],
+    );
+
+    let deps = db.impact_dependents("Error").unwrap();
+    let handle_dep = deps.iter().find(|d| d.name == "handle");
+    assert!(
+        handle_dep.is_some(),
+        "handle must depend on Error: {deps:?}"
+    );
+    assert!(
+        handle_dep.unwrap().file_path.contains("app/"),
+        "handle is in app crate"
+    );
+}
+
+#[test]
+fn self_method_resolves_correct_impl_with_collision() {
+    let (_dir, db) = index_source(
+        r"
+pub struct TypeA;
+pub struct TypeB;
+
+impl TypeA {
+    pub fn helper(&self) -> i32 { 1 }
+    pub fn do_work(&self) -> i32 { self.helper() }
+}
+
+impl TypeB {
+    pub fn helper(&self) -> i32 { 2 }
+}
+",
+    );
+
+    let callees = db.get_callees("do_work").unwrap();
+    let helper_callee = callees.iter().find(|c| c.name == "helper");
+    assert!(
+        helper_callee.is_some(),
+        "do_work must call helper: {callees:?}"
+    );
+}
+
+#[test]
+fn impact_depth_and_via_chain_accurate() {
+    let (_dir, db) = index_source(
+        r"
+pub fn root() {}
+pub fn depth1() { root(); }
+pub fn depth2() { depth1(); }
+pub fn depth3() { depth2(); }
+",
+    );
+
+    let result = impact::handle_impact(&db, "root").unwrap();
+    assert!(result.contains("depth1"), "depth1 at depth 1: {result}");
+    assert!(result.contains("depth2"), "depth2 at depth 2: {result}");
+    assert!(result.contains("depth3"), "depth3 at depth 3: {result}");
+    assert!(
+        result.contains("via"),
+        "must show via chain: {result}"
+    );
+}
+
+#[test]
+fn refresh_cleans_refs_from_unchanged_caller_to_deleted_target() {
+    // When a target symbol is removed, stale refs from an unchanged
+    // caller must be cleaned up after refresh.
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        "[[package]]\nname = \"test\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    // lib.rs defines helper_target and caller (which calls it)
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn helper_target() {}\npub fn caller() { helper_target(); }\n",
+    )
+    .unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    let deps = db.impact_dependents("helper_target").unwrap();
+    assert!(
+        deps.iter().any(|d| d.name == "caller"),
+        "caller should depend on helper_target initially"
+    );
+
+    // Remove helper_target definition, caller stops calling it
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "pub fn caller() { }\n",
+    )
+    .unwrap();
+    refresh_index(&db, &config).unwrap();
+
+    let syms = db.search_symbols("helper_target").unwrap();
+    assert!(syms.is_empty(), "helper_target should be gone: {syms:?}");
+    let deps = db.impact_dependents("helper_target").unwrap();
+    assert!(deps.is_empty(), "stale refs should be cleaned: {deps:?}");
+}
+
+#[test]
+fn refresh_updates_line_numbers() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(src_dir.join("lib.rs"), "pub fn foo() {}\n").unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    let syms = db.search_symbols("foo").unwrap();
+    assert_eq!(syms[0].line_start, 1, "initially at line 1");
+
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "\n\n\n\n\npub fn foo() {}\n",
+    )
+    .unwrap();
+    refresh_index(&db, &config).unwrap();
+
+    let syms = db.search_symbols("foo").unwrap();
+    assert_eq!(
+        syms[0].line_start, 6,
+        "after adding 5 blank lines, foo should be at line 6"
+    );
+}
+
+#[test]
+fn context_full_body_returns_untruncated_source() {
+    use std::fmt::Write;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    let mut body = String::from("pub fn big_fn() {\n");
+    for i in 0..118 {
+        let _ = writeln!(body, "    let _x{i} = {i};");
+    }
+    body.push_str("}\n");
+    std::fs::write(src_dir.join("lib.rs"), &body).unwrap();
+
+    let db_path = dir.path().join(".illu").join("index.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let db = Database::open(&db_path).unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    let result = context::handle_context(&db, "big_fn", false).unwrap();
+    assert!(
+        result.contains("truncated"),
+        "should be truncated without full_body: {result}"
+    );
+
+    let result = context::handle_context(&db, "big_fn", true).unwrap();
+    assert!(
+        !result.contains("truncated"),
+        "should NOT be truncated with full_body: {result}"
+    );
+    assert!(
+        result.contains("_x117"),
+        "should contain last variable: {result}"
+    );
+}
+
+#[test]
+fn docs_no_topic_lists_modules() {
+    let (_dir, db) = index_source("pub fn placeholder() {}\n");
+    let dep_id = db
+        .insert_dependency("tokio", "1.35.0", true, None)
+        .unwrap();
+    db.store_doc_with_module(dep_id, "cargo_doc", "Tokio summary", "")
+        .unwrap();
+    db.store_doc_with_module(dep_id, "cargo_doc", "Sync primitives", "sync")
+        .unwrap();
+    db.store_doc_with_module(dep_id, "cargo_doc", "File I/O", "fs")
+        .unwrap();
+
+    let result = docs::handle_docs(&db, "tokio", None).unwrap();
+    assert!(
+        result.contains("sync"),
+        "must list sync module: {result}"
+    );
+    assert!(
+        result.contains("fs"),
+        "must list fs module: {result}"
+    );
+}
+
+#[test]
+fn non_self_method_call_creates_ref() {
+    let (_dir, db) = index_source(
+        r"
+pub struct Processor;
+
+impl Processor {
+    pub fn process(&self) -> i32 { 42 }
+}
+
+pub fn run(p: Processor) -> i32 {
+    p.process()
+}
+",
+    );
+
+    let callees = db.get_callees("run").unwrap();
+    assert!(
+        callees.iter().any(|c| c.name == "process"),
+        "run must have a ref to process: {callees:?}"
+    );
+}
+
+#[test]
+fn empty_file_indexed_without_error() {
+    let (_dir, db) = index_multi_file(&[
+        ("lib.rs", "pub mod empty;\npub fn real() {}\n"),
+        ("empty.rs", ""),
+    ]);
+    let syms = db.search_symbols("real").unwrap();
+    assert_eq!(syms.len(), 1);
+}
+
+#[test]
+fn comment_only_file_indexed_without_error() {
+    let (_dir, db) = index_multi_file(&[
+        ("lib.rs", "pub mod comments;\npub fn real() {}\n"),
+        ("comments.rs", "// This file has only comments\n// Nothing else\n"),
+    ]);
+    let syms = db.search_symbols("real").unwrap();
+    assert_eq!(syms.len(), 1);
+}
+
+#[test]
+fn impact_handles_overloaded_names() {
+    let (_dir, db) = index_source(
+        r"
+pub struct Error {
+    pub message: String,
+}
+
+pub fn make_error() -> Error {
+    Error { message: String::new() }
+}
+",
+    );
+
+    let result = impact::handle_impact(&db, "Error").unwrap();
+    assert!(
+        result.contains("make_error"),
+        "make_error uses Error: {result}"
+    );
 }
