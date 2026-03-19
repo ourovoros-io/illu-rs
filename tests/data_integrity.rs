@@ -1385,7 +1385,7 @@ impl TypeB {
 ",
     );
 
-    let callees = db.get_callees("do_work").unwrap();
+    let callees = db.get_callees("do_work", "src/lib.rs").unwrap();
     let helper_callee = callees.iter().find(|c| c.name == "helper");
     assert!(
         helper_callee.is_some(),
@@ -1583,7 +1583,7 @@ pub fn run(p: Processor) -> i32 {
 ",
     );
 
-    let callees = db.get_callees("run").unwrap();
+    let callees = db.get_callees("run", "src/lib.rs").unwrap();
     assert!(
         callees.iter().any(|c| c.name == "process"),
         "run must have a ref to process: {callees:?}"

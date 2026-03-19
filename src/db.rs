@@ -1071,17 +1071,22 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees(&self, symbol_name: &str) -> SqlResult<Vec<CalleeInfo>> {
+    pub fn get_callees(
+        &self,
+        symbol_name: &str,
+        source_file: &str,
+    ) -> SqlResult<Vec<CalleeInfo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT ts.name, ts.kind, f.path, sr.kind \
+            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
-             WHERE ss.name = ?1",
+             JOIN files sf ON sf.id = ss.file_id \
+             WHERE ss.name = ?1 AND sf.path = ?2",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name])?;
+        let mut rows = stmt.query(params![symbol_name, source_file])?;
         while let Some(row) = rows.next()? {
             results.push(CalleeInfo {
                 name: row.get(0)?,
@@ -1736,7 +1741,7 @@ mod tests {
             .unwrap();
         db.insert_symbol_ref(caller_id, callee_b_id, "type_ref")
             .unwrap();
-        let callees = db.get_callees("caller").unwrap();
+        let callees = db.get_callees("caller", "src/lib.rs").unwrap();
         assert_eq!(callees.len(), 2);
         let names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"callee_a"));
@@ -1807,7 +1812,7 @@ mod tests {
         let impls = db.get_trait_impls_for_type("Foo").unwrap();
         assert!(impls.is_empty());
         // Verify: ref to deleted symbol gone
-        let callees = db.get_callees("main").unwrap();
+        let callees = db.get_callees("main", "src/main.rs").unwrap();
         assert!(callees.is_empty());
         // Verify: second file still intact
         assert!(db.get_file_hash("src/main.rs").unwrap().is_some());

@@ -47,6 +47,12 @@ fn format_symbols(
             .collect()
     } else {
         all_symbols
+            .into_iter()
+            .filter(|s| {
+                s.kind != crate::indexer::parser::SymbolKind::Use
+                    && s.kind != crate::indexer::parser::SymbolKind::Mod
+            })
+            .collect()
     };
     if !symbols.is_empty() {
         output.push_str("## Symbols\n\n");
@@ -93,10 +99,14 @@ fn format_files(
     query: &str,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let symbols = db.search_symbols(query)?;
-    let mut files: Vec<&str> = symbols.iter().map(|s| s.file_path.as_str()).collect();
+    let all_paths = db.get_all_file_paths()?;
+    let query_lower = query.to_lowercase();
+    let mut files: Vec<&str> = all_paths
+        .iter()
+        .filter(|p| p.to_lowercase().contains(&query_lower))
+        .map(String::as_str)
+        .collect();
     files.sort_unstable();
-    files.dedup();
 
     if !files.is_empty() {
         output.push_str("## Files\n\n");

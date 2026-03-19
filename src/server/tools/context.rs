@@ -159,7 +159,7 @@ fn render_callees(
     output: &mut String,
     sym: &StoredSymbol,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let callees = db.get_callees(&sym.name)?;
+    let callees = db.get_callees(&sym.name, &sym.file_path)?;
     if callees.is_empty() {
         return Ok(());
     }
