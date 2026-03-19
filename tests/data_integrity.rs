@@ -1630,3 +1630,77 @@ pub fn make_error() -> Error {
         "make_error uses Error: {result}"
     );
 }
+
+#[test]
+fn refresh_handles_new_file_added() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"inc\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        "[[package]]\nname = \"inc\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(src_dir.join("lib.rs"), "pub fn original() {}\n").unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    // Add a new file
+    std::fs::write(src_dir.join("extra.rs"), "pub fn bonus() {}\n").unwrap();
+
+    refresh_index(&db, &config).unwrap();
+
+    let result = query::handle_query(&db, "bonus", Some("symbols"), None).unwrap();
+    assert!(
+        result.contains("bonus"),
+        "refresh should pick up new file's symbols"
+    );
+}
+
+#[test]
+fn refresh_handles_file_content_change() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_dir = dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"chg\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.lock"),
+        "[[package]]\nname = \"chg\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(src_dir.join("lib.rs"), "pub fn version_one() {}\n").unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    // Change the function name
+    std::fs::write(src_dir.join("lib.rs"), "pub fn version_two() {}\n").unwrap();
+    refresh_index(&db, &config).unwrap();
+
+    let old_syms = db.search_symbols("version_one").unwrap();
+    assert!(
+        old_syms.is_empty(),
+        "old symbol should be gone after refresh"
+    );
+    let new_result = query::handle_query(&db, "version_two", Some("symbols"), None).unwrap();
+    assert!(
+        new_result.contains("version_two"),
+        "new symbol should appear after refresh"
+    );
+}
