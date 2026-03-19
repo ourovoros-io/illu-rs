@@ -20,6 +20,11 @@ walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "indexing"
+harness = false
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
