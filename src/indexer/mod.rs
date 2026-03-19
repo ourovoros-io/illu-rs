@@ -14,7 +14,7 @@ pub struct IndexConfig {
 }
 
 pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
-    db.clear_index()?;
+    db.clear_code_index()?;
 
     let cargo_toml = std::fs::read_to_string(config.repo_path.join("Cargo.toml"))?;
     let ws_info = workspace::parse_workspace_toml(&cargo_toml)?;

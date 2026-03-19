@@ -279,20 +279,29 @@ impl Database {
         Ok(())
     }
 
-    pub fn clear_index(&self) -> SqlResult<()> {
+    /// Clear code index data while preserving cached docs and dependencies.
+    /// Used during re-indexing to avoid re-fetching documentation.
+    pub fn clear_code_index(&self) -> SqlResult<()> {
         self.conn.execute_batch(
-            "DELETE FROM docs_fts;
-             DELETE FROM symbols_fts;
-             DELETE FROM symbols_trigram;
-             DELETE FROM docs;
+            "INSERT INTO symbols_fts(symbols_fts) VALUES('delete-all');
+             INSERT INTO symbols_trigram(symbols_trigram) VALUES('delete-all');
              DELETE FROM symbol_refs;
              DELETE FROM trait_impls;
              DELETE FROM symbols;
              DELETE FROM files;
              DELETE FROM crate_deps;
              DELETE FROM crates;
-             DELETE FROM dependencies;
              DELETE FROM metadata;",
+        )
+    }
+
+    /// Completely reset the index, including all cached documentation.
+    pub fn clear_all(&self) -> SqlResult<()> {
+        self.clear_code_index()?;
+        self.conn.execute_batch(
+            "INSERT INTO docs_fts(docs_fts) VALUES('delete-all');
+             DELETE FROM docs;
+             DELETE FROM dependencies;",
         )
     }
 
@@ -1696,5 +1705,82 @@ mod tests {
         let results = db.search_symbols_by_attribute("Serialize").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "Config");
+    }
+
+    #[test]
+    fn test_clear_code_index_preserves_docs() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'Foo', 'struct', 'public', \
+                         1, 10, 'pub struct Foo')",
+                params![file_id],
+            )
+            .unwrap();
+
+        let dep_id = db
+            .insert_dependency("serde", "1.0.0", true, None)
+            .unwrap();
+        db.store_doc(dep_id, "docs.rs", "Serde docs content")
+            .unwrap();
+
+        db.clear_code_index().unwrap();
+
+        // Symbols and files should be gone
+        let syms = db.search_symbols("Foo").unwrap();
+        assert!(syms.is_empty());
+        let hash = db.get_file_hash("src/lib.rs").unwrap();
+        assert!(hash.is_none());
+
+        // Docs and dependencies should remain
+        let doc_count: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM docs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(doc_count, 1);
+        let dep_count: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dependencies",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(dep_count, 1);
+    }
+
+    #[test]
+    fn test_clear_code_index_then_reinsert_deps_preserves_matching_docs() {
+        let db = Database::open_in_memory().unwrap();
+
+        let dep_id = db
+            .insert_dependency("tokio", "1.35.0", true, None)
+            .unwrap();
+        db.store_doc(dep_id, "docs.rs", "Tokio async runtime docs")
+            .unwrap();
+
+        db.clear_code_index().unwrap();
+
+        // Docs should still be accessible via search
+        let results = db.search_docs("Tokio").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].dependency_name, "tokio");
+        assert!(results[0].content.contains("Tokio async runtime"));
+
+        // Dependency row still present
+        let dep_count: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM dependencies \
+                 WHERE name = 'tokio'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(dep_count, 1);
     }
 }
