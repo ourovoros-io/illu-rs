@@ -182,11 +182,13 @@ fn rebuild_refs_for_files(
         .map(|c| (c.name.clone(), c.path.clone()))
         .collect();
 
+    let symbol_map = db.build_symbol_id_map()?;
+
     db.begin_transaction()?;
     for df in dirty_files {
         let refs = parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-        db.store_symbol_refs(&refs)?;
+        db.store_symbol_refs_fast(&refs, &symbol_map)?;
     }
     db.commit()?;
     Ok(())
@@ -350,6 +352,8 @@ fn extract_all_symbol_refs(
         .map(|c| (c.name.clone(), c.path.clone()))
         .collect();
 
+    let symbol_map = db.build_symbol_id_map()?;
+
     let files = db.get_all_file_paths()?;
     let total = files.len();
     tracing::info!(
@@ -375,7 +379,7 @@ fn extract_all_symbol_refs(
         };
         let refs = parser::extract_refs(&source, relative, &known_symbols, &crate_map)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-        ref_count += db.store_symbol_refs(&refs)?;
+        ref_count += db.store_symbol_refs_fast(&refs, &symbol_map)?;
     }
     db.commit()?;
 

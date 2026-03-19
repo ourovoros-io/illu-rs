@@ -1129,6 +1129,66 @@ impl Database {
         result
     }
 
+    /// Build an in-memory lookup table mapping symbol names to their DB IDs.
+    /// Three tiers: (name, file) -> id, (name, impl_type) -> id, name -> id.
+    pub fn build_symbol_id_map(&self) -> SqlResult<SymbolIdMap> {
+        let mut by_name_and_file = std::collections::HashMap::new();
+        let mut by_name_and_impl = std::collections::HashMap::new();
+        let mut by_name = std::collections::HashMap::new();
+
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id, s.name, f.path, s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id",
+        )?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let id: SymbolId = row.get(0)?;
+            let name: String = row.get(1)?;
+            let path: String = row.get(2)?;
+            let impl_type: Option<String> = row.get(3)?;
+
+            by_name_and_file
+                .entry((name.clone(), path))
+                .or_insert(id);
+            if let Some(it) = impl_type {
+                by_name_and_impl
+                    .entry((name.clone(), it))
+                    .or_insert(id);
+            }
+            by_name.entry(name).or_insert(id);
+        }
+
+        Ok(SymbolIdMap {
+            by_name_and_file,
+            by_name_and_impl,
+            by_name,
+        })
+    }
+
+    /// Insert symbol references using an in-memory lookup map instead of
+    /// per-ref SQL queries. Much faster for large ref counts.
+    pub fn store_symbol_refs_fast(
+        &self,
+        refs: &[crate::indexer::parser::SymbolRef],
+        map: &SymbolIdMap,
+    ) -> SqlResult<u64> {
+        let mut count = 0;
+        for r in refs {
+            let source_id = map.resolve(&r.source_name, Some(&r.source_file), None);
+            let target_id = map.resolve(
+                &r.target_name,
+                r.target_file.as_deref(),
+                r.target_context.as_deref(),
+            );
+            if let (Some(sid), Some(tid)) = (source_id, target_id) {
+                self.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
     /// Insert symbol references from parsed refs, looking up IDs by name.
     /// Caller should wrap in a transaction for performance.
     pub fn store_symbol_refs(&self, refs: &[crate::indexer::parser::SymbolRef]) -> SqlResult<u64> {
@@ -1155,6 +1215,41 @@ impl Database {
             }
         }
         Ok(count)
+    }
+}
+
+pub struct SymbolIdMap {
+    by_name_and_file: std::collections::HashMap<(String, String), SymbolId>,
+    by_name_and_impl: std::collections::HashMap<(String, String), SymbolId>,
+    by_name: std::collections::HashMap<String, SymbolId>,
+}
+
+impl SymbolIdMap {
+    /// Resolve a symbol name to its DB ID using a three-tier lookup:
+    /// impl-qualified -> file-qualified -> name-only fallback.
+    pub fn resolve(
+        &self,
+        name: &str,
+        target_file: Option<&str>,
+        target_context: Option<&str>,
+    ) -> Option<SymbolId> {
+        if let Some(ctx) = target_context {
+            if let Some(id) = self
+                .by_name_and_impl
+                .get(&(name.to_string(), ctx.to_string()))
+            {
+                return Some(*id);
+            }
+        }
+        if let Some(file) = target_file {
+            if let Some(id) = self
+                .by_name_and_file
+                .get(&(name.to_string(), file.to_string()))
+            {
+                return Some(*id);
+            }
+        }
+        self.by_name.get(name).copied()
     }
 }
 
