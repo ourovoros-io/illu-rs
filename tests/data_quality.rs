@@ -1067,3 +1067,167 @@ fn impact_no_dependents_gives_clear_message() {
         "clear message: {result}"
     );
 }
+
+// =========================================================================
+// 9. COMPLEX RUST SYNTAX EDGE CASES
+// =========================================================================
+
+#[test]
+fn where_clause_in_signature() {
+    let (_dir, db) = index_source(
+        r"
+pub fn process<T>(item: T) -> String where T: std::fmt::Display + Clone {
+    item.to_string()
+}
+",
+    );
+    let result = query::handle_query(&db, "process", Some("symbols"), None).unwrap();
+    assert!(
+        result.contains("process"),
+        "should find function with where clause: {result}"
+    );
+}
+
+#[test]
+fn const_generic_parameter() {
+    let (_dir, db) = index_source(
+        r"
+pub struct FixedArray<const N: usize> {
+    data: [u8; N],
+}
+",
+    );
+    let result = context::handle_context(&db, "FixedArray", false).unwrap();
+    assert!(
+        result.contains("FixedArray"),
+        "should find struct with const generic: {result}"
+    );
+}
+
+#[test]
+fn impl_block_with_lifetime() {
+    let (_dir, db) = index_source(
+        r"
+pub struct Parser<'a> {
+    input: &'a str,
+}
+
+impl<'a> Parser<'a> {
+    pub fn new(input: &'a str) -> Self {
+        Parser { input }
+    }
+}
+",
+    );
+    let result = context::handle_context(&db, "Parser", false).unwrap();
+    assert!(
+        result.contains("Parser"),
+        "should find struct with lifetime: {result}"
+    );
+    assert!(
+        result.contains("new"),
+        "should show method from lifetime impl block: {result}"
+    );
+}
+
+#[test]
+fn multiple_impl_blocks_for_same_type() {
+    let (_dir, db) = index_source(
+        r"
+pub struct Builder;
+
+impl Builder {
+    pub fn new() -> Self { Builder }
+}
+
+impl Builder {
+    pub fn build(&self) -> String { String::new() }
+}
+",
+    );
+    let result = context::handle_context(&db, "Builder", false).unwrap();
+    assert!(
+        result.contains("new"),
+        "should show method from first impl block: {result}"
+    );
+    assert!(
+        result.contains("build"),
+        "should show method from second impl block: {result}"
+    );
+}
+
+#[test]
+fn cfg_gated_function() {
+    let (_dir, db) = index_source(
+        r"
+#[cfg(test)]
+pub fn test_only() {}
+
+#[cfg(not(test))]
+pub fn prod_only() {}
+
+pub fn always() {}
+",
+    );
+    let result = query::handle_query(&db, "always", Some("symbols"), None).unwrap();
+    assert!(
+        result.contains("always"),
+        "should find non-gated function: {result}"
+    );
+}
+
+#[test]
+fn unsafe_function_parsed() {
+    let (_dir, db) = index_source(
+        r"
+pub unsafe fn dangerous(ptr: *const u8) -> u8 {
+    unsafe { *ptr }
+}
+",
+    );
+    let result = query::handle_query(&db, "dangerous", Some("symbols"), None).unwrap();
+    assert!(
+        result.contains("dangerous"),
+        "should find unsafe function: {result}"
+    );
+}
+
+// =========================================================================
+// 10. FTS RANKING TESTS
+// =========================================================================
+
+#[test]
+fn exact_match_ranks_above_substring() {
+    let (_dir, db) = index_source(
+        r"
+pub fn config() {}
+pub fn config_parser() {}
+pub fn parse_config_file() {}
+",
+    );
+    let result = query::handle_query(&db, "config", Some("symbols"), None).unwrap();
+    assert!(
+        result.contains("config"),
+        "exact match should appear in results: {result}"
+    );
+}
+
+#[test]
+fn query_kind_filter_excludes_other_kinds() {
+    let (_dir, db) = index_source(
+        r"
+pub fn process() {}
+pub struct Process {}
+",
+    );
+    let result =
+        query::handle_query(&db, "process", Some("symbols"), Some("function")).unwrap();
+    assert!(
+        result.contains("process"),
+        "function should be found: {result}"
+    );
+    assert!(
+        !result.contains("struct Process"),
+        "struct should be excluded by kind filter: {result}"
+    );
+}
