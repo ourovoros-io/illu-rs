@@ -65,6 +65,7 @@ pub struct FetchedDoc {
     pub dep_id: crate::db::DepId,
     pub source: &'static str,
     pub content: String,
+    pub module: String,
 }
 
 /// Parse a GitHub/GitLab URL into (owner, repo).
@@ -132,6 +133,7 @@ async fn fetch_single_doc(
                 dep_id,
                 source: "docs.rs",
                 content,
+                module: String::new(),
             });
         }
         Err(e) => {
@@ -157,6 +159,7 @@ async fn fetch_single_doc(
                 dep_id,
                 source: "readme",
                 content: readme,
+                module: String::new(),
             });
         }
     }
@@ -187,13 +190,16 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
         let dep_names: Vec<String> = pending.iter().map(|p| p.name.clone()).collect();
         match super::cargo_doc::generate_cargo_docs(repo_path, &dep_names) {
             Ok(docs) => {
-                for (name, content) in docs {
+                for (name, module_docs) in docs {
                     if let Some(p) = pending.iter().find(|p| p.name == name) {
-                        results.push(FetchedDoc {
-                            dep_id: p.dep_id,
-                            source: "cargo_doc",
-                            content: truncate_content(&content),
-                        });
+                        for md in module_docs {
+                            results.push(FetchedDoc {
+                                dep_id: p.dep_id,
+                                source: "cargo_doc",
+                                content: md.content,
+                                module: md.module,
+                            });
+                        }
                     }
                 }
                 tracing::info!(count = results.len(), "Got docs from cargo doc");
@@ -272,7 +278,7 @@ pub fn store_fetched_docs(
     docs: &[FetchedDoc],
 ) -> Result<usize, Box<dyn std::error::Error>> {
     for doc in docs {
-        db.store_doc(doc.dep_id, doc.source, &doc.content)?;
+        db.store_doc_with_module(doc.dep_id, doc.source, &doc.content, &doc.module)?;
     }
     Ok(docs.len())
 }

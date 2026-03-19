@@ -11,12 +11,15 @@ fn has_nightly_rustdoc() -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Named docs for a single crate: (`crate_name`, per-module docs).
+pub type CrateDocs = (String, Vec<ModuleDoc>);
+
 /// Generate dependency docs using `cargo +nightly doc` JSON output.
-/// Returns a list of `(dep_name, formatted_docs)` pairs.
+/// Returns a list of `(dep_name, module_docs)` pairs.
 pub fn generate_cargo_docs(
     repo_path: &Path,
     dep_names: &[String],
-) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CrateDocs>, Box<dyn std::error::Error>> {
     if dep_names.is_empty() {
         return Ok(Vec::new());
     }
@@ -77,16 +80,16 @@ pub fn generate_cargo_docs(
             }
         };
 
-        let formatted = match parse_rustdoc_json(&content, dep_name) {
-            Ok(doc) => doc,
+        let module_docs = match parse_rustdoc_json_modules(&content, dep_name) {
+            Ok(docs) => docs,
             Err(e) => {
                 tracing::warn!("Failed to parse rustdoc JSON for {dep_name}: {e}");
                 continue;
             }
         };
 
-        if !formatted.is_empty() {
-            results.push((dep_name.clone(), formatted));
+        if !module_docs.is_empty() {
+            results.push((dep_name.clone(), module_docs));
         }
     }
 
@@ -158,37 +161,13 @@ fn collect_public_items(index: &serde_json::Map<String, serde_json::Value>) -> C
     };
 
     for item in index.values() {
-        let Some(name) = item.get("name").and_then(|n| n.as_str()) else {
-            continue;
-        };
-        if item.get("visibility").and_then(|v| v.as_str()) != Some("public") {
-            continue;
-        }
         let Some(inner) = item.get("inner").and_then(|i| i.as_object()) else {
             continue;
         };
-        let docs = item.get("docs").and_then(|d| d.as_str()).unwrap_or("");
-
-        let kind = if inner.contains_key("trait_") {
-            "trait_"
-        } else if inner.contains_key("struct") {
-            "struct"
-        } else if inner.contains_key("enum") {
-            "enum"
-        } else if inner.contains_key("function") {
-            "function"
-        } else if inner.contains_key("macro") {
-            "macro"
-        } else {
+        let Some(entry) = classify_item(item, inner) else {
             continue;
         };
-        let entry = ItemEntry {
-            name,
-            docs,
-            inner,
-            kind,
-        };
-        match kind {
+        match entry.kind {
             "trait_" => items.traits.push(entry),
             "struct" => items.structs.push(entry),
             "enum" => items.enums.push(entry),
@@ -308,6 +287,231 @@ fn format_fn_signature(name: &str, inner: &serde_json::Map<String, serde_json::V
     }
 }
 
+/// A single module's documentation content.
+pub struct ModuleDoc {
+    /// Module name ("" for summary/root).
+    pub module: String,
+    /// Rendered markdown content.
+    pub content: String,
+}
+
+/// Collect items from a list of item IDs in the index.
+fn collect_items_from_ids<'a>(
+    item_ids: &[serde_json::Value],
+    index: &'a serde_json::Map<String, serde_json::Value>,
+) -> CollectedItems<'a> {
+    let mut items = CollectedItems {
+        traits: Vec::new(),
+        structs: Vec::new(),
+        enums: Vec::new(),
+        functions: Vec::new(),
+        macros: Vec::new(),
+    };
+    for child_id in item_ids {
+        let key = child_id.to_string().replace('"', "");
+        let Some(child) = index.get(&key) else {
+            continue;
+        };
+        let Some(inner) = child.get("inner").and_then(|i| i.as_object()) else {
+            continue;
+        };
+        if let Some(entry) = classify_item(child, inner) {
+            match entry.kind {
+                "trait_" => items.traits.push(entry),
+                "struct" => items.structs.push(entry),
+                "enum" => items.enums.push(entry),
+                "function" => items.functions.push(entry),
+                "macro" => items.macros.push(entry),
+                _ => {}
+            }
+        }
+    }
+    items
+}
+
+/// Render collected items into a module doc string.
+fn render_collected_items(
+    heading: &str,
+    docs: &str,
+    items: &CollectedItems<'_>,
+    max_len: usize,
+) -> String {
+    let mut output = String::new();
+    let _ = writeln!(output, "# {heading}\n");
+    if !docs.is_empty() {
+        let truncated = truncate_doc(docs, 500);
+        let _ = writeln!(output, "{truncated}\n");
+    }
+    render_section(&mut output, "Traits", &items.traits);
+    render_section(&mut output, "Structs", &items.structs);
+    render_section(&mut output, "Enums", &items.enums);
+    render_section(&mut output, "Functions", &items.functions);
+    render_section(&mut output, "Macros", &items.macros);
+    truncate_doc(&output, max_len)
+}
+
+/// Check if an item is a non-crate submodule. Returns the module name.
+fn as_submodule<'a>(
+    item: &'a serde_json::Value,
+    inner: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&'a str> {
+    let module = inner.get("module")?;
+    let is_crate = module
+        .get("is_crate")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if is_crate {
+        return None;
+    }
+    item.get("name").and_then(|n| n.as_str())
+}
+
+/// Parse rustdoc JSON into a summary plus per-module detail docs.
+///
+/// Returns: summary (module="") with module listing + top-level items,
+/// plus one entry per submodule with its items.
+pub fn parse_rustdoc_json_modules(
+    json_str: &str,
+    crate_name: &str,
+) -> Result<Vec<ModuleDoc>, Box<dyn std::error::Error>> {
+    let doc: serde_json::Value = serde_json::from_str(json_str)?;
+    let version = doc
+        .get("crate_version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let index = doc
+        .get("index")
+        .and_then(|v| v.as_object())
+        .ok_or("missing index")?;
+
+    let root_id = doc
+        .get("root")
+        .ok_or("missing root")?
+        .to_string()
+        .replace('"', "");
+    let root_item = index.get(&root_id).ok_or("root item not in index")?;
+    let root_items = root_item
+        .get("inner")
+        .and_then(|i| i.get("module"))
+        .and_then(|m| m.get("items"))
+        .and_then(|i| i.as_array());
+    let crate_docs = root_item.get("docs").and_then(|d| d.as_str()).unwrap_or("");
+
+    // Separate root children into submodules vs top-level items
+    let mut submodules: Vec<(String, String)> = Vec::new();
+    let mut top_level_ids = Vec::new();
+
+    if let Some(items) = root_items {
+        for item_id in items {
+            let key = item_id.to_string().replace('"', "");
+            let Some(item) = index.get(&key) else {
+                continue;
+            };
+            let Some(inner) = item.get("inner").and_then(|i| i.as_object()) else {
+                continue;
+            };
+            if let Some(name) = as_submodule(item, inner) {
+                submodules.push((name.to_string(), key));
+            } else {
+                top_level_ids.push(item_id.clone());
+            }
+        }
+    }
+
+    let top_level = collect_items_from_ids(&top_level_ids, index);
+    let mut results = Vec::new();
+
+    // Summary doc with module listing
+    let mut summary = render_collected_items(
+        &format!("{crate_name} {version}"),
+        crate_docs,
+        &top_level,
+        4000,
+    );
+    if !submodules.is_empty() {
+        // Insert module listing before the sections
+        let mut mod_list = String::from("\n## Modules\n\n");
+        for (name, _) in &submodules {
+            let _ = writeln!(mod_list, "- **{name}**");
+        }
+        // Insert after the header + crate docs, before ## sections
+        if let Some(pos) = summary.find("\n## ") {
+            summary.insert_str(pos, &mod_list);
+        } else {
+            summary.push_str(&mod_list);
+        }
+        summary = truncate_doc(&summary, 4000);
+    }
+    results.push(ModuleDoc {
+        module: String::new(),
+        content: summary,
+    });
+
+    // Per-module docs
+    for (mod_name, mod_key) in &submodules {
+        let Some(mod_item) = index.get(mod_key) else {
+            continue;
+        };
+        let mod_docs = mod_item.get("docs").and_then(|d| d.as_str()).unwrap_or("");
+        let child_ids: Vec<serde_json::Value> = mod_item
+            .get("inner")
+            .and_then(|i| i.get("module"))
+            .and_then(|m| m.get("items"))
+            .and_then(|i| i.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mod_items = collect_items_from_ids(&child_ids, index);
+        let content = render_collected_items(
+            &format!("{crate_name}::{mod_name}"),
+            mod_docs,
+            &mod_items,
+            8000,
+        );
+        if content.lines().count() > 2 {
+            results.push(ModuleDoc {
+                module: mod_name.clone(),
+                content,
+            });
+        }
+    }
+
+    Ok(results)
+}
+
+/// Classify a single item into an `ItemEntry` if it's a public,
+/// recognized kind (trait, struct, enum, function, macro).
+fn classify_item<'a>(
+    item: &'a serde_json::Value,
+    inner: &'a serde_json::Map<String, serde_json::Value>,
+) -> Option<ItemEntry<'a>> {
+    let name = item.get("name").and_then(|n| n.as_str())?;
+    if item.get("visibility").and_then(|v| v.as_str()) != Some("public") {
+        return None;
+    }
+    let docs = item.get("docs").and_then(|d| d.as_str()).unwrap_or("");
+
+    let kind = if inner.contains_key("trait_") {
+        "trait_"
+    } else if inner.contains_key("struct") {
+        "struct"
+    } else if inner.contains_key("enum") {
+        "enum"
+    } else if inner.contains_key("function") {
+        "function"
+    } else if inner.contains_key("macro") {
+        "macro"
+    } else {
+        return None;
+    };
+
+    Some(ItemEntry {
+        name,
+        docs,
+        inner,
+        kind,
+    })
+}
+
 /// Parse rustdoc JSON and return formatted API summary.
 /// Exposed for integration testing.
 pub fn parse_rustdoc_json_public(
@@ -389,6 +593,118 @@ mod tests {
         assert!(result.contains("A test library."));
         assert!(result.contains("**Config**"));
         assert!(result.contains("Application configuration."));
+    }
+
+    #[test]
+    fn test_parse_rustdoc_json_with_modules() {
+        let json = serde_json::json!({
+            "root": "0",
+            "crate_version": "1.0.0",
+            "index": {
+                "0": {
+                    "id": 0, "crate_id": 0, "name": "mylib",
+                    "visibility": "public",
+                    "docs": "A great library.",
+                    "inner": {
+                        "module": {
+                            "is_crate": true,
+                            "items": ["1", "2", "3"]
+                        }
+                    }
+                },
+                "1": {
+                    "id": 1, "crate_id": 0, "name": "Config",
+                    "visibility": "public",
+                    "docs": "Top-level config.",
+                    "inner": {
+                        "struct": {
+                            "kind": { "plain": { "fields": [], "has_stripped_fields": false } },
+                            "generics": { "params": [], "where_predicates": [] },
+                            "impls": []
+                        }
+                    }
+                },
+                "2": {
+                    "id": 2, "crate_id": 0, "name": "net",
+                    "visibility": "public",
+                    "docs": "Networking utilities.",
+                    "inner": {
+                        "module": {
+                            "is_crate": false,
+                            "items": ["4"]
+                        }
+                    }
+                },
+                "3": {
+                    "id": 3, "crate_id": 0, "name": "sync",
+                    "visibility": "public",
+                    "docs": "Synchronization primitives.",
+                    "inner": {
+                        "module": {
+                            "is_crate": false,
+                            "items": ["5"]
+                        }
+                    }
+                },
+                "4": {
+                    "id": 4, "crate_id": 0, "name": "TcpListener",
+                    "visibility": "public",
+                    "docs": "A TCP listener.",
+                    "inner": {
+                        "struct": {
+                            "kind": { "plain": { "fields": [], "has_stripped_fields": false } },
+                            "generics": { "params": [], "where_predicates": [] },
+                            "impls": []
+                        }
+                    }
+                },
+                "5": {
+                    "id": 5, "crate_id": 0, "name": "Mutex",
+                    "visibility": "public",
+                    "docs": "An async mutex.",
+                    "inner": {
+                        "struct": {
+                            "kind": { "plain": { "fields": [], "has_stripped_fields": false } },
+                            "generics": { "params": [{"name": "T"}], "where_predicates": [] },
+                            "impls": []
+                        }
+                    }
+                }
+            },
+            "paths": {},
+            "external_crates": {},
+            "format_version": 39
+        });
+
+        let results = parse_rustdoc_json_modules(&json.to_string(), "mylib").unwrap();
+
+        // Should have summary + 2 modules
+        assert_eq!(results.len(), 3);
+
+        // Summary (module="")
+        let summary = &results[0];
+        assert_eq!(summary.module, "");
+        assert!(summary.content.contains("# mylib 1.0.0"));
+        assert!(summary.content.contains("A great library."));
+        assert!(summary.content.contains("## Modules"));
+        assert!(summary.content.contains("**net**"));
+        assert!(summary.content.contains("**sync**"));
+        assert!(summary.content.contains("**Config**"));
+        // Summary should NOT contain items from submodules
+        assert!(!summary.content.contains("TcpListener"));
+        assert!(!summary.content.contains("Mutex"));
+
+        // Net module
+        let net = results.iter().find(|m| m.module == "net").unwrap();
+        assert!(net.content.contains("mylib::net"));
+        assert!(net.content.contains("TcpListener"));
+        assert!(net.content.contains("A TCP listener."));
+
+        // Sync module
+        let sync = results.iter().find(|m| m.module == "sync").unwrap();
+        assert!(sync.content.contains("mylib::sync"));
+        assert!(sync.content.contains("Mutex"));
+        assert!(sync.content.contains("An async mutex."));
     }
 
     #[test]

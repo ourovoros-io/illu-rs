@@ -84,6 +84,7 @@ fn row_to_doc_result(row: &rusqlite::Row) -> SqlResult<DocResult> {
         source: row.get(1)?,
         dependency_name: row.get(2)?,
         version: row.get(3)?,
+        module: row.get(4)?,
     })
 }
 
@@ -187,7 +188,8 @@ impl Database {
                 id INTEGER PRIMARY KEY,
                 dependency_id INTEGER NOT NULL REFERENCES dependencies(id),
                 source TEXT NOT NULL,
-                content TEXT NOT NULL
+                content TEXT NOT NULL,
+                module TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS crates (
@@ -236,7 +238,8 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_docs_dep_id
                 ON docs(dependency_id);",
         )?;
-        self.migrate_fts_schema()
+        self.migrate_fts_schema()?;
+        self.migrate_docs_module_column()
     }
 
     /// Detect old FTS schema and rebuild if needed.
@@ -275,6 +278,21 @@ impl Database {
                  INSERT INTO symbols_trigram(rowid, name)
                      SELECT id, name FROM symbols;",
             )?;
+        }
+        Ok(())
+    }
+
+    /// Add `module` column to docs table if missing (existing DBs).
+    fn migrate_docs_module_column(&self) -> SqlResult<()> {
+        let sql: String = self.conn.query_row(
+            "SELECT sql FROM sqlite_master \
+             WHERE type='table' AND name='docs'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !sql.contains("module") {
+            self.conn
+                .execute_batch("ALTER TABLE docs ADD COLUMN module TEXT NOT NULL DEFAULT ''")?;
         }
         Ok(())
     }
@@ -795,10 +813,20 @@ impl Database {
     }
 
     pub fn store_doc(&self, dep_id: DepId, source: &str, content: &str) -> SqlResult<()> {
+        self.store_doc_with_module(dep_id, source, content, "")
+    }
+
+    pub fn store_doc_with_module(
+        &self,
+        dep_id: DepId,
+        source: &str,
+        content: &str,
+        module: &str,
+    ) -> SqlResult<()> {
         self.conn.execute(
-            "INSERT INTO docs (dependency_id, source, content) \
-             VALUES (?1, ?2, ?3)",
-            params![dep_id, source, content],
+            "INSERT INTO docs (dependency_id, source, content, module) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![dep_id, source, content, module],
         )?;
         let rowid = self.conn.last_insert_rowid();
         self.conn.execute(
@@ -807,6 +835,38 @@ impl Database {
             params![rowid, content],
         )?;
         Ok(())
+    }
+
+    pub fn get_doc_by_module(&self, dep_name: &str, module: &str) -> SqlResult<Option<DocResult>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT d.content, d.source, dep.name, dep.version, d.module \
+             FROM docs d \
+             JOIN dependencies dep ON dep.id = d.dependency_id \
+             WHERE dep.name = ?1 AND d.module = ?2 \
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![dep_name, module])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row_to_doc_result(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// List all module names stored for a dependency.
+    pub fn get_doc_modules(&self, dep_name: &str) -> SqlResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT d.module \
+             FROM docs d \
+             JOIN dependencies dep ON dep.id = d.dependency_id \
+             WHERE dep.name = ?1 AND d.module != '' \
+             ORDER BY d.module",
+        )?;
+        let mut modules = Vec::new();
+        let mut rows = stmt.query(params![dep_name])?;
+        while let Some(row) = rows.next()? {
+            modules.push(row.get(0)?);
+        }
+        Ok(modules)
     }
 
     pub fn search_docs(&self, query: &str) -> SqlResult<Vec<DocResult>> {
@@ -818,7 +878,7 @@ impl Database {
         }
         let fts_query = format!("\"{query}\"*");
         let mut stmt = self.conn.prepare(
-            "SELECT d.content, d.source, dep.name, dep.version \
+            "SELECT d.content, d.source, dep.name, dep.version, d.module \
              FROM docs_fts fts \
              JOIN docs d ON d.id = fts.rowid \
              JOIN dependencies dep ON dep.id = d.dependency_id \
@@ -945,7 +1005,7 @@ impl Database {
 
     pub fn get_docs_for_dependency(&self, name: &str) -> SqlResult<Vec<DocResult>> {
         let mut stmt = self.conn.prepare(
-            "SELECT d.content, d.source, dep.name, dep.version \
+            "SELECT d.content, d.source, dep.name, dep.version, d.module \
              FROM docs d \
              JOIN dependencies dep ON dep.id = d.dependency_id \
              WHERE dep.name = ?1",
@@ -1029,6 +1089,7 @@ pub struct DocResult {
     pub source: String,
     pub dependency_name: String,
     pub version: String,
+    pub module: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1722,9 +1783,7 @@ mod tests {
             )
             .unwrap();
 
-        let dep_id = db
-            .insert_dependency("serde", "1.0.0", true, None)
-            .unwrap();
+        let dep_id = db.insert_dependency("serde", "1.0.0", true, None).unwrap();
         db.store_doc(dep_id, "docs.rs", "Serde docs content")
             .unwrap();
 
@@ -1744,22 +1803,53 @@ mod tests {
         assert_eq!(doc_count, 1);
         let dep_count: i64 = db
             .conn
-            .query_row(
-                "SELECT COUNT(*) FROM dependencies",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM dependencies", [], |row| row.get(0))
             .unwrap();
         assert_eq!(dep_count, 1);
+    }
+
+    #[test]
+    fn test_store_doc_with_module() {
+        let db = Database::open_in_memory().unwrap();
+        let dep_id = db.insert_dependency("tokio", "1.35.0", true, None).unwrap();
+
+        // Store summary doc (empty module)
+        db.store_doc_with_module(dep_id, "cargo_doc", "Tokio summary", "")
+            .unwrap();
+        // Store module-specific doc
+        db.store_doc_with_module(dep_id, "cargo_doc", "Tokio net module", "net")
+            .unwrap();
+        db.store_doc_with_module(dep_id, "cargo_doc", "Tokio sync module", "sync")
+            .unwrap();
+
+        // get_doc_by_module finds summary
+        let summary = db.get_doc_by_module("tokio", "").unwrap().unwrap();
+        assert_eq!(summary.content, "Tokio summary");
+        assert_eq!(summary.module, "");
+
+        // get_doc_by_module finds specific module
+        let net = db.get_doc_by_module("tokio", "net").unwrap().unwrap();
+        assert_eq!(net.content, "Tokio net module");
+        assert_eq!(net.module, "net");
+
+        // get_doc_by_module returns None for unknown module
+        assert!(db.get_doc_by_module("tokio", "io").unwrap().is_none());
+
+        // get_doc_modules lists non-empty modules
+        let modules = db.get_doc_modules("tokio").unwrap();
+        assert_eq!(modules, vec!["net", "sync"]);
+
+        // get_docs_for_dependency returns all docs including module field
+        let all = db.get_docs_for_dependency("tokio").unwrap();
+        assert_eq!(all.len(), 3);
+        assert!(all.iter().any(|d| d.module == "net"));
     }
 
     #[test]
     fn test_clear_code_index_then_reinsert_deps_preserves_matching_docs() {
         let db = Database::open_in_memory().unwrap();
 
-        let dep_id = db
-            .insert_dependency("tokio", "1.35.0", true, None)
-            .unwrap();
+        let dep_id = db.insert_dependency("tokio", "1.35.0", true, None).unwrap();
         db.store_doc(dep_id, "docs.rs", "Tokio async runtime docs")
             .unwrap();
 

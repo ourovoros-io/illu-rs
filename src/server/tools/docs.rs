@@ -6,40 +6,35 @@ pub fn handle_docs(
     dep_name: &str,
     topic: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    // If a topic is specified, search docs via FTS
     if let Some(topic) = topic {
-        let results = db.search_docs(topic)?;
-        let filtered: Vec<_> = results
-            .iter()
-            .filter(|d| d.dependency_name == dep_name)
-            .collect();
+        return handle_docs_with_topic(db, dep_name, topic);
+    }
 
-        if filtered.is_empty() {
-            let dep = db.get_dependency_by_name(dep_name)?;
-            return match dep {
-                Some(_) => Ok(format!(
-                    "'{dep_name}' is a known dependency but no docs match \
-                     topic '{topic}'. It may not be published on docs.rs."
-                )),
-                None => Ok(format!(
-                    "'{dep_name}' is not a known dependency of this project."
-                )),
-            };
-        }
-
+    // No topic — return summary doc (module=""), list available modules
+    let summary = db.get_doc_by_module(dep_name, "")?;
+    if let Some(doc) = summary {
         let mut output = String::new();
-        let _ = writeln!(output, "## {dep_name} — {topic}\n");
-        for doc in &filtered {
+        let _ = writeln!(
+            output,
+            "### {} v{} ({})\n\n{}\n",
+            doc.dependency_name, doc.version, doc.source, doc.content
+        );
+        let modules = db.get_doc_modules(dep_name)?;
+        if !modules.is_empty() {
             let _ = writeln!(
                 output,
-                "### {} ({})\n\n{}\n",
-                doc.dependency_name, doc.source, doc.content
+                "---\n**Available modules** \
+                (use `topic` parameter to view):"
             );
+            for m in &modules {
+                let _ = writeln!(output, "- `{m}`");
+            }
+            let _ = writeln!(output);
         }
         return Ok(output);
     }
 
-    // No topic — return all docs for this dependency
+    // No summary doc — fall back to returning all docs
     let docs = db.get_docs_for_dependency(dep_name)?;
     if docs.is_empty() {
         let dep = db.get_dependency_by_name(dep_name)?;
@@ -61,6 +56,61 @@ pub fn handle_docs(
             output,
             "### {} v{} ({})\n\n{}\n",
             doc.dependency_name, doc.version, doc.source, doc.content
+        );
+    }
+    Ok(output)
+}
+
+fn handle_docs_with_topic(
+    db: &Database,
+    dep_name: &str,
+    topic: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    // Try exact module match first
+    if let Some(doc) = db.get_doc_by_module(dep_name, topic)? {
+        let mut output = String::new();
+        let _ = writeln!(output, "## {dep_name}::{topic}\n");
+        let _ = writeln!(output, "{}\n", doc.content);
+        return Ok(output);
+    }
+
+    // Fall back to FTS search
+    let results = db.search_docs(topic)?;
+    let filtered: Vec<_> = results
+        .iter()
+        .filter(|d| d.dependency_name == dep_name)
+        .collect();
+
+    if filtered.is_empty() {
+        let dep = db.get_dependency_by_name(dep_name)?;
+        let mut msg = match dep {
+            Some(_) => format!(
+                "'{dep_name}' is a known dependency but no docs match \
+                 topic '{topic}'."
+            ),
+            None => {
+                return Ok(format!(
+                    "'{dep_name}' is not a known dependency of this project."
+                ));
+            }
+        };
+        let modules = db.get_doc_modules(dep_name)?;
+        if !modules.is_empty() {
+            msg.push_str("\n\nAvailable modules:");
+            for m in &modules {
+                let _ = write!(msg, "\n- `{m}`");
+            }
+        }
+        return Ok(msg);
+    }
+
+    let mut output = String::new();
+    let _ = writeln!(output, "## {dep_name} — {topic}\n");
+    for doc in &filtered {
+        let _ = writeln!(
+            output,
+            "### {} ({})\n\n{}\n",
+            doc.dependency_name, doc.source, doc.content
         );
     }
     Ok(output)
