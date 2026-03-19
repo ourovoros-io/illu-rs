@@ -8,6 +8,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use illu_rs::db::Database;
+use illu_rs::indexer::parser::{SymbolKind, Visibility};
 use illu_rs::indexer::{IndexConfig, index_repo};
 use illu_rs::server::tools::{context, impact, overview, query};
 
@@ -248,5 +249,139 @@ fn tool_queries_complete_under_100ms() {
     assert!(
         overview_time.as_millis() < 100,
         "overview took {overview_time:?}, should be <100ms"
+    );
+}
+
+// =========================================================================
+// 6. PROPERTY-BASED INVARIANTS
+// =========================================================================
+
+#[test]
+fn self_no_symbol_has_inverted_line_range() {
+    let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let symbols = db.get_symbols_by_path_prefix("src/").unwrap();
+    for sym in &symbols {
+        assert!(
+            sym.line_start <= sym.line_end,
+            "symbol '{}' in {} has inverted line range: {} > {}",
+            sym.name,
+            sym.file_path,
+            sym.line_start,
+            sym.line_end,
+        );
+    }
+    assert!(
+        symbols.len() > 20,
+        "expected >20 symbols to check, got {}",
+        symbols.len()
+    );
+}
+
+#[test]
+fn self_no_signature_contains_body() {
+    let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let symbols = db.get_symbols_by_path_prefix("src/").unwrap();
+    for sym in symbols
+        .iter()
+        .filter(|s| s.kind == SymbolKind::Function)
+    {
+        let trimmed = sym.signature.trim();
+        let without_trailing_brace = trimmed.strip_suffix('{').unwrap_or(trimmed);
+        assert!(
+            !without_trailing_brace.contains('{'),
+            "function '{}' in {} has '{{' in signature body: {}",
+            sym.name,
+            sym.file_path,
+            sym.signature,
+        );
+        assert!(
+            !sym.signature.contains("let "),
+            "function '{}' in {} has 'let ' in signature: {}",
+            sym.name,
+            sym.file_path,
+            sym.signature,
+        );
+        assert!(
+            !sym.signature.contains("println"),
+            "function '{}' in {} has 'println' in signature: {}",
+            sym.name,
+            sym.file_path,
+            sym.signature,
+        );
+    }
+}
+
+#[test]
+fn self_all_file_paths_exist_on_disk() {
+    let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let symbols = db.get_symbols_by_path_prefix("src/").unwrap();
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let unique_paths: std::collections::HashSet<&str> =
+        symbols.iter().map(|s| s.file_path.as_str()).collect();
+    for path in &unique_paths {
+        let full = std::path::Path::new(manifest_dir).join(path);
+        assert!(
+            full.exists(),
+            "indexed file path does not exist on disk: {}",
+            full.display(),
+        );
+    }
+}
+
+#[test]
+fn self_every_query_result_has_valid_context() {
+    let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let known_symbols = [
+        "Database",
+        "index_repo",
+        "IlluServer",
+        "parse_rust_source",
+        "Symbol",
+        "handle_query",
+        "handle_context",
+        "handle_impact",
+        "StoredSymbol",
+        "truncate_at",
+    ];
+    for name in &known_symbols {
+        let result = context::handle_context(&db, name, false).unwrap();
+        assert!(
+            result.contains("## "),
+            "context for '{name}' missing header: {result}"
+        );
+        assert!(
+            result.contains("- **File:**"),
+            "context for '{name}' missing file location: {result}"
+        );
+        assert!(
+            result.contains("- **Signature:**"),
+            "context for '{name}' missing signature: {result}"
+        );
+    }
+}
+
+#[test]
+fn self_overview_covers_all_public_functions() {
+    let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let symbols = db.get_symbols_by_path_prefix("src/").unwrap();
+    let public_fns: Vec<&str> = symbols
+        .iter()
+        .filter(|s| {
+            s.kind == SymbolKind::Function
+                && s.visibility == Visibility::Public
+        })
+        .map(|s| s.name.as_str())
+        .collect();
+    let overview_output = overview::handle_overview(&db, "src/").unwrap();
+    for name in &public_fns {
+        assert!(
+            overview_output.contains(name),
+            "public function '{name}' missing from overview output"
+        );
+    }
+    assert!(
+        public_fns.len() > 10,
+        "expected >10 public functions to check, got {}",
+        public_fns.len()
     );
 }
