@@ -2162,3 +2162,39 @@ pub struct MyPublicStruct {
         "must have summary with 'files': {result}"
     );
 }
+
+// =========================================================================
+// FTS QUERY SAFETY — no crash on special characters or FTS operators
+// =========================================================================
+
+#[test]
+fn query_with_dot_does_not_crash() {
+    let (_dir, db) = index_source("pub fn hello() {}\n");
+    let result = query::handle_query(&db, "self.method", Some("symbols"), None);
+    assert!(result.is_ok(), "dot in query must not crash: {result:?}");
+}
+
+#[test]
+fn query_with_colon_does_not_crash() {
+    let (_dir, db) = index_source("pub fn hello() {}\n");
+    let result = query::handle_query(&db, "a:b", Some("symbols"), None);
+    assert!(result.is_ok(), "colon in query must not crash: {result:?}");
+}
+
+#[test]
+fn query_with_fts_operators_does_not_crash() {
+    let (_dir, db) = index_source("pub fn hello() {}\n");
+    for q in &["OR DROP", "NOT something", "foo{bar}", "test -flag", "a&b", "\"quoted\""] {
+        let result = query::handle_query(&db, q, Some("symbols"), None);
+        assert!(result.is_ok(), "query '{q}' must not crash: {result:?}");
+    }
+}
+
+#[test]
+fn query_with_special_chars_falls_back_to_like() {
+    let (_dir, db) = index_source("pub fn config_parser() {}\n");
+    // Underscore query should still find results via LIKE fallback
+    let result = query::handle_query(&db, "config.parser", Some("symbols"), None).unwrap();
+    // Should not crash — may or may not find results depending on LIKE matching
+    assert!(!result.contains("error"), "should not contain error: {result}");
+}

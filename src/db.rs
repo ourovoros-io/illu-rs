@@ -31,9 +31,9 @@ fn escape_like(s: &str) -> String {
 }
 
 fn is_fts_safe(query: &str) -> bool {
-    !query
+    query
         .chars()
-        .any(|c| matches!(c, '"' | '%' | '\'' | '\\' | '*' | '(' | ')'))
+        .all(|c| c.is_alphanumeric() || c == '_' || c == ' ')
 }
 
 fn parse_kind(s: &str) -> rusqlite::Result<SymbolKind> {
@@ -775,7 +775,7 @@ impl Database {
                     ORDER BY CASE WHEN s.name = ?2 THEN 0 ELSE 1 END, \
                              c.source, s.name \
                     LIMIT 50",
-                    query.to_string(),
+                    format!("\"{query}\""),
                 )
             } else {
                 let escaped = escape_like(query);
