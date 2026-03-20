@@ -225,6 +225,12 @@ struct HotspotsParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct RenamePlanParams {
+    /// Symbol name to plan a rename for (supports `Type::method` syntax)
+    symbol_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -611,6 +617,24 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "rename_plan",
+        description = "Preview all locations that would need updating when renaming a symbol. Shows call sites, type usage in signatures, struct fields, trait implementations, and doc comments."
+    )]
+    async fn rename_plan(
+        &self,
+        Parameters(params): Parameters<RenamePlanParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: rename_plan");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("rename_plan \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::rename_plan::handle_rename_plan(&db, &params.symbol_name)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -652,6 +676,7 @@ impl ServerHandler for IlluServer {
                  'symbols_at' for file:line symbol lookup, \
                  'hotspots' for complexity and coupling analysis, \
                  'stats' for codebase statistics and health metrics, \
+                 'rename_plan' for rename impact preview, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
