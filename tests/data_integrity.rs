@@ -424,27 +424,34 @@ pub fn builder() {
 }
 
 #[test]
-fn no_false_refs_to_noisy_names() {
+fn constructor_names_are_tracked_as_refs() {
     let (_dir, db) = index_source(
         r"
 pub fn new() -> i32 { 0 }
 pub fn default() -> i32 { 1 }
 pub fn clone() -> i32 { 2 }
+pub fn fmt() -> i32 { 3 }
 
 pub fn caller() -> i32 {
     let x = new();
     let y = default();
     let z = clone();
-    x + y + z
+    let w = fmt();
+    x + y + z + w
 }
 ",
     );
-    // Even though caller uses new/default/clone, these are in the
-    // noisy symbol list and should be filtered out
+    // new/default/clone are user-written constructors — tracked as refs
     let result = impact::handle_impact(&db, "new", None).unwrap();
     assert!(
+        result.contains("caller"),
+        "new should be tracked as a ref target: {result}"
+    );
+    // fmt is still in the noisy list (derive/trait plumbing) — not tracked
+    let result = impact::handle_impact(&db, "fmt", None).unwrap();
+    assert!(
         !result.contains("caller"),
-        "noisy name 'new' should not create ref: {result}"
+        "fmt should still be filtered as noisy: {result}"
     );
 }
 
