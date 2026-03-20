@@ -4,7 +4,13 @@ use std::fmt::Write;
 pub fn handle_impact(
     db: &Database,
     symbol_name: &str,
+    max_depth: Option<i64>,
+    summary: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    // Summarization threshold: depth 3+ with >10 entries gets grouped by file
+    const SUMMARY_DEPTH: i64 = 3;
+    const SUMMARY_THRESHOLD: usize = 10;
+
     let symbols = db.search_symbols(symbol_name)?;
     if symbols.is_empty() {
         return Ok(format!(
@@ -13,6 +19,7 @@ pub fn handle_impact(
         ));
     }
 
+    let depth = max_depth.unwrap_or(5);
     let mut output = String::new();
     let _ = writeln!(output, "## Impact Analysis: {symbol_name}\n");
 
@@ -33,23 +40,25 @@ pub fn handle_impact(
         }
     }
 
-    let dependents = db.impact_dependents(symbol_name)?;
+    let dependents = db.impact_dependents_with_depth(symbol_name, depth)?;
 
     let mut current_depth: i64 = -1;
+    let mut depth_buf: Vec<&crate::db::ImpactEntry> = Vec::new();
+
     for dep in &dependents {
         if dep.depth != current_depth {
+            // Flush previous depth
+            if !depth_buf.is_empty() {
+                render_depth_entries(&mut output, current_depth, &depth_buf, summary, SUMMARY_DEPTH, SUMMARY_THRESHOLD);
+                depth_buf.clear();
+            }
             current_depth = dep.depth;
-            let _ = writeln!(output, "### Depth {}\n", dep.depth);
         }
-        if dep.via.is_empty() {
-            let _ = writeln!(output, "- **{}** ({})", dep.name, dep.file_path);
-        } else {
-            let _ = writeln!(
-                output,
-                "- **{}** ({}) — via {}",
-                dep.name, dep.file_path, dep.via
-            );
-        }
+        depth_buf.push(dep);
+    }
+    // Flush last depth
+    if !depth_buf.is_empty() {
+        render_depth_entries(&mut output, current_depth, &depth_buf, summary, SUMMARY_DEPTH, SUMMARY_THRESHOLD);
     }
 
     if dependents.is_empty() {
@@ -61,7 +70,72 @@ pub fn handle_impact(
         );
     }
 
+    // Related tests section
+    let tests = db.get_related_tests(symbol_name)?;
+    if !tests.is_empty() {
+        let _ = writeln!(output, "\n### Related Tests\n");
+        for t in &tests {
+            let _ = writeln!(
+                output,
+                "- **{}** ({}:{})",
+                t.name, t.file_path, t.line_start
+            );
+        }
+        let test_names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
+        let _ = writeln!(
+            output,
+            "\nSuggested: `cargo test {}`",
+            test_names.join(" ")
+        );
+    }
+
     Ok(output)
+}
+
+fn render_depth_entries(
+    output: &mut String,
+    depth: i64,
+    entries: &[&crate::db::ImpactEntry],
+    summary: bool,
+    summary_depth: i64,
+    summary_threshold: usize,
+) {
+    let should_summarize = summary && depth >= summary_depth && entries.len() > summary_threshold;
+
+    if should_summarize {
+        // Group by file
+        let mut file_counts: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for dep in entries {
+            *file_counts.entry(&dep.file_path).or_default() += 1;
+        }
+        let entry_count = entries.len();
+        let file_count = file_counts.len();
+        let _ = writeln!(
+            output,
+            "### Depth {depth} ({entry_count} functions across {file_count} files)\n",
+        );
+        for (file, count) in &file_counts {
+            let _ = writeln!(output, "- **{file}** ({count} symbols)");
+        }
+        let _ = writeln!(
+            output,
+            "\n*Use `summary: false` to expand all entries.*\n"
+        );
+    } else {
+        let _ = writeln!(output, "### Depth {depth}\n");
+        for dep in entries {
+            if dep.via.is_empty() {
+                let _ = writeln!(output, "- **{}** ({})", dep.name, dep.file_path);
+            } else {
+                let _ = writeln!(
+                    output,
+                    "- **{}** ({}) — via {}",
+                    dep.name, dep.file_path, dep.via
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -74,7 +148,7 @@ mod tests {
     #[test]
     fn test_impact_no_symbol() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_impact(&db, "nonexistent").unwrap();
+        let result = handle_impact(&db, "nonexistent", None, false).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
@@ -102,7 +176,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_impact(&db, "lonely_fn").unwrap();
+        let result = handle_impact(&db, "lonely_fn", None, false).unwrap();
         assert!(result.contains("Impact Analysis"));
         assert!(result.contains("No dependents found"));
     }
@@ -155,7 +229,7 @@ mod tests {
             .unwrap();
         db.insert_symbol_ref(caller_id, base_id, "call").unwrap();
 
-        let result = handle_impact(&db, "base_fn").unwrap();
+        let result = handle_impact(&db, "base_fn", None, false).unwrap();
         assert!(result.contains("caller_fn"));
     }
 
@@ -219,13 +293,230 @@ mod tests {
         db.insert_symbol_ref(mid_id, base_id, "call").unwrap();
         db.insert_symbol_ref(top_id, mid_id, "call").unwrap();
 
-        let result = handle_impact(&db, "base_fn").unwrap();
+        let result = handle_impact(&db, "base_fn", None, false).unwrap();
         assert!(result.contains("mid_fn"), "should show direct dependent");
         assert!(
             result.contains("top_fn"),
             "should show transitive dependent"
         );
         assert!(result.contains("via"), "should show dependency chain");
+    }
+
+    #[test]
+    fn test_impact_shows_related_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        let test_file_id = db.insert_file("tests/calc.rs", "hash2").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "calculate_tax".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 10,
+                signature: "pub fn calculate_tax()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+        store_symbols(
+            &db,
+            test_file_id,
+            &[
+                Symbol {
+                    name: "test_tax_basic".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "tests/calc.rs".into(),
+                    line_start: 5,
+                    line_end: 12,
+                    signature: "fn test_tax_basic()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "test_tax_zero".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "tests/calc.rs".into(),
+                    line_start: 14,
+                    line_end: 20,
+                    signature: "fn test_tax_zero()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "unrelated_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "tests/calc.rs".into(),
+                    line_start: 22,
+                    line_end: 25,
+                    signature: "fn unrelated_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // test_tax_basic -> calculate_tax (direct)
+        // test_tax_zero  -> calculate_tax (direct)
+        // unrelated_fn does NOT call calculate_tax
+        let tax_id = db
+            .get_symbol_id("calculate_tax", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_basic_id = db
+            .get_symbol_id("test_tax_basic", "tests/calc.rs")
+            .unwrap()
+            .unwrap();
+        let test_zero_id = db
+            .get_symbol_id("test_tax_zero", "tests/calc.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(test_basic_id, tax_id, "call").unwrap();
+        db.insert_symbol_ref(test_zero_id, tax_id, "call").unwrap();
+
+        let result = handle_impact(&db, "calculate_tax", None, false).unwrap();
+        assert!(
+            result.contains("Related Tests"),
+            "should have related tests section"
+        );
+        assert!(result.contains("test_tax_basic"), "should find direct test");
+        assert!(result.contains("test_tax_zero"), "should find second test");
+        assert!(
+            !result.contains("unrelated_fn"),
+            "should not include unrelated test"
+        );
+        assert!(
+            result.contains("cargo test"),
+            "should suggest cargo test command"
+        );
+    }
+
+    #[test]
+    fn test_impact_shows_transitive_test() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "inner_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn inner_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "wrapper_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 12,
+                    signature: "pub fn wrapper_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "test_via_wrapper".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 14,
+                    line_end: 20,
+                    signature: "fn test_via_wrapper()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // test_via_wrapper -> wrapper_fn -> inner_fn
+        let inner_id = db
+            .get_symbol_id("inner_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let wrapper_id = db
+            .get_symbol_id("wrapper_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_id = db
+            .get_symbol_id("test_via_wrapper", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(wrapper_id, inner_id, "call").unwrap();
+        db.insert_symbol_ref(test_id, wrapper_id, "call").unwrap();
+
+        let result = handle_impact(&db, "inner_fn", None, false).unwrap();
+        assert!(
+            result.contains("test_via_wrapper"),
+            "should find transitive test"
+        );
+    }
+
+    #[test]
+    fn test_impact_no_related_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "untested_fn".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn untested_fn()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        let result = handle_impact(&db, "untested_fn", None, false).unwrap();
+        assert!(
+            !result.contains("Related Tests"),
+            "should not show tests section when none exist"
+        );
     }
 
     #[test]
@@ -294,12 +585,83 @@ mod tests {
         db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref")
             .unwrap();
 
-        let result = handle_impact(&db, "SharedType").unwrap();
+        let result = handle_impact(&db, "SharedType", None, false).unwrap();
         assert!(
             result.contains("Affected Crates"),
             "should have crate summary"
         );
         assert!(result.contains("shared"), "should mention shared crate");
         assert!(result.contains("app"), "should mention app crate");
+    }
+
+    #[test]
+    fn test_impact_depth_limit() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "base".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn base()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "mid".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 10,
+                    signature: "pub fn mid()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "top".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 15,
+                    signature: "pub fn top()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let base_id = db.get_symbol_id("base", "src/lib.rs").unwrap().unwrap();
+        let mid_id = db.get_symbol_id("mid", "src/lib.rs").unwrap().unwrap();
+        let top_id = db.get_symbol_id("top", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(mid_id, base_id, "call").unwrap();
+        db.insert_symbol_ref(top_id, mid_id, "call").unwrap();
+
+        // depth=1: only direct callers
+        let result = handle_impact(&db, "base", Some(1), false).unwrap();
+        assert!(result.contains("mid"), "should show direct caller");
+        assert!(!result.contains("top"), "should NOT show transitive caller at depth 1");
+
+        // default depth: shows both
+        let result = handle_impact(&db, "base", None, false).unwrap();
+        assert!(result.contains("mid"));
+        assert!(result.contains("top"), "should show transitive caller at default depth");
     }
 }

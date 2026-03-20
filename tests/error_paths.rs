@@ -120,7 +120,7 @@ fn context_on_nonexistent_symbol_returns_not_found() {
 #[test]
 fn impact_on_nonexistent_symbol_does_not_panic() {
     let (_dir, db) = empty_crate();
-    let result = impact::handle_impact(&db, "Nonexistent", None).unwrap();
+    let result = impact::handle_impact(&db, "Nonexistent", None, false).unwrap();
     assert!(
         !result.is_empty(),
         "impact on nonexistent symbol should return non-empty result"
