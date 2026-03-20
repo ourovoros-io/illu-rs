@@ -82,6 +82,8 @@ struct QueryParams {
     signature: Option<String>,
     /// Filter results to files under this path prefix (e.g. "src/db.rs", "src/server/")
     path: Option<String>,
+    /// Max number of results to return (default: 50)
+    limit: Option<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -92,8 +94,10 @@ struct ContextParams {
     /// Filter results to a specific file path (e.g. "src/db.rs")
     file: Option<String>,
     /// Select specific sections to include: `source`, `callers`, `callees`,
-    /// `tested_by`, `traits`, `docs`. Omit for all sections.
+    /// `tested_by`, `traits`, `related`, `docs`. Omit for all sections.
     sections: Option<Vec<String>>,
+    /// Filter callers and callees to this path prefix (e.g. "src/" to exclude test callers)
+    callers_path: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -117,6 +121,8 @@ struct OverviewParams {
     path: String,
     /// Include private symbols (default: false, shows only public/pub(crate))
     include_private: Option<bool>,
+    /// Max symbols to show (default: all)
+    limit: Option<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -197,6 +203,42 @@ struct FileGraphParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct SymbolsAtParams {
+    /// File path (e.g. "src/db.rs")
+    file: String,
+    /// Line number to look up
+    line: i64,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct StatsParams {
+    /// Filter to files under this path prefix (default: all)
+    path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct HotspotsParams {
+    /// Filter to files under this path prefix
+    path: Option<String>,
+    /// Max entries per section (default: 10)
+    limit: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RenamePlanParams {
+    /// Symbol name to plan a rename for (supports `Type::method` syntax)
+    symbol_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct SimilarParams {
+    /// Symbol to find similar symbols for
+    symbol_name: String,
+    /// Filter to files under this path prefix
+    path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -237,6 +279,7 @@ impl IlluServer {
             params.attribute.as_deref(),
             params.signature.as_deref(),
             params.path.as_deref(),
+            params.limit,
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -265,6 +308,7 @@ impl IlluServer {
             full_body,
             params.file.as_deref(),
             sections.as_deref(),
+            params.callers_path.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -325,6 +369,7 @@ impl IlluServer {
             &db,
             &params.path,
             params.include_private.unwrap_or(false),
+            params.limit,
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -527,6 +572,96 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "symbols_at",
+        description = "Look up which symbol(s) exist at a given file path and line number. Use when navigating from compiler errors, stack traces, or git blame output."
+    )]
+    async fn symbols_at(
+        &self,
+        Parameters(params): Parameters<SymbolsAtParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(file = %params.file, line = params.line, "Tool call: symbols_at");
+        let _guard = crate::status::StatusGuard::new(&format!(
+            "symbols_at \u{25b8} {}:{}",
+            params.file, params.line
+        ));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::symbols_at::handle_symbols_at(&db, &params.file, params.line)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "hotspots",
+        description = "Identify complexity and coupling hotspots: most-referenced symbols (fragile), most-referencing symbols (complex), and largest functions."
+    )]
+    async fn hotspots(
+        &self,
+        Parameters(params): Parameters<HotspotsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = ?params.path, "Tool call: hotspots");
+        let _guard = crate::status::StatusGuard::new("hotspots");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::hotspots::handle_hotspots(&db, params.path.as_deref(), params.limit)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "stats",
+        description = "Show codebase statistics: file and symbol counts, test coverage ratio, most-referenced symbols, and largest files."
+    )]
+    async fn stats(
+        &self,
+        Parameters(params): Parameters<StatsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = ?params.path, "Tool call: stats");
+        let _guard = crate::status::StatusGuard::new("stats");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::stats::handle_stats(&db, params.path.as_deref()).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "rename_plan",
+        description = "Preview all locations that would need updating when renaming a symbol. Shows call sites, type usage in signatures, struct fields, trait implementations, and doc comments."
+    )]
+    async fn rename_plan(
+        &self,
+        Parameters(params): Parameters<RenamePlanParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: rename_plan");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("rename_plan \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::rename_plan::handle_rename_plan(&db, &params.symbol_name)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "similar",
+        description = "Find symbols with similar signatures and call patterns. Useful for discovering duplicates, finding patterns to follow, or identifying refactoring candidates."
+    )]
+    async fn similar(
+        &self,
+        Parameters(params): Parameters<SimilarParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: similar");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("similar \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::similar::handle_similar(&db, &params.symbol_name, params.path.as_deref())
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -565,6 +700,11 @@ impl ServerHandler for IlluServer {
                  'neighborhood' for bidirectional call graph exploration, \
                  'type_usage' for finding type usage in signatures and fields, \
                  'file_graph' for file-level dependency visualization, \
+                 'symbols_at' for file:line symbol lookup, \
+                 'hotspots' for complexity and coupling analysis, \
+                 'stats' for codebase statistics and health metrics, \
+                 'rename_plan' for rename impact preview, \
+                 'similar' for finding structurally similar symbols, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),

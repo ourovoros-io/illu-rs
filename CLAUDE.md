@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-illu-rs is an MCP (Model Context Protocol) server that indexes Rust codebases and exposes code intelligence tools. It parses source files with tree-sitter, stores symbols/refs/deps in SQLite, and serves 16 MCP tools over stdio: `query`, `context`, `batch_context`, `impact`, `diff_impact`, `callpath`, `unused`, `freshness`, `docs`, `overview`, `tree`, `crate_graph`, `implements`, `neighborhood`, `type_usage`, `file_graph`.
+illu-rs is an MCP (Model Context Protocol) server that indexes Rust codebases and exposes code intelligence tools. It parses source files with tree-sitter, stores symbols/refs/deps in SQLite, and serves 22 MCP tools over stdio: `query`, `context`, `batch_context`, `impact`, `diff_impact`, `callpath`, `unused`, `freshness`, `docs`, `overview`, `tree`, `crate_graph`, `implements`, `neighborhood`, `type_usage`, `file_graph`, `symbols_at`, `stats`, `hotspots`, `rename_plan`, `similar`.
 
 ## Commands
 
@@ -53,7 +53,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 
 ### `server` — MCP server (`src/server/`)
 - `mod.rs` — `IlluServer` wraps `Arc<Mutex<Database>>`. Uses rmcp's `#[tool_router]`, `#[tool_handler]`, `#[tool]` macros with `Parameters<T>` wrapper. Tool param structs derive `JsonSchema` via `rmcp::schemars` re-export.
-- `tools/` — Each tool handler is a pure function `handle_*(db, ...) -> Result<String>`: `query.rs`, `context.rs`, `batch_context.rs`, `impact.rs`, `diff_impact.rs`, `callpath.rs`, `unused.rs`, `freshness.rs`, `docs.rs`, `overview.rs`, `tree.rs`, `crate_graph.rs`, `implements.rs`, `neighborhood.rs`, `type_usage.rs`, `file_graph.rs`.
+- `tools/` — Each tool handler is a pure function `handle_*(db, ...) -> Result<String>`: `query.rs`, `context.rs`, `batch_context.rs`, `impact.rs`, `diff_impact.rs`, `callpath.rs`, `unused.rs`, `freshness.rs`, `docs.rs`, `overview.rs`, `tree.rs`, `crate_graph.rs`, `implements.rs`, `neighborhood.rs`, `type_usage.rs`, `file_graph.rs`, `symbols_at.rs`, `stats.rs`, `hotspots.rs`, `rename_plan.rs`, `similar.rs`.
 
 ## Key Patterns
 
@@ -77,6 +77,15 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Diff impact changes_only** — When `changes_only=true`, skips downstream impact and test coverage, returns only changed symbols.
 - **Type usage tool** — Best-effort text search on `signature` and `details` columns to find where a type is used as params, returns, and struct fields.
 - **File graph tool** — Derives file-level dependencies from `symbol_refs` table (no new tables needed). If symbol A in file X references symbol B in file Y, X depends on Y.
+- **Symbols_at tool** — Wraps existing `get_symbols_at_lines` DB method for file:line lookup. Returns all symbols whose line range contains the given line.
+- **Query bodies scope** — `scope: "bodies"` searches within function body text via LIKE on the `body` column. Also supports `limit` parameter to cap result count.
+- **Query/overview limit** — Optional `limit` parameter truncates results. Overview shows "(limited to N, M total)" when truncated.
+- **Context callers_path** — Optional `callers_path` parameter filters callers and callees to a path prefix (e.g. `"src/"` to exclude test callers).
+- **Context related section** — Shows sibling symbols in the same file with matching `impl_type`. Labels as "Related (impl X)" for methods or "Related (same file)" for top-level.
+- **Stats tool** — Aggregates file/symbol counts, kind breakdown, test coverage ratio, most-referenced symbols, and largest files into a compact dashboard.
+- **Hotspots tool** — Identifies high-risk symbols: most-referenced (fragile to change), most-referencing (high complexity), and largest functions (by line span).
+- **Rename_plan tool** — Unified preview of all locations referencing a symbol: definition, call sites, type usage in signatures, struct fields, trait implementations, and doc comments.
+- **Similar tool** — Finds symbols with similar signatures and callee patterns. Scores by return type match, shared parameter types, and shared callees.
 - **Constructor tracking** — `new`, `from`, `into`, `clone`, `default`, `build`, `init` are tracked as symbol refs (removed from `NOISY_SYMBOL_NAMES`). `impl_type` disambiguation prevents cross-type collisions.
 
 ## Lint Configuration
@@ -107,6 +116,12 @@ This repo is indexed by illu. **Use illu tools as your first step** — before r
 - **Trait/type relationships**: `illu implements` to find trait implementations
 - **Finding type usage**: `illu type_usage` to see where a type appears in signatures and fields
 - **Module coupling**: `illu file_graph` to visualize file-level dependencies
+- **Error navigation**: `illu symbols_at` to look up symbols by file:line from compiler errors
+- **Pattern detection**: `illu query --scope bodies` to search within function bodies
+- **Codebase orientation**: `illu stats` for a quick health dashboard
+- **Refactoring planning**: `illu rename_plan` to preview all rename locations
+- **Complexity analysis**: `illu hotspots` to find fragile and complex symbols
+- **Finding patterns**: `illu similar` to find structurally similar symbols
 
 ### Commands
 
@@ -137,6 +152,15 @@ This repo is indexed by illu. **Use illu tools as your first step** — before r
 | `illu file_graph src/server/` | `mcp__illu__file_graph` | `path: "src/server/"` |
 | `illu callpath <from> <to> --all` | `mcp__illu__callpath` | `from: "<from>", to: "<to>", all_paths: true` |
 | `illu diff_impact --changes-only` | `mcp__illu__diff_impact` | `changes_only: true` |
+| `illu query <term> --scope bodies` | `mcp__illu__query` | `query: "<term>", scope: "bodies"` |
+| `illu query <term> --limit 5` | `mcp__illu__query` | `query: "<term>", limit: 5` |
+| `illu context <sym> --callers-path src/` | `mcp__illu__context` | `symbol_name: "<sym>", callers_path: "src/"` |
+| `illu symbols_at <file> <line>` | `mcp__illu__symbols_at` | `file: "<file>", line: <line>` |
+| `illu stats` | `mcp__illu__stats` | |
+| `illu hotspots` | `mcp__illu__hotspots` | |
+| `illu hotspots --path src/ --limit 5` | `mcp__illu__hotspots` | `path: "src/", limit: 5` |
+| `illu rename_plan <symbol>` | `mcp__illu__rename_plan` | `symbol_name: "<symbol>"` |
+| `illu similar <symbol>` | `mcp__illu__similar` | `symbol_name: "<symbol>"` |
 | `illu crate_graph` | `mcp__illu__crate_graph` | |
 
 ### Workflow rules

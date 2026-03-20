@@ -1,6 +1,10 @@
 use crate::db::Database;
 use std::fmt::Write;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "query has many independent filter params"
+)]
 pub fn handle_query(
     db: &Database,
     query: &str,
@@ -9,24 +13,44 @@ pub fn handle_query(
     attribute: Option<&str>,
     signature: Option<&str>,
     path: Option<&str>,
+    limit: Option<i64>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let scope = scope.unwrap_or("all");
     let mut output = String::new();
 
     match scope {
         "symbols" => {
-            format_symbols(db, query, kind, attribute, signature, path, &mut output)?;
+            format_symbols(
+                db,
+                query,
+                kind,
+                attribute,
+                signature,
+                path,
+                limit,
+                &mut output,
+            )?;
         }
         "docs" => format_docs(db, query, &mut output)?,
-        "files" => format_files(db, query, path, &mut output)?,
+        "files" => format_files(db, query, path, limit, &mut output)?,
         "all" => {
-            format_symbols(db, query, kind, attribute, signature, path, &mut output)?;
+            format_symbols(
+                db,
+                query,
+                kind,
+                attribute,
+                signature,
+                path,
+                limit,
+                &mut output,
+            )?;
             format_docs(db, query, &mut output)?;
         }
-        "doc_comments" => format_doc_comments(db, query, kind, path, &mut output)?,
+        "doc_comments" => format_doc_comments(db, query, kind, path, limit, &mut output)?,
+        "bodies" => format_body_search(db, query, kind, path, limit, &mut output)?,
         other => {
             return Err(format!(
-                "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, all"
+                "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, bodies, all"
             )
             .into());
         }
@@ -39,6 +63,10 @@ pub fn handle_query(
     Ok(output)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal format helper, mirrors handle_query params"
+)]
 fn format_symbols(
     db: &Database,
     query: &str,
@@ -46,6 +74,7 @@ fn format_symbols(
     attribute: Option<&str>,
     signature: Option<&str>,
     path: Option<&str>,
+    limit: Option<i64>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut all_symbols = if let Some(attr) = attribute {
@@ -70,7 +99,7 @@ fn format_symbols(
     if let Some(p) = path {
         all_symbols.retain(|s| s.file_path.starts_with(p));
     }
-    let symbols: Vec<_> = if let Some(k) = kind {
+    let mut symbols: Vec<_> = if let Some(k) = kind {
         let k_lower = k.to_lowercase();
         all_symbols
             .into_iter()
@@ -86,6 +115,10 @@ fn format_symbols(
             })
             .collect()
     };
+    if let Some(max) = limit {
+        let max = usize::try_from(max.max(1)).unwrap_or(50);
+        symbols.truncate(max);
+    }
     if !symbols.is_empty() {
         output.push_str("## Symbols\n\n");
         for sym in &symbols {
@@ -131,6 +164,7 @@ fn format_files(
     db: &Database,
     query: &str,
     path: Option<&str>,
+    limit: Option<i64>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let all_paths = db.get_all_file_paths()?;
@@ -142,6 +176,10 @@ fn format_files(
         .map(String::as_str)
         .collect();
     files.sort_unstable();
+    if let Some(max) = limit {
+        let max = usize::try_from(max.max(1)).unwrap_or(50);
+        files.truncate(max);
+    }
 
     if !files.is_empty() {
         output.push_str("## Files\n\n");
@@ -158,13 +196,14 @@ fn format_doc_comments(
     query: &str,
     kind: Option<&str>,
     path: Option<&str>,
+    limit: Option<i64>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut symbols = db.search_symbols_by_doc_comment(query)?;
     if let Some(p) = path {
         symbols.retain(|s| s.file_path.starts_with(p));
     }
-    let symbols: Vec<_> = if let Some(k) = kind {
+    let mut symbols: Vec<_> = if let Some(k) = kind {
         let k_lower = k.to_lowercase();
         symbols
             .into_iter()
@@ -173,6 +212,10 @@ fn format_doc_comments(
     } else {
         symbols
     };
+    if let Some(max) = limit {
+        let max = usize::try_from(max.max(1)).unwrap_or(50);
+        symbols.truncate(max);
+    }
     if !symbols.is_empty() {
         output.push_str("## Symbols matching doc comments\n\n");
         for sym in &symbols {
@@ -187,6 +230,46 @@ fn format_doc_comments(
             {
                 let _ = writeln!(output, "  *{first_line}*");
             }
+        }
+        output.push('\n');
+    }
+    Ok(())
+}
+
+fn format_body_search(
+    db: &Database,
+    query: &str,
+    kind: Option<&str>,
+    path: Option<&str>,
+    limit: Option<i64>,
+    output: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut symbols = db.search_symbols_by_body(query)?;
+    if let Some(p) = path {
+        symbols.retain(|s| s.file_path.starts_with(p));
+    }
+    let mut symbols: Vec<_> = if let Some(k) = kind {
+        let k_lower = k.to_lowercase();
+        symbols
+            .into_iter()
+            .filter(|s| s.kind.to_string().to_lowercase() == k_lower)
+            .collect()
+    } else {
+        symbols
+    };
+    if let Some(max) = limit {
+        let max = usize::try_from(max.max(1)).unwrap_or(50);
+        symbols.truncate(max);
+    }
+    if !symbols.is_empty() {
+        output.push_str("## Symbols matching body content\n\n");
+        for sym in &symbols {
+            let qname = super::qualified_name(sym);
+            let _ = writeln!(
+                output,
+                "- **{qname}** ({}) at {}:{}-{}\n  `{}`",
+                sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
+            );
         }
         output.push('\n');
     }
@@ -241,7 +324,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_query(&db, "parse", Some("symbols"), None, None, None, None).unwrap();
+        let result =
+            handle_query(&db, "parse", Some("symbols"), None, None, None, None, None).unwrap();
         assert!(!result.is_empty());
         assert!(result.contains("parse_config"));
     }
@@ -253,8 +337,17 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "Serde serialization framework")
             .unwrap();
 
-        let result =
-            handle_query(&db, "serialization", Some("docs"), None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "serialization",
+            Some("docs"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(result.contains("serialization"));
     }
 
@@ -282,7 +375,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_query(&db, "serialize", None, None, None, None, None).unwrap();
+        let result = handle_query(&db, "serialize", None, None, None, None, None, None).unwrap();
         assert!(result.contains("serialize"));
     }
 
@@ -310,8 +403,17 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            handle_query(&db, "parse_config", Some("symbols"), None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "parse_config",
+            Some("symbols"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(result.contains("*Parse configuration from file.*"));
         assert!(!result.contains("Supports TOML"));
     }
@@ -364,6 +466,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
         assert!(result.contains("Config"), "should find Config struct");
@@ -380,6 +483,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
         assert!(!result.contains("Config"), "struct should be filtered out");
@@ -388,7 +492,7 @@ mod tests {
     #[test]
     fn test_query_no_results() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_query(&db, "nonexistent", None, None, None, None, None).unwrap();
+        let result = handle_query(&db, "nonexistent", None, None, None, None, None, None).unwrap();
         assert!(result.contains("No results found for 'nonexistent'"));
     }
 
@@ -411,7 +515,17 @@ mod tests {
         .unwrap();
 
         // No path filter: both found
-        let r = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), None).unwrap();
+        let r = handle_query(
+            &db,
+            "",
+            Some("symbols"),
+            None,
+            None,
+            Some("pub fn"),
+            None,
+            None,
+        )
+        .unwrap();
         assert!(r.contains("serve"));
         assert!(r.contains("query_db"));
 
@@ -424,6 +538,7 @@ mod tests {
             None,
             Some("pub fn"),
             Some("src/server/"),
+            None,
         )
         .unwrap();
         assert!(r.contains("serve"));
@@ -438,6 +553,7 @@ mod tests {
             None,
             Some("pub fn"),
             Some("src/db.rs"),
+            None,
         )
         .unwrap();
         assert!(!r.contains("serve"));
@@ -452,6 +568,7 @@ mod tests {
             None,
             Some("pub fn"),
             Some("src/other/"),
+            None,
         )
         .unwrap();
         assert!(r.contains("No results found"));
@@ -505,6 +622,7 @@ mod tests {
             None,
             Some("test"),
             Some("Database"),
+            None,
             None,
         )
         .unwrap();
@@ -574,8 +692,17 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            handle_query(&db, "TOML", Some("doc_comments"), None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "TOML",
+            Some("doc_comments"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(
             result.contains("parse_config"),
             "should find symbol with TOML in doc"
@@ -598,8 +725,114 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
         assert!(result.contains("No results found"));
+    }
+
+    #[test]
+    fn test_query_bodies_scope() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "spawn_task".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn spawn_task()".into(),
+                    doc_comment: None,
+                    body: Some("tokio::spawn(async { do_work().await });".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "sync_work".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn sync_work()".into(),
+                    doc_comment: None,
+                    body: Some("let result = compute(42);".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let result = handle_query(
+            &db,
+            "tokio::spawn",
+            Some("bodies"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.contains("spawn_task"),
+            "should find symbol with tokio::spawn in body"
+        );
+        assert!(
+            !result.contains("sync_work"),
+            "should not find unrelated symbol"
+        );
+        assert!(result.contains("Symbols matching body content"));
+
+        let result = handle_query(
+            &db,
+            "nonexistent_call",
+            Some("bodies"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(result.contains("No results found"));
+    }
+
+    #[test]
+    fn test_query_limit() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        let symbols: Vec<_> = (0..10)
+            .map(|i| {
+                make_fn(
+                    &format!("fn_{i}"),
+                    "src/lib.rs",
+                    i * 10,
+                    &format!("pub fn fn_{i}()"),
+                )
+            })
+            .collect();
+        store_symbols(&db, file_id, &symbols).unwrap();
+
+        // Without limit: all 10
+        let result =
+            handle_query(&db, "fn_", Some("symbols"), None, None, None, None, None).unwrap();
+        for i in 0..10 {
+            assert!(result.contains(&format!("fn_{i}")));
+        }
+
+        // With limit=3: only 3
+        let result =
+            handle_query(&db, "fn_", Some("symbols"), None, None, None, None, Some(3)).unwrap();
+        let count = result.matches("**fn_").count();
+        assert_eq!(count, 3, "limit=3 should return 3 results, got {count}");
     }
 }
