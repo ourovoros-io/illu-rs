@@ -1173,6 +1173,36 @@ pub fn caller() -> i32 {
     }
 
     #[test]
+    fn test_extract_refs_method_call_on_parameter() {
+        let source = r"
+pub fn do_query() -> Vec<String> { vec![] }
+
+pub fn caller(db: &Database) {
+    let results = db.do_query();
+}
+";
+        let known: std::collections::HashSet<String> =
+            ["do_query", "caller", "Database"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let method_ref = refs
+            .iter()
+            .find(|r| r.target_name == "do_query" && r.source_name == "caller");
+        assert!(
+            method_ref.is_some(),
+            "should detect db.do_query() as a ref to do_query: {refs:?}"
+        );
+    }
+
+    #[test]
     fn test_extract_refs_no_self_ref() {
         let source = r"
 pub fn standalone() -> i32 { 42 }
