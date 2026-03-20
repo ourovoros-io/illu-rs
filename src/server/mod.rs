@@ -133,6 +133,14 @@ struct CallpathParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct BatchContextParams {
+    /// List of symbol names to get context for
+    symbols: Vec<String>,
+    /// Return full untruncated source bodies (default: false)
+    full_body: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct FreshnessParams {}
 
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
@@ -321,6 +329,26 @@ impl IlluServer {
         let repo_path = &self.config.repo_path;
         let result = tools::freshness::handle_freshness(&db, repo_path)
             .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "batch_context",
+        description = "Get full context for multiple symbols in one call. Returns definition, signature, callers, callees, and docs for each symbol."
+    )]
+    async fn batch_context(
+        &self,
+        Parameters(params): Parameters<BatchContextParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbols = ?params.symbols, "Tool call: batch_context");
+        let _guard = crate::status::StatusGuard::new("batch_context");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let full_body = params.full_body.unwrap_or(false);
+        let result = tools::batch_context::handle_batch_context(
+            &db, &params.symbols, full_body,
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 }
