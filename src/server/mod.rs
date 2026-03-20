@@ -175,6 +175,14 @@ struct ImplementsParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct TypeUsageParams {
+    /// Type name to find usages of
+    type_name: String,
+    /// Filter to files under this path prefix
+    path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct NeighborhoodParams {
     /// Symbol to explore around
     symbol_name: String,
@@ -478,6 +486,28 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "type_usage",
+        description = "Find where a type is used: as function parameters, return types, and struct fields. Best-effort text search on signatures and struct details."
+    )]
+    async fn type_usage(
+        &self,
+        Parameters(params): Parameters<TypeUsageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(type_name = %params.type_name, "Tool call: type_usage");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("type_usage ▸ {}", params.type_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::type_usage::handle_type_usage(
+            &db,
+            &params.type_name,
+            params.path.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -515,6 +545,7 @@ impl ServerHandler for IlluServer {
                  'tree' for file/module tree, \
                  'implements' for trait/type relationships, \
                  'neighborhood' for bidirectional call graph exploration, \
+                 'type_usage' for finding type usage in signatures and fields, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
