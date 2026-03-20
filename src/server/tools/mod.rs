@@ -1,5 +1,6 @@
 pub mod context;
 pub mod diff_impact;
+pub mod freshness;
 pub mod docs;
 pub mod impact;
 pub mod overview;

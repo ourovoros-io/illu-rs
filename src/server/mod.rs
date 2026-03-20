@@ -122,6 +122,9 @@ struct DiffImpactParams {
     git_ref: Option<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct FreshnessParams {}
+
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
     McpError::internal_error(e.to_string(), None)
 }
@@ -270,6 +273,23 @@ impl IlluServer {
         let result =
             tools::diff_impact::handle_diff_impact(&db, repo_path, params.git_ref.as_deref())
                 .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "freshness",
+        description = "Check if the index is up to date with the current git HEAD. Shows indexed commit, current HEAD, and any changed files."
+    )]
+    async fn freshness(
+        &self,
+        Parameters(_params): Parameters<FreshnessParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Tool call: freshness");
+        let _guard = crate::status::StatusGuard::new("freshness");
+        let db = self.lock_db()?;
+        let repo_path = &self.config.repo_path;
+        let result = tools::freshness::handle_freshness(&db, repo_path)
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 }
