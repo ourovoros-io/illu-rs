@@ -61,6 +61,7 @@ fn row_to_stored_symbol(row: &rusqlite::Row) -> SqlResult<StoredSymbol> {
         body: row.get(8)?,
         details: row.get(9)?,
         attributes: row.get(10)?,
+        impl_type: row.get(11)?,
     })
 }
 
@@ -522,6 +523,22 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM crates", [], |row| row.get(0))
     }
 
+    pub fn get_all_crate_deps(&self) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT sc.name, tc.name \
+             FROM crate_deps cd \
+             JOIN crates sc ON sc.id = cd.source_crate_id \
+             JOIN crates tc ON tc.id = cd.target_crate_id \
+             ORDER BY sc.name, tc.name",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
+
     pub fn insert_crate_dep(
         &self,
         source_crate_id: CrateId,
@@ -681,6 +698,14 @@ impl Database {
     }
 
     pub fn impact_dependents(&self, symbol_name: &str) -> SqlResult<Vec<ImpactEntry>> {
+        self.impact_dependents_with_depth(symbol_name, 5)
+    }
+
+    pub fn impact_dependents_with_depth(
+        &self,
+        symbol_name: &str,
+        max_depth: i64,
+    ) -> SqlResult<Vec<ImpactEntry>> {
         let mut stmt = self.conn.prepare(
             "WITH RECURSIVE deps(id, name, file_path, depth, via) AS (
                 SELECT s.id, s.name, f.path, 0, ''
@@ -696,7 +721,7 @@ impl Database {
                 JOIN symbol_refs sr ON sr.target_symbol_id = deps.id
                 JOIN symbols s2 ON s2.id = sr.source_symbol_id
                 JOIN files f2 ON f2.id = s2.file_id
-                WHERE deps.depth < 5
+                WHERE deps.depth < ?2
             )
             SELECT DISTINCT name, file_path, depth, via FROM deps
             WHERE depth > 0
@@ -704,13 +729,48 @@ impl Database {
             LIMIT 100",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name])?;
+        let mut rows = stmt.query(params![symbol_name, max_depth])?;
         while let Some(row) = rows.next()? {
             results.push(ImpactEntry {
                 name: row.get(0)?,
                 file_path: row.get(1)?,
                 depth: row.get(2)?,
                 via: row.get(3)?,
+            });
+        }
+        Ok(results)
+    }
+
+    /// Find test functions that directly or transitively call the given symbol.
+    /// Walks the call graph upward (who calls me?) filtering for `#[test]` attributes.
+    pub fn get_related_tests(&self, symbol_name: &str) -> SqlResult<Vec<TestEntry>> {
+        let mut stmt = self.conn.prepare(
+            "WITH RECURSIVE callers(id, name, file_path, line_start, depth, attributes) AS (
+                SELECT s.id, s.name, f.path, s.line_start, 0, s.attributes
+                FROM symbols s
+                JOIN files f ON f.id = s.file_id
+                WHERE s.name = ?1
+              UNION
+                SELECT s2.id, s2.name, f2.path, s2.line_start, callers.depth + 1, s2.attributes
+                FROM callers
+                JOIN symbol_refs sr ON sr.target_symbol_id = callers.id
+                JOIN symbols s2 ON s2.id = sr.source_symbol_id
+                JOIN files f2 ON f2.id = s2.file_id
+                WHERE callers.depth < 5
+            )
+            SELECT DISTINCT name, file_path, line_start
+            FROM callers
+            WHERE depth > 0
+              AND attributes LIKE '%test%'
+            ORDER BY file_path, name",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![symbol_name])?;
+        while let Some(row) = rows.next()? {
+            results.push(TestEntry {
+                name: row.get(0)?,
+                file_path: row.get(1)?,
+                line_start: row.get(2)?,
             });
         }
         Ok(results)
@@ -768,7 +828,7 @@ impl Database {
                     ) \
                     SELECT s.name, s.kind, s.visibility, f.path, \
                            s.line_start, s.line_end, s.signature, \
-                           s.doc_comment, s.body, s.details, s.attributes \
+                           s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
                     FROM combined c \
                     JOIN symbols s ON s.id = c.sid \
                     JOIN files f ON f.id = s.file_id \
@@ -796,7 +856,7 @@ impl Database {
                     ) \
                     SELECT s.name, s.kind, s.visibility, f.path, \
                            s.line_start, s.line_end, s.signature, \
-                           s.doc_comment, s.body, s.details, s.attributes \
+                           s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
                     FROM combined c \
                     JOIN symbols s ON s.id = c.sid \
                     JOIN files f ON f.id = s.file_id \
@@ -820,7 +880,7 @@ impl Database {
             let mut stmt = self.conn.prepare_cached(
                 "SELECT s.name, s.kind, s.visibility, f.path, \
                        s.line_start, s.line_end, s.signature, \
-                       s.doc_comment, s.body, s.details, s.attributes \
+                       s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
                 FROM symbols s \
                 JOIN files f ON f.id = s.file_id \
                 WHERE s.name LIKE ?1 ESCAPE '\\' \
@@ -834,6 +894,29 @@ impl Database {
             }
             Ok(results)
         }
+    }
+
+    /// Search for symbols matching `impl_type::name` pattern.
+    pub fn search_symbols_by_impl(
+        &self,
+        impl_type: &str,
+        method_name: &str,
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.name = ?1 AND s.impl_type = ?2 \
+             ORDER BY f.path, s.line_start",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![method_name, impl_type])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
     }
 
     pub fn get_dependency_by_name(&self, name: &str) -> SqlResult<Option<StoredDep>> {
@@ -1014,7 +1097,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
-                    s.doc_comment, s.body, s.details, s.attributes \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
              WHERE f.path = ?1 AND s.line_start <= ?3 AND s.line_end >= ?2",
@@ -1033,17 +1116,34 @@ impl Database {
     }
 
     pub fn get_symbols_by_path_prefix(&self, path_prefix: &str) -> SqlResult<Vec<StoredSymbol>> {
+        self.get_symbols_by_path_prefix_filtered(path_prefix, false)
+    }
+
+    pub fn get_symbols_by_path_prefix_filtered(
+        &self,
+        path_prefix: &str,
+        include_private: bool,
+    ) -> SqlResult<Vec<StoredSymbol>> {
         let pattern = format!("{path_prefix}%");
-        let mut stmt = self.conn.prepare(
+        let sql = if include_private {
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
-                    s.doc_comment, s.body, s.details, s.attributes \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE f.path LIKE ?1 \
+             ORDER BY f.path, s.line_start"
+        } else {
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
              WHERE f.path LIKE ?1 \
                AND s.visibility IN ('public', 'pub(crate)') \
-             ORDER BY f.path, s.line_start",
-        )?;
+             ORDER BY f.path, s.line_start"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern])?;
         while let Some(row) = rows.next()? {
@@ -1057,7 +1157,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
-                    s.doc_comment, s.body, s.details, s.attributes \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
              WHERE s.attributes LIKE ?1 \
@@ -1065,6 +1165,30 @@ impl Database {
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
+    pub fn search_symbols_by_signature(
+        &self,
+        pattern: &str,
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        let like_pattern = format!("%{}%", escape_like(pattern));
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, \
+                    s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.signature LIKE ?1 ESCAPE '\\' \
+             ORDER BY s.name \
+             LIMIT 50",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![like_pattern])?;
         while let Some(row) = rows.next()? {
             results.push(row_to_stored_symbol(row)?);
         }
@@ -1094,6 +1218,54 @@ impl Database {
                 file_path: row.get(2)?,
                 ref_kind: row.get(3)?,
             });
+        }
+        Ok(results)
+    }
+
+    /// Find symbols that directly reference the given symbol (reverse of `get_callees`).
+    pub fn get_callers(
+        &self,
+        symbol_name: &str,
+        target_file: &str,
+    ) -> SqlResult<Vec<CalleeInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             JOIN files tf ON tf.id = ts.file_id \
+             WHERE ts.name = ?1 AND tf.path = ?2",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![symbol_name, target_file])?;
+        while let Some(row) = rows.next()? {
+            results.push(CalleeInfo {
+                name: row.get(0)?,
+                kind: row.get(1)?,
+                file_path: row.get(2)?,
+                ref_kind: row.get(3)?,
+            });
+        }
+        Ok(results)
+    }
+
+    pub fn get_callees_by_name(
+        &self,
+        symbol_name: &str,
+    ) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT ts.name, f.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             WHERE ss.name = ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![symbol_name])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
         }
         Ok(results)
     }
@@ -1221,6 +1393,41 @@ impl Database {
         }
         Ok(count)
     }
+
+    pub fn get_unreferenced_symbols(
+        &self,
+        path_prefix: Option<&str>,
+        include_private: bool,
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        let prefix = path_prefix.unwrap_or("");
+        let like_pattern = format!("{prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, \
+                    s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             LEFT JOIN symbol_refs sr ON sr.target_symbol_id = s.id \
+             WHERE sr.id IS NULL \
+               AND f.path LIKE ?1 \
+               AND s.kind NOT IN ('use', 'mod', 'impl') \
+             ORDER BY f.path, s.line_start",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![like_pattern])?;
+        while let Some(row) = rows.next()? {
+            let sym = row_to_stored_symbol(row)?;
+            if !include_private
+                && sym.visibility != Visibility::Public
+                && sym.visibility != Visibility::PublicCrate
+            {
+                continue;
+            }
+            results.push(sym);
+        }
+        Ok(results)
+    }
 }
 
 pub struct SymbolIdMap {
@@ -1279,6 +1486,13 @@ pub struct ImpactEntry {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct TestEntry {
+    pub name: String,
+    pub file_path: String,
+    pub line_start: i64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct StoredCrate {
     pub id: CrateId,
     pub name: String,
@@ -1316,6 +1530,7 @@ pub struct StoredSymbol {
     pub body: Option<String>,
     pub details: Option<String>,
     pub attributes: Option<String>,
+    pub impl_type: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

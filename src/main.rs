@@ -122,6 +122,9 @@ before grep, before guessing at code structure.
 - **Debugging or tracing issues**: `{cmd_prefix} context` to get the full definition and references
 - **Using an external crate**: `{cmd_prefix} docs` to check how it's used in this project
 - **Before reading files**: query first — illu tells you exactly where things are
+- **Finding call paths**: `{cmd_prefix} callpath` to trace how one symbol reaches another
+- **Dead code detection**: `{cmd_prefix} unused` to find unreferenced symbols
+- **Index health**: `{cmd_prefix} freshness` to check if the index is current
 
 ### Commands
 
@@ -130,9 +133,18 @@ before grep, before guessing at code structure.
 | `{cmd_prefix} query <term>` | `{tool_prefix}query` | `query: \"<term>\"` |
 | `{cmd_prefix} query <term> --scope <s>` | `{tool_prefix}query` | `query: \"<term>\", scope: \"<s>\"` |
 | `{cmd_prefix} context <symbol>` | `{tool_prefix}context` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} context Type::method` | `{tool_prefix}context` | `symbol_name: \"Type::method\"` |
+| `{cmd_prefix} context <symbol> --file <f>` | `{tool_prefix}context` | `symbol_name: \"<symbol>\", file: \"<f>\"` |
 | `{cmd_prefix} impact <symbol>` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} impact <symbol> --depth 1` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\", depth: 1` |
 | `{cmd_prefix} docs <dep>` | `{tool_prefix}docs` | `dependency: \"<dep>\"` |
 | `{cmd_prefix} docs <dep> --topic <t>` | `{tool_prefix}docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
+| `{cmd_prefix} callpath <from> <to>` | `{tool_prefix}callpath` | `from: \"<from>\", to: \"<to>\"` |
+| `{cmd_prefix} batch_context <sym1> <sym2>` | `{tool_prefix}batch_context` | `symbols: [\"<sym1>\", \"<sym2>\"]` |
+| `{cmd_prefix} unused` | `{tool_prefix}unused` | |
+| `{cmd_prefix} unused --path src/server/` | `{tool_prefix}unused` | `path: \"src/server/\"` |
+| `{cmd_prefix} freshness` | `{tool_prefix}freshness` | |
+| `{cmd_prefix} crate_graph` | `{tool_prefix}crate_graph` | |
 
 ### Workflow rules
 
@@ -356,17 +368,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             kind,
         }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_query(&db, &search, Some(&scope), kind.as_deref())?;
+            let result = handle_query(&db, &search, Some(&scope), kind.as_deref(), None, None)?;
             print_result(&result);
         }
         Some(Command::Context { symbol }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_context(&db, &symbol, false)?;
+            let result = handle_context(&db, &symbol, false, None)?;
             print_result(&result);
         }
         Some(Command::Impact { symbol }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_impact(&db, &symbol)?;
+            let result = handle_impact(&db, &symbol, None)?;
             print_result(&result);
         }
         Some(Command::Docs { dep, topic }) => {

@@ -15,7 +15,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-dea584?style=flat-square&logo=rust" alt="Rust 2024"/>
-  <img src="https://img.shields.io/badge/tests-284_passing-brightgreen?style=flat-square" alt="284 tests"/>
+  <img src="https://img.shields.io/badge/tests-355_passing-brightgreen?style=flat-square" alt="355 tests"/>
 </p>
 
 ---
@@ -61,32 +61,40 @@ Add to `.mcp.json` (Claude Code) or `.gemini/settings.json` (Gemini CLI):
 
 ## What Your AI Gets
 
-illu gives your AI agent 7 tools through the [Model Context Protocol](https://modelcontextprotocol.io/):
+illu gives your AI agent 12 tools through the [Model Context Protocol](https://modelcontextprotocol.io/):
 
 ### Find symbols instantly — `query`
 
 Instead of grepping, the AI searches an indexed database with full-text search and exact-match priority.
 
 ```
-query: "Config"                                    → symbols + docs matching Config
-query: "Config", scope: "symbols", kind: "struct"  → just the struct
+query: "Config"                                         → symbols + docs matching Config
+query: "Config", scope: "symbols", kind: "struct"       → just the struct
+query: "Color", scope: "symbols", kind: "enum_variant"  → enum variants of Color
+query: "", attribute: "test"                             → all #[test] functions
+query: "", signature: "&Database"                        → functions taking &Database
 ```
 
 ### Understand a symbol completely — `context`
 
-One call returns everything: signature, doc comments, source body, struct fields, trait impls, callees, and related dependency docs. No need to read the whole file.
+One call returns everything: signature, doc comments, source body, struct fields, trait impls, callers, callees, and related dependency docs. No need to read the whole file.
+
+Supports `Type::method` syntax for disambiguation and file-scoped lookups:
 
 ```
-symbol_name: "Database"                      → full definition + who calls it
+symbol_name: "Database"                      → full definition + who it calls + who calls it
+symbol_name: "Database::new"                 → only the new() method on Database
+symbol_name: "Config", file: "src/db.rs"     → Config in a specific file
 symbol_name: "parse_config", full_body: true → untruncated source for large functions
 ```
 
 ### Know what breaks before changing it — `impact`
 
-Before modifying a symbol, the AI sees every function, struct, and crate that depends on it — up to 5 levels deep, with the dependency chain explained.
+Before modifying a symbol, the AI sees every function, struct, and crate that depends on it — with the dependency chain explained. Automatically discovers related tests and suggests which to run.
 
 ```
-symbol_name: "Config"
+symbol_name: "Config"              → full transitive impact (default depth 5)
+symbol_name: "Config", depth: 1    → direct callers only (flat list)
 ```
 
 ```markdown
@@ -102,6 +110,12 @@ symbol_name: "Config"
 
 ### Depth 2
 - **run_server** (src/main.rs) — via parse_config
+
+### Related Tests
+- **test_parse_config** (tests/config.rs:42)
+- **test_config_defaults** (tests/config.rs:58)
+
+Suggested: `cargo test test_parse_config test_config_defaults`
 ```
 
 ### Get accurate dependency docs — `docs`
@@ -147,18 +161,67 @@ git_ref: "main"           → impact of current branch vs main
 #### search_symbols
 - handle_query (src/server/tools/query.rs) — depth 1
 - handle_context (src/server/tools/context.rs) — depth 1
+
+### Related Tests
+- **test_search_symbols** (src/db.rs:1450)
+
+Suggested: `cargo test test_search_symbols`
+```
+
+### Get multiple symbols at once — `batch_context`
+
+When starting a task that touches several symbols, fetch all their context in one call instead of making separate requests.
+
+```
+symbols: ["Database", "handle_query", "parse_rust_source"]  → context for all three
+symbols: ["Config", "Server"], full_body: true               → with full source bodies
+```
+
+### Trace call chains — `callpath`
+
+Find the shortest path through the call graph between two symbols. Useful for understanding how a change in one function reaches another.
+
+```
+from: "main", to: "parse_rust_source"   → main → open_or_index → ... → parse_rust_source
+from: "handle_query", to: "escape_like" → shows the call chain with file locations
+```
+
+### Find dead code — `unused`
+
+Detect potentially unused symbols — public functions, structs, or traits with no incoming references. Excludes entry points (`main`, `#[test]`).
+
+```
+(no params)                                → all unreferenced public symbols
+path: "src/server/", kind: "function"      → unused functions in server module
+include_private: true                      → include private symbols too
+```
+
+### Check index health — `freshness`
+
+See whether the index is current or stale. Shows the indexed commit vs HEAD and lists any files that changed since last indexing.
+
+```
+(no params)   → indexed commit, current HEAD, changed file list
+```
+
+### Visualize workspace structure — `crate_graph`
+
+For multi-crate workspaces, shows the dependency graph between crates — which crate depends on which, plus root and leaf crates.
+
+```
+(no params)   → crate list + dependency arrows + root/leaf identification
 ```
 
 ### See project structure — `overview` and `tree`
 
 The AI can explore the codebase layout without reading files:
 
-- **`overview`** — public symbols under a path, grouped by file, with signatures and doc snippets
+- **`overview`** — public symbols under a path, grouped by file, with signatures and doc snippets. Set `include_private: true` to see internal helpers and test functions.
 - **`tree`** — file/module hierarchy with symbol counts per file
 
 ```
-path: "src/server/"   → public API in the server module
-path: "src/"          → full project layout
+path: "src/server/"                        → public API in the server module
+path: "src/db.rs", include_private: true   → everything in db.rs, including private fns
 ```
 
 ## Works With
@@ -171,7 +234,7 @@ path: "src/"          → full project layout
 
 Auto-configured via `.mcp.json` and `CLAUDE.md`
 
-Tools: `mcp__illu__query`, `mcp__illu__context`, etc.
+12 tools: `mcp__illu__query`, `mcp__illu__context`, `mcp__illu__callpath`, etc.
 
 </td>
 <td width="50%" align="center">
@@ -180,7 +243,7 @@ Tools: `mcp__illu__query`, `mcp__illu__context`, etc.
 
 Auto-configured via `.gemini/settings.json` and `GEMINI.md`
 
-Tools: `@illu query`, `@illu context`, etc.
+12 tools: `@illu query`, `@illu context`, `@illu callpath`, etc.
 
 </td>
 </tr>
@@ -198,9 +261,22 @@ Any MCP client with stdio transport support works — illu speaks standard MCP.
 | **Full-text search** | FTS5 prefix matching + trigram-indexed substring search |
 | **Qualified refs** | Import-map-aware resolution — `use crate::foo::Bar` resolves to the right file |
 | **Method-level refs** | `self.method()` resolves to the correct impl type, not a global name match |
+| **Qualified symbol lookup** | `Database::new` syntax disambiguates methods across types; optional `file` filter |
+| **Callers + callees** | `context` shows both what a symbol calls and who calls it |
 | **Trait impl tracking** | Maps which types implement which traits |
-| **Impact analysis** | Recursive CTE walks the reference graph up to depth 5 |
-| **Diff-based impact** | `diff_impact` maps git changes to symbols and shows batch downstream effects |
+| **Enum variant indexing** | Each variant is a searchable symbol — `Color::Red` via qualified lookup |
+| **Impact analysis** | Recursive CTE walks the reference graph with configurable depth (default 5) |
+| **Symbol-to-test mapping** | `impact` and `diff_impact` discover `#[test]` functions that exercise changed symbols |
+| **Diff-based impact** | `diff_impact` maps git changes to symbols, shows downstream effects + test suggestions |
+| **Call path tracing** | `callpath` finds the shortest call chain between any two symbols via BFS |
+| **Batch context** | `batch_context` fetches context for multiple symbols in one call |
+| **Dead code detection** | `unused` finds public symbols with zero incoming references |
+| **Index freshness** | `freshness` compares indexed commit to HEAD, lists changed files |
+| **Crate dependency graph** | `crate_graph` shows workspace inter-crate dependencies with root/leaf identification |
+| **Attribute search** | `query` with `attribute` parameter finds symbols by derive/attribute (e.g. `#[test]`) |
+| **Signature search** | `query` with `signature` parameter finds symbols by type signature pattern |
+| **Constructor tracking** | `new`, `from`, `default`, `clone` calls are tracked as refs with impl_type disambiguation |
+| **Private symbol access** | `overview` with `include_private: true` shows internal helpers and test functions |
 | **Version-pinned docs** | Two-tier: crate summary + per-module detail from rustdoc JSON |
 | **Full body on demand** | `full_body: true` reads untruncated source from disk |
 
@@ -275,7 +351,8 @@ src/
 │   └── docs.rs          # Doc fetching (cargo doc → docs.rs → GitHub)
 └── server/
     ├── mod.rs           # MCP server (rmcp, tool routing)
-    └── tools/           # query, context, impact, diff_impact, docs, overview, tree
+    └── tools/           # 12 tools: query, context, batch_context, impact, diff_impact,
+                         #   callpath, unused, freshness, docs, overview, tree, crate_graph
 ```
 
 </details>
@@ -284,7 +361,7 @@ src/
 <summary>Development</summary>
 
 ```bash
-cargo test                                                    # 284 tests
+cargo test                                                    # 355 tests
 cargo clippy --all-targets --all-features -- -D warnings      # strict lints
 cargo fmt --all -- --check                                    # formatting
 RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
@@ -292,10 +369,12 @@ RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
 
 | Test Suite | Count | What it guards |
 |------------|-------|----------------|
-| Unit | 172 | Parser, DB, indexer, tool handlers |
-| Data integrity | 51 | Line numbers, refs, cross-crate resolution, stale cleanup |
-| Data quality | 42 | End-to-end tool output format and content |
+| Unit | 182 | Parser, DB, indexer, tool handlers |
+| Data integrity | 68 | Line numbers, refs, cross-crate resolution, stale cleanup |
+| Data quality | 61 | End-to-end tool output format and content |
 | Integration | 19 | Full pipeline: index, query, verify |
+| Self-index | 19 | illu indexes itself — validates real-world accuracy |
+| Error paths | 6 | Edge cases: empty files, missing symbols, Unicode |
 
 </details>
 

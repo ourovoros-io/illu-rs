@@ -91,7 +91,7 @@ fn index_multi_file(files: &[(&str, &str)]) -> (tempfile::TempDir, Database) {
 #[test]
 fn query_on_empty_crate_returns_no_results() {
     let (_dir, db) = empty_crate();
-    let result = query::handle_query(&db, "anything", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "anything", Some("symbols"), None, None, None).unwrap();
     let has_no_symbols = result.contains("No symbols")
         || result.contains("No results")
         || !result.contains("(function)")
@@ -107,7 +107,7 @@ fn query_on_empty_crate_returns_no_results() {
 #[test]
 fn context_on_nonexistent_symbol_returns_not_found() {
     let (_dir, db) = empty_crate();
-    let result = context::handle_context(&db, "Nonexistent", false).unwrap();
+    let result = context::handle_context(&db, "Nonexistent", false, None).unwrap();
     let indicates_missing = result.contains("not found")
         || result.contains("No symbol")
         || result.contains("no symbol");
@@ -120,7 +120,7 @@ fn context_on_nonexistent_symbol_returns_not_found() {
 #[test]
 fn impact_on_nonexistent_symbol_does_not_panic() {
     let (_dir, db) = empty_crate();
-    let result = impact::handle_impact(&db, "Nonexistent").unwrap();
+    let result = impact::handle_impact(&db, "Nonexistent", None).unwrap();
     assert!(
         !result.is_empty(),
         "impact on nonexistent symbol should return non-empty result"
@@ -148,7 +148,7 @@ fn unicode_in_doc_comments_preserved() {
     let (_dir, db) = index_source(
         "/// H\u{00e9}llo w\u{00f6}rld \u{2014} docs with \u{00fc}\u{00f1}\u{00ed}c\u{00f6}d\u{00e9}\npub fn greet() {}\n",
     );
-    let result = context::handle_context(&db, "greet", false).unwrap();
+    let result = context::handle_context(&db, "greet", false, None).unwrap();
     assert!(
         result.contains("H\u{00e9}llo"),
         "unicode 'Héllo' should be preserved: {result}"
