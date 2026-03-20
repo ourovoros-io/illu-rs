@@ -1181,11 +1181,10 @@ pub fn caller(db: &Database) {
     let results = db.do_query();
 }
 ";
-        let known: std::collections::HashSet<String> =
-            ["do_query", "caller", "Database"]
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
+        let known: std::collections::HashSet<String> = ["do_query", "caller", "Database"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         let refs = extract_refs(
             source,
             "src/lib.rs",

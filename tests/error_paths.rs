@@ -91,7 +91,8 @@ fn index_multi_file(files: &[(&str, &str)]) -> (tempfile::TempDir, Database) {
 #[test]
 fn query_on_empty_crate_returns_no_results() {
     let (_dir, db) = empty_crate();
-    let result = query::handle_query(&db, "anything", Some("symbols"), None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "anything", Some("symbols"), None, None, None, None).unwrap();
     let has_no_symbols = result.contains("No symbols")
         || result.contains("No results")
         || !result.contains("(function)")
@@ -107,7 +108,7 @@ fn query_on_empty_crate_returns_no_results() {
 #[test]
 fn context_on_nonexistent_symbol_returns_not_found() {
     let (_dir, db) = empty_crate();
-    let result = context::handle_context(&db, "Nonexistent", false, None).unwrap();
+    let result = context::handle_context(&db, "Nonexistent", false, None, None).unwrap();
     let indicates_missing = result.contains("not found")
         || result.contains("No symbol")
         || result.contains("no symbol");
@@ -133,9 +134,7 @@ fn impact_on_nonexistent_symbol_does_not_panic() {
 
 #[test]
 fn malformed_rust_source_does_not_crash() {
-    let (_dir, _db) = index_source(
-        "pub fn broken( { }}}}} struct @@@\n",
-    );
+    let (_dir, _db) = index_source("pub fn broken( { }}}}} struct @@@\n");
     // Reaching this point means indexing did not panic
 }
 
@@ -148,7 +147,7 @@ fn unicode_in_doc_comments_preserved() {
     let (_dir, db) = index_source(
         "/// H\u{00e9}llo w\u{00f6}rld \u{2014} docs with \u{00fc}\u{00f1}\u{00ed}c\u{00f6}d\u{00e9}\npub fn greet() {}\n",
     );
-    let result = context::handle_context(&db, "greet", false, None).unwrap();
+    let result = context::handle_context(&db, "greet", false, None, None).unwrap();
     assert!(
         result.contains("H\u{00e9}llo"),
         "unicode 'Héllo' should be preserved: {result}"
@@ -176,9 +175,6 @@ fn deeply_nested_module_files_indexed() {
         ("a/b/c/mod.rs", "pub fn deep_fn() {}\n"),
     ]);
     let syms = db.search_symbols("deep_fn").unwrap();
-    assert!(
-        !syms.is_empty(),
-        "deeply nested deep_fn should be indexed"
-    );
+    assert!(!syms.is_empty(), "deeply nested deep_fn should be indexed");
     assert_eq!(syms[0].name, "deep_fn");
 }

@@ -25,8 +25,7 @@ pub fn handle_freshness(
     let _ = writeln!(output, "- **Indexed commit:** `{indexed}`");
     let _ = writeln!(output, "- **Current HEAD:** `{current_head}`");
 
-    let is_current =
-        indexed_hash.as_deref() == Some(current_head.as_str());
+    let is_current = indexed_hash.as_deref() == Some(current_head.as_str());
     let _ = writeln!(
         output,
         "- **Status:** {}",
@@ -44,8 +43,7 @@ pub fn handle_freshness(
                 .current_dir(repo_path)
                 .output()?;
             let changed = String::from_utf8_lossy(&diff_output.stdout);
-            let files: Vec<&str> =
-                changed.lines().filter(|l| !l.is_empty()).collect();
+            let files: Vec<&str> = changed.lines().filter(|l| !l.is_empty()).collect();
             if !files.is_empty() {
                 let _ = writeln!(
                     output,
@@ -62,18 +60,10 @@ pub fn handle_freshness(
             .args(["diff", "--name-only"])
             .current_dir(repo_path)
             .output()?;
-        let unstaged_files =
-            String::from_utf8_lossy(&unstaged.stdout);
-        let ufiles: Vec<&str> = unstaged_files
-            .lines()
-            .filter(|l| !l.is_empty())
-            .collect();
+        let unstaged_files = String::from_utf8_lossy(&unstaged.stdout);
+        let ufiles: Vec<&str> = unstaged_files.lines().filter(|l| !l.is_empty()).collect();
         if !ufiles.is_empty() {
-            let _ = writeln!(
-                output,
-                "\n### Unstaged changes ({} files)\n",
-                ufiles.len()
-            );
+            let _ = writeln!(output, "\n### Unstaged changes ({} files)\n", ufiles.len());
             for f in &ufiles {
                 let _ = writeln!(output, "- {f}");
             }

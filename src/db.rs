@@ -1171,10 +1171,27 @@ impl Database {
         Ok(results)
     }
 
-    pub fn search_symbols_by_signature(
-        &self,
-        pattern: &str,
-    ) -> SqlResult<Vec<StoredSymbol>> {
+    pub fn search_symbols_by_doc_comment(&self, query: &str) -> SqlResult<Vec<StoredSymbol>> {
+        let pattern = format!("%{}%", escape_like(query));
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.doc_comment LIKE ?1 ESCAPE '\\' \
+             ORDER BY s.name \
+             LIMIT 50",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
+    pub fn search_symbols_by_signature(&self, pattern: &str) -> SqlResult<Vec<StoredSymbol>> {
         let like_pattern = format!("%{}%", escape_like(pattern));
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
@@ -1195,11 +1212,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees(
-        &self,
-        symbol_name: &str,
-        source_file: &str,
-    ) -> SqlResult<Vec<CalleeInfo>> {
+    pub fn get_callees(&self, symbol_name: &str, source_file: &str) -> SqlResult<Vec<CalleeInfo>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind \
              FROM symbol_refs sr \
@@ -1223,11 +1236,7 @@ impl Database {
     }
 
     /// Find symbols that directly reference the given symbol (reverse of `get_callees`).
-    pub fn get_callers(
-        &self,
-        symbol_name: &str,
-        target_file: &str,
-    ) -> SqlResult<Vec<CalleeInfo>> {
+    pub fn get_callers(&self, symbol_name: &str, target_file: &str) -> SqlResult<Vec<CalleeInfo>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind \
              FROM symbol_refs sr \
@@ -1250,10 +1259,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees_by_name(
-        &self,
-        symbol_name: &str,
-    ) -> SqlResult<Vec<(String, String)>> {
+    pub fn get_callees_by_name(&self, symbol_name: &str) -> SqlResult<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
@@ -1261,6 +1267,23 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![symbol_name])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
+
+    pub fn get_callers_by_name(&self, symbol_name: &str) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT ss.name, sf.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             WHERE ts.name = ?1",
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name])?;
@@ -1325,13 +1348,9 @@ impl Database {
             let path: String = row.get(2)?;
             let impl_type: Option<String> = row.get(3)?;
 
-            file_qualified
-                .entry((name.clone(), path))
-                .or_insert(id);
+            file_qualified.entry((name.clone(), path)).or_insert(id);
             if let Some(it) = impl_type {
-                impl_qualified
-                    .entry((name.clone(), it))
-                    .or_insert(id);
+                impl_qualified.entry((name.clone(), it)).or_insert(id);
             }
             name_only.entry(name).or_insert(id);
         }
@@ -1432,6 +1451,26 @@ impl Database {
         let mut rows = stmt.query(params![like_pattern])?;
         while let Some(row) = rows.next()? {
             results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_file_dependencies(&self, path_prefix: &str) -> SqlResult<Vec<(String, String)>> {
+        let pattern = format!("{path_prefix}%");
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT sf.path, tf.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             JOIN files tf ON tf.id = ts.file_id \
+             WHERE sf.path LIKE ?1 AND sf.path != tf.path \
+             ORDER BY sf.path, tf.path",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
         }
         Ok(results)
     }
@@ -2193,6 +2232,40 @@ mod tests {
     }
 
     #[test]
+    fn test_search_by_doc_comment() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, doc_comment) \
+                 VALUES (?1, 'parse_config', 'function', 'public', \
+                         1, 10, 'pub fn parse_config()', \
+                         'Parse configuration from TOML files.')",
+                params![file_id],
+            )
+            .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'no_docs', 'function', 'public', \
+                         11, 15, 'pub fn no_docs()')",
+                params![file_id],
+            )
+            .unwrap();
+
+        let results = db.search_symbols_by_doc_comment("TOML").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "parse_config");
+
+        let results = db.search_symbols_by_doc_comment("nonexistent").unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
     fn test_clear_code_index_preserves_docs() {
         let db = Database::open_in_memory().unwrap();
         let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
@@ -2446,5 +2519,117 @@ mod tests {
         // Non-existent impl type
         let missing = db.get_symbol_id_in_impl("method", "Nonexistent").unwrap();
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_get_callers_by_name() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'caller_fn', 'function', 'public', \
+                         1, 10, 'fn caller_fn()')",
+                params![file_id],
+            )
+            .unwrap();
+        let caller_id = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'target_fn', 'function', 'public', \
+                         12, 20, 'fn target_fn()')",
+                params![file_id],
+            )
+            .unwrap();
+        let target_id = SymbolId(db.conn.last_insert_rowid());
+        db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
+
+        let callers = db.get_callers_by_name("target_fn").unwrap();
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0].0, "caller_fn");
+        assert_eq!(callers[0].1, "src/lib.rs");
+
+        // No callers for caller_fn
+        let empty = db.get_callers_by_name("caller_fn").unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_get_file_dependencies() {
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/a.rs", "h1").unwrap();
+        let f2 = db.insert_file("src/b.rs", "h2").unwrap();
+
+        // Symbol in file a
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'foo', 'function', 'public', 1, 5, 'fn foo()')",
+                params![f1],
+            )
+            .unwrap();
+        let src_id = SymbolId(db.conn.last_insert_rowid());
+
+        // Symbol in file b
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'bar', 'function', 'public', 1, 5, 'fn bar()')",
+                params![f2],
+            )
+            .unwrap();
+        let tgt_id = SymbolId(db.conn.last_insert_rowid());
+
+        db.insert_symbol_ref(src_id, tgt_id, "call").unwrap();
+
+        let edges = db.get_file_dependencies("src/").unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0], ("src/a.rs".to_string(), "src/b.rs".to_string()));
+
+        // Wrong prefix returns empty
+        let empty = db.get_file_dependencies("other/").unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_get_file_dependencies_excludes_self() {
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/a.rs", "h1").unwrap();
+
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'foo', 'function', 'public', 1, 5, 'fn foo()')",
+                params![f1],
+            )
+            .unwrap();
+        let s1 = SymbolId(db.conn.last_insert_rowid());
+
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'bar', 'function', 'public', 6, 10, 'fn bar()')",
+                params![f1],
+            )
+            .unwrap();
+        let s2 = SymbolId(db.conn.last_insert_rowid());
+
+        db.insert_symbol_ref(s1, s2, "call").unwrap();
+
+        let edges = db.get_file_dependencies("src/").unwrap();
+        assert!(edges.is_empty());
     }
 }

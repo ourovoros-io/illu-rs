@@ -1,12 +1,17 @@
 use crate::db::Database;
 use std::fmt::Write;
 
-pub fn handle_overview(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let symbols = db.get_symbols_by_path_prefix(path)?;
+pub fn handle_overview(
+    db: &Database,
+    path: &str,
+    include_private: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let symbols = db.get_symbols_by_path_prefix_filtered(path, include_private)?;
 
     if symbols.is_empty() {
+        let scope = if include_private { "" } else { "public " };
         return Ok(format!(
-            "No public symbols found under '{path}'. \
+            "No {scope}symbols found under '{path}'. \
              Try a broader prefix like 'src/'."
         ));
     }
@@ -17,6 +22,10 @@ pub fn handle_overview(db: &Database, path: &str) -> Result<String, Box<dyn std:
     let mut kind_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
 
     for sym in &symbols {
+        // Variants are shown in their parent enum's details
+        if sym.kind == crate::indexer::parser::SymbolKind::EnumVariant {
+            continue;
+        }
         if sym.file_path != current_file {
             current_file = &sym.file_path;
             file_count += 1;
@@ -105,7 +114,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_overview(&db, "src/server/").unwrap();
+        let result = handle_overview(&db, "src/server/", false).unwrap();
         assert!(result.contains("### src/server/mod.rs"));
         assert!(result.contains("### src/server/tools.rs"));
         assert!(result.contains("**serve**"));
@@ -152,7 +161,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_overview(&db, "src/").unwrap();
+        let result = handle_overview(&db, "src/", false).unwrap();
         assert!(result.contains("**public_fn**"));
         assert!(!result.contains("private_fn"));
     }
@@ -160,7 +169,55 @@ mod tests {
     #[test]
     fn test_overview_no_results() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_overview(&db, "nonexistent/").unwrap();
+        let result = handle_overview(&db, "nonexistent/", false).unwrap();
         assert!(result.contains("No public symbols found under 'nonexistent/'"));
+    }
+
+    #[test]
+    fn test_overview_include_private() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "h1").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "public_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn public_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "private_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 12,
+                    signature: "fn private_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let result = handle_overview(&db, "src/", true).unwrap();
+        assert!(result.contains("**public_fn**"));
+        assert!(
+            result.contains("**private_fn**"),
+            "should include private symbols"
+        );
     }
 }

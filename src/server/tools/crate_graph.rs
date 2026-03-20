@@ -2,15 +2,10 @@ use crate::db::Database;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub fn handle_crate_graph(
-    db: &Database,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_crate_graph(db: &Database) -> Result<String, Box<dyn std::error::Error>> {
     let crate_count = db.get_crate_count()?;
     if crate_count <= 1 {
-        return Ok(
-            "Single-crate project — no crate dependency graph."
-                .to_string(),
-        );
+        return Ok("Single-crate project — no crate dependency graph.".to_string());
     }
 
     let crates = db.get_all_crates()?;
@@ -26,9 +21,7 @@ pub fn handle_crate_graph(
 
     let mut adj: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (source, target) in &deps {
-        adj.entry(source.clone())
-            .or_default()
-            .push(target.clone());
+        adj.entry(source.clone()).or_default().push(target.clone());
     }
 
     if adj.is_empty() {
@@ -44,10 +37,8 @@ pub fn handle_crate_graph(
 
     let all_names: std::collections::BTreeSet<&str> =
         crates.iter().map(|c| c.name.as_str()).collect();
-    let sources: std::collections::BTreeSet<&str> =
-        deps.iter().map(|(s, _)| s.as_str()).collect();
-    let targets: std::collections::BTreeSet<&str> =
-        deps.iter().map(|(_, t)| t.as_str()).collect();
+    let sources: std::collections::BTreeSet<&str> = deps.iter().map(|(s, _)| s.as_str()).collect();
+    let targets: std::collections::BTreeSet<&str> = deps.iter().map(|(_, t)| t.as_str()).collect();
 
     let leaves: Vec<&&str> = all_names
         .iter()

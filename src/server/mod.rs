@@ -80,6 +80,8 @@ struct QueryParams {
     attribute: Option<String>,
     /// Filter by signature pattern (e.g. "&Database", "-> Result")
     signature: Option<String>,
+    /// Filter results to files under this path prefix (e.g. "src/db.rs", "src/server/")
+    path: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -89,6 +91,9 @@ struct ContextParams {
     full_body: Option<bool>,
     /// Filter results to a specific file path (e.g. "src/db.rs")
     file: Option<String>,
+    /// Select specific sections to include: `source`, `callers`, `callees`,
+    /// `tested_by`, `traits`, `docs`. Omit for all sections.
+    sections: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -123,6 +128,8 @@ struct TreeParams {
 struct DiffImpactParams {
     /// Git ref range (e.g. "HEAD~3..HEAD", "main"). Omit for unstaged changes.
     git_ref: Option<String>,
+    /// Only list changed symbols, skip downstream impact analysis (default: false)
+    changes_only: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -133,6 +140,10 @@ struct CallpathParams {
     to: String,
     /// Max search depth (default: 10)
     max_depth: Option<i64>,
+    /// Find all paths instead of just the shortest (default: false)
+    all_paths: Option<bool>,
+    /// Max number of paths when `all_paths=true` (default: 5)
+    max_paths: Option<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -153,6 +164,36 @@ struct UnusedParams {
     include_private: Option<bool>,
     /// Find symbols with no test coverage instead of unused symbols (default: false)
     untested: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ImplementsParams {
+    /// Trait name to find implementors of
+    trait_name: Option<String>,
+    /// Type name to find trait implementations for
+    type_name: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct TypeUsageParams {
+    /// Type name to find usages of
+    type_name: String,
+    /// Filter to files under this path prefix
+    path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct NeighborhoodParams {
+    /// Symbol to explore around
+    symbol_name: String,
+    /// Max hops in each direction (default: 2)
+    depth: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct FileGraphParams {
+    /// Path prefix to scope the graph (e.g. "src/server/")
+    path: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -195,6 +236,7 @@ impl IlluServer {
             params.kind.as_deref(),
             params.attribute.as_deref(),
             params.signature.as_deref(),
+            params.path.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -213,11 +255,16 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let full_body = params.full_body.unwrap_or(false);
+        let sections: Option<Vec<&str>> = params
+            .sections
+            .as_ref()
+            .map(|v| v.iter().map(String::as_str).collect());
         let result = tools::context::handle_context(
             &db,
             &params.symbol_name,
             full_body,
             params.file.as_deref(),
+            sections.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -274,7 +321,12 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("overview ▸ {}", params.path));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::overview::handle_overview(&db, &params.path, params.include_private.unwrap_or(false)).map_err(to_mcp_err)?;
+        let result = tools::overview::handle_overview(
+            &db,
+            &params.path,
+            params.include_private.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -307,28 +359,36 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
-        let result =
-            tools::diff_impact::handle_diff_impact(&db, repo_path, params.git_ref.as_deref())
-                .map_err(to_mcp_err)?;
+        let result = tools::diff_impact::handle_diff_impact(
+            &db,
+            repo_path,
+            params.git_ref.as_deref(),
+            params.changes_only.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
     #[tool(
         name = "callpath",
-        description = "Find the shortest call path between two symbols. Shows how function A reaches function B through the call graph."
+        description = "Find call paths between two symbols. By default finds the shortest path. Set all_paths=true to find up to max_paths (default 5) distinct paths via DFS."
     )]
     async fn callpath(
         &self,
         Parameters(params): Parameters<CallpathParams>,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!(from = %params.from, to = %params.to, "Tool call: callpath");
-        let _guard = crate::status::StatusGuard::new(
-            &format!("callpath ▸ {} → {}", params.from, params.to),
-        );
+        tracing::info!(from = %params.from, to = %params.to, all_paths = ?params.all_paths, "Tool call: callpath");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("callpath ▸ {} → {}", params.from, params.to));
         self.refresh()?;
         let db = self.lock_db()?;
         let result = tools::callpath::handle_callpath(
-            &db, &params.from, &params.to, params.max_depth,
+            &db,
+            &params.from,
+            &params.to,
+            params.max_depth,
+            params.all_paths.unwrap_or(false),
+            params.max_paths,
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -346,8 +406,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new("freshness");
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
-        let result = tools::freshness::handle_freshness(&db, repo_path)
-            .map_err(to_mcp_err)?;
+        let result = tools::freshness::handle_freshness(&db, repo_path).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -364,10 +423,8 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let full_body = params.full_body.unwrap_or(false);
-        let result = tools::batch_context::handle_batch_context(
-            &db, &params.symbols, full_body,
-        )
-        .map_err(to_mcp_err)?;
+        let result = tools::batch_context::handle_batch_context(&db, &params.symbols, full_body)
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -395,6 +452,81 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "implements",
+        description = "Query trait/type relationships. Use trait_name to find all types implementing a trait, type_name to find all traits a type implements, or both to check a specific implementation."
+    )]
+    async fn implements(
+        &self,
+        Parameters(params): Parameters<ImplementsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(trait_name = ?params.trait_name, type_name = ?params.type_name, "Tool call: implements");
+        let _guard = crate::status::StatusGuard::new("implements");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::implements::handle_implements(
+            &db,
+            params.trait_name.as_deref(),
+            params.type_name.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "neighborhood",
+        description = "Explore the local call graph around a symbol. Shows callers (upstream) and callees (downstream) within N hops. Use for understanding a symbol's role in the architecture."
+    )]
+    async fn neighborhood(
+        &self,
+        Parameters(params): Parameters<NeighborhoodParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, depth = ?params.depth, "Tool call: neighborhood");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("neighborhood ▸ {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::neighborhood::handle_neighborhood(&db, &params.symbol_name, params.depth)
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "type_usage",
+        description = "Find where a type is used: as function parameters, return types, and struct fields. Best-effort text search on signatures and struct details."
+    )]
+    async fn type_usage(
+        &self,
+        Parameters(params): Parameters<TypeUsageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(type_name = %params.type_name, "Tool call: type_usage");
+        let _guard = crate::status::StatusGuard::new(&format!("type_usage ▸ {}", params.type_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::type_usage::handle_type_usage(&db, &params.type_name, params.path.as_deref())
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "file_graph",
+        description = "Show the file-level dependency graph under a path prefix. Derived from symbol references — shows which files depend on which other files."
+    )]
+    async fn file_graph(
+        &self,
+        Parameters(params): Parameters<FileGraphParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = %params.path, "Tool call: file_graph");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("file_graph \u{25b8} {}", params.path));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::file_graph::handle_file_graph(&db, &params.path).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -406,8 +538,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new("crate_graph");
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::crate_graph::handle_crate_graph(&db)
-            .map_err(to_mcp_err)?;
+        let result = tools::crate_graph::handle_crate_graph(&db).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 }
@@ -430,6 +561,10 @@ impl ServerHandler for IlluServer {
                  'docs' for dependency docs, \
                  'overview' for structural maps, \
                  'tree' for file/module tree, \
+                 'implements' for trait/type relationships, \
+                 'neighborhood' for bidirectional call graph exploration, \
+                 'type_usage' for finding type usage in signatures and fields, \
+                 'file_graph' for file-level dependency visualization, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),

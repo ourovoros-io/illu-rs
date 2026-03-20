@@ -1,0 +1,254 @@
+use crate::db::Database;
+use crate::indexer::parser::SymbolKind;
+use std::fmt::Write;
+
+pub fn handle_type_usage(
+    db: &Database,
+    type_name: &str,
+    path: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut sig_matches = db.search_symbols_by_signature(type_name)?;
+
+    // Remove the type's own definition
+    sig_matches.retain(|s| s.name != type_name);
+
+    // Apply optional path filter
+    if let Some(p) = path {
+        sig_matches.retain(|s| s.file_path.starts_with(p));
+    }
+
+    // Split into "Returns" (type appears after ->) and "Accepts" (before -> or no ->)
+    let mut returns = Vec::new();
+    let mut accepts = Vec::new();
+    for sym in &sig_matches {
+        if let Some(arrow_pos) = sym.signature.find("->") {
+            let after_arrow = &sym.signature[arrow_pos..];
+            if after_arrow.contains(type_name) {
+                returns.push(sym);
+            } else {
+                accepts.push(sym);
+            }
+        } else {
+            accepts.push(sym);
+        }
+    }
+
+    // Find structs whose field list (details) mentions the type
+    let prefix = path.unwrap_or("");
+    let all_symbols = db.get_symbols_by_path_prefix_filtered(prefix, true)?;
+    let field_matches: Vec<_> = all_symbols
+        .into_iter()
+        .filter(|s| s.kind == SymbolKind::Struct && s.name != type_name)
+        .filter(|s| s.details.as_deref().is_some_and(|d| d.contains(type_name)))
+        .collect();
+
+    let mut output = String::new();
+    let _ = writeln!(output, "## Type Usage: `{type_name}`\n");
+
+    if returns.is_empty() && accepts.is_empty() && field_matches.is_empty() {
+        let _ = writeln!(
+            output,
+            "No usage of `{type_name}` found in signatures or struct fields."
+        );
+        return Ok(output);
+    }
+
+    if !returns.is_empty() {
+        let _ = writeln!(output, "### Returns `{type_name}`\n");
+        for sym in &returns {
+            let qualified = super::qualified_name(sym);
+            let _ = writeln!(
+                output,
+                "- **{qualified}** ({}:{}) — `{}`",
+                sym.file_path, sym.line_start, sym.signature
+            );
+        }
+        let _ = writeln!(output);
+    }
+
+    if !accepts.is_empty() {
+        let _ = writeln!(output, "### Accepts `{type_name}`\n");
+        for sym in &accepts {
+            let qualified = super::qualified_name(sym);
+            let _ = writeln!(
+                output,
+                "- **{qualified}** ({}:{}) — `{}`",
+                sym.file_path, sym.line_start, sym.signature
+            );
+        }
+        let _ = writeln!(output);
+    }
+
+    if !field_matches.is_empty() {
+        let _ = writeln!(output, "### Contains `{type_name}` as field\n");
+        for sym in &field_matches {
+            let qualified = super::qualified_name(sym);
+            let _ = writeln!(
+                output,
+                "- **{qualified}** ({}:{})",
+                sym.file_path, sym.line_start
+            );
+        }
+        let _ = writeln!(output);
+    }
+
+    Ok(output)
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests")]
+mod tests {
+    use super::*;
+    use crate::indexer::parser::{Symbol, Visibility};
+    use crate::indexer::store::store_symbols;
+
+    fn setup_db() -> Database {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        let symbols = vec![
+            // The type itself
+            Symbol {
+                name: "Config".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub struct Config".into(),
+                doc_comment: None,
+                body: None,
+                details: Some("path: String, debug: bool".into()),
+                attributes: None,
+                impl_type: None,
+            },
+            // Returns Config
+            Symbol {
+                name: "load_config".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 7,
+                line_end: 12,
+                signature: "pub fn load_config() -> Config".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            // Accepts Config
+            Symbol {
+                name: "use_config".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 14,
+                line_end: 18,
+                signature: "pub fn use_config(cfg: &Config)".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            // Struct containing Config as field
+            Symbol {
+                name: "AppState".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 20,
+                line_end: 24,
+                signature: "pub struct AppState".into(),
+                doc_comment: None,
+                body: None,
+                details: Some("config: Config, name: String".into()),
+                attributes: None,
+                impl_type: None,
+            },
+            // Unrelated function
+            Symbol {
+                name: "unrelated".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 26,
+                line_end: 30,
+                signature: "pub fn unrelated() -> bool".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+        ];
+        store_symbols(&db, file_id, &symbols).unwrap();
+        db
+    }
+
+    #[test]
+    fn test_type_usage_in_signatures() {
+        let db = setup_db();
+        let result = handle_type_usage(&db, "Config", None).unwrap();
+
+        assert!(result.contains("## Type Usage: `Config`"));
+        assert!(result.contains("### Returns `Config`"));
+        assert!(result.contains("load_config"));
+        assert!(result.contains("### Accepts `Config`"));
+        assert!(result.contains("use_config"));
+        assert!(result.contains("### Contains `Config` as field"));
+        assert!(result.contains("AppState"));
+        assert!(!result.contains("unrelated"));
+    }
+
+    #[test]
+    fn test_type_usage_no_results() {
+        let db = setup_db();
+        let result = handle_type_usage(&db, "Nonexistent", None).unwrap();
+
+        assert!(result.contains("No usage of `Nonexistent` found"));
+    }
+
+    #[test]
+    fn test_type_usage_path_filter() {
+        let db = Database::open_in_memory().unwrap();
+        let file1 = db.insert_file("src/lib.rs", "hash1").unwrap();
+        let file2 = db.insert_file("src/server/mod.rs", "hash2").unwrap();
+
+        let symbols1 = vec![Symbol {
+            name: "use_config".into(),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            file_path: "src/lib.rs".into(),
+            line_start: 1,
+            line_end: 5,
+            signature: "pub fn use_config(cfg: &Config)".into(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: None,
+            impl_type: None,
+        }];
+        let symbols2 = vec![Symbol {
+            name: "serve_config".into(),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            file_path: "src/server/mod.rs".into(),
+            line_start: 1,
+            line_end: 5,
+            signature: "pub fn serve_config(cfg: Config)".into(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: None,
+            impl_type: None,
+        }];
+        store_symbols(&db, file1, &symbols1).unwrap();
+        store_symbols(&db, file2, &symbols2).unwrap();
+
+        let result = handle_type_usage(&db, "Config", Some("src/server/")).unwrap();
+        assert!(result.contains("serve_config"));
+        assert!(!result.contains("use_config"));
+    }
+}

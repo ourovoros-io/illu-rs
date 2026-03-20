@@ -8,6 +8,7 @@ pub fn handle_context(
     symbol_name: &str,
     full_body: bool,
     file: Option<&str>,
+    sections: Option<&[&str]>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = resolve_symbols(db, symbol_name, file)?;
     if symbols.is_empty() {
@@ -17,22 +18,35 @@ pub fn handle_context(
         ));
     }
 
+    let show =
+        |name: &str| -> bool { sections.is_none() || sections.is_some_and(|s| s.contains(&name)) };
+
     let repo_root = db.repo_root();
     let mut output = String::new();
 
     for sym in &symbols {
         render_symbol_header(&mut output, sym);
-        render_symbol_details(&mut output, sym, full_body, repo_root);
-        render_trait_info(db, &mut output, sym)?;
-        render_callers(db, &mut output, sym)?;
-        render_callees(db, &mut output, sym)?;
-        render_tested_by(db, &mut output, sym)?;
+        if show("source") {
+            render_symbol_details(&mut output, sym, full_body, repo_root);
+        }
+        if show("traits") {
+            render_trait_info(db, &mut output, sym)?;
+        }
+        if show("callers") {
+            render_callers(db, &mut output, sym)?;
+        }
+        if show("callees") {
+            render_callees(db, &mut output, sym)?;
+        }
+        if show("tested_by") {
+            render_tested_by(db, &mut output, sym)?;
+        }
     }
 
-    let base_name = symbol_name
-        .split_once("::")
-        .map_or(symbol_name, |(_, m)| m);
-    render_related_docs(db, &mut output, base_name)?;
+    if show("docs") {
+        let base_name = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);
+        render_related_docs(db, &mut output, base_name)?;
+    }
 
     Ok(output)
 }
@@ -247,7 +261,11 @@ fn render_tested_by(
     let _ = writeln!(output, "### Tested By\n");
     if tests.len() <= MAX_INLINE {
         for t in &tests {
-            let _ = writeln!(output, "- **{}** ({}:{})", t.name, t.file_path, t.line_start);
+            let _ = writeln!(
+                output,
+                "- **{}** ({}:{})",
+                t.name, t.file_path, t.line_start
+            );
         }
     } else {
         let mut file_counts: std::collections::BTreeMap<&str, usize> =
@@ -321,7 +339,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "parse_config", false, None).unwrap();
+        let result = handle_context(&db, "parse_config", false, None, None).unwrap();
         assert!(result.contains("parse_config"));
         assert!(result.contains("src/lib.rs"));
         assert!(result.contains("public"));
@@ -330,7 +348,7 @@ mod tests {
     #[test]
     fn test_context_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_context(&db, "nonexistent", false, None).unwrap();
+        let result = handle_context(&db, "nonexistent", false, None, None).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
@@ -362,7 +380,7 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "serialize and deserialize data")
             .unwrap();
 
-        let result = handle_context(&db, "serialize", false, None).unwrap();
+        let result = handle_context(&db, "serialize", false, None, None).unwrap();
         assert!(result.contains("serialize"));
         assert!(result.contains("Related Documentation"));
     }
@@ -391,7 +409,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "Config", false, None).unwrap();
+        let result = handle_context(&db, "Config", false, None, None).unwrap();
         assert!(result.contains("> Application configuration."));
         assert!(result.contains("> Holds all settings."));
         assert!(result.contains("### Fields/Variants"));
@@ -450,7 +468,7 @@ mod tests {
             .unwrap();
         db.insert_symbol_ref(caller_id, callee_id, "call").unwrap();
 
-        let result = handle_context(&db, "caller_fn", false, None).unwrap();
+        let result = handle_context(&db, "caller_fn", false, None, None).unwrap();
         assert!(result.contains("### Callees"));
         assert!(result.contains("**Calls:**"));
         assert!(result.contains("callee_fn"));
@@ -485,7 +503,7 @@ mod tests {
         db.insert_trait_impl("MyStruct", "Debug", file_id, 22, 30)
             .unwrap();
 
-        let result = handle_context(&db, "MyStruct", false, None).unwrap();
+        let result = handle_context(&db, "MyStruct", false, None, None).unwrap();
         assert!(result.contains("### Trait Implementations"));
         assert!(result.contains("**Display**"));
         assert!(result.contains("**Debug**"));
@@ -535,14 +553,14 @@ mod tests {
             .get_symbol_id("target_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        let caller_id = db
-            .get_symbol_id("caller_a", "src/lib.rs")
-            .unwrap()
-            .unwrap();
+        let caller_id = db.get_symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
 
-        let result = handle_context(&db, "target_fn", false, None).unwrap();
-        assert!(result.contains("### Called By"), "should show callers section");
+        let result = handle_context(&db, "target_fn", false, None, None).unwrap();
+        assert!(
+            result.contains("### Called By"),
+            "should show callers section"
+        );
         assert!(result.contains("caller_a"), "should list the caller");
     }
 
@@ -574,15 +592,9 @@ mod tests {
             .unwrap();
 
         // Qualified query should return only Database::new
-        let result = handle_context(&db, "Database::new", false, None).unwrap();
-        assert!(
-            result.contains("Database"),
-            "should find Database::new"
-        );
-        assert!(
-            !result.contains("Server"),
-            "should NOT include Server::new"
-        );
+        let result = handle_context(&db, "Database::new", false, None, None).unwrap();
+        assert!(result.contains("Database"), "should find Database::new");
+        assert!(!result.contains("Server"), "should NOT include Server::new");
     }
 
     #[test]
@@ -630,13 +642,162 @@ mod tests {
         .unwrap();
 
         // Without file filter: both appear
-        let result = handle_context(&db, "Config", false, None).unwrap();
+        let result = handle_context(&db, "Config", false, None, None).unwrap();
         assert!(result.contains("src/a.rs"));
         assert!(result.contains("src/b.rs"));
 
         // With file filter: only one
-        let result = handle_context(&db, "Config", false, Some("src/a.rs")).unwrap();
+        let result = handle_context(&db, "Config", false, Some("src/a.rs"), None).unwrap();
         assert!(result.contains("src/a.rs"));
         assert!(!result.contains("src/b.rs"));
+    }
+
+    #[test]
+    fn test_context_sections_source_only() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "my_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn my_fn()".into(),
+                    doc_comment: None,
+                    body: Some("pub fn my_fn() { helper() }".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "helper".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn helper()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let my_fn_id = db.get_symbol_id("my_fn", "src/lib.rs").unwrap().unwrap();
+        let helper_id = db.get_symbol_id("helper", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(my_fn_id, helper_id, "call").unwrap();
+
+        let sections: &[&str] = &["source"];
+        let result = handle_context(&db, "my_fn", false, None, Some(sections)).unwrap();
+        assert!(result.contains("### Source"), "source section present");
+        assert!(!result.contains("### Callees"), "callees section absent");
+    }
+
+    #[test]
+    fn test_context_sections_callers_only() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "target".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn target()".into(),
+                    doc_comment: None,
+                    body: Some("pub fn target() {}".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "invoker".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn invoker()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let invoker_id = db.get_symbol_id("invoker", "src/lib.rs").unwrap().unwrap();
+        let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(invoker_id, target_id, "call").unwrap();
+
+        let sections: &[&str] = &["callers"];
+        let result = handle_context(&db, "target", false, None, Some(sections)).unwrap();
+        assert!(result.contains("### Called By"), "callers section present");
+        assert!(!result.contains("### Source"), "source section absent");
+    }
+
+    #[test]
+    fn test_context_sections_none_shows_all() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "all_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn all_fn()".into(),
+                    doc_comment: None,
+                    body: Some("pub fn all_fn() { dep() }".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "dep".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn dep()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let all_fn_id = db.get_symbol_id("all_fn", "src/lib.rs").unwrap().unwrap();
+        let dep_id = db.get_symbol_id("dep", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(all_fn_id, dep_id, "call").unwrap();
+
+        let result = handle_context(&db, "all_fn", false, None, None).unwrap();
+        assert!(result.contains("### Source"), "source present");
+        assert!(result.contains("### Callees"), "callees present");
     }
 }
