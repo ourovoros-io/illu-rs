@@ -411,15 +411,19 @@ impl ServerHandler for IlluServer {
         ServerInfo {
             instructions: Some(
                 "illu-rs: Code intelligence server for Rust projects. \
-                 Use 'query' to search, 'context' for symbol details \
-                 (includes source body, doc comments, struct fields, \
-                 trait impls, callees, and callers — supports Type::method \
-                 syntax and file filtering), 'impact' for single-symbol \
-                 change analysis (with depth control and related test \
-                 discovery), 'diff_impact' for git diff-based batch \
-                 impact analysis with test suggestions, 'docs' for \
-                 dependency docs, 'overview' for structural maps \
-                 (with include_private option)."
+                 Use 'query' to search (supports attribute and signature filters), \
+                 'context' for symbol details (includes source body, doc comments, \
+                 struct fields, trait impls, and callees), \
+                 'batch_context' for multiple symbols at once, \
+                 'impact' for single-symbol change analysis, \
+                 'diff_impact' for git diff-based batch impact analysis, \
+                 'callpath' to find shortest call chain between two symbols, \
+                 'unused' to find potentially dead code, \
+                 'freshness' to check index staleness, \
+                 'docs' for dependency docs, \
+                 'overview' for structural maps, \
+                 'tree' for file/module tree, \
+                 'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
