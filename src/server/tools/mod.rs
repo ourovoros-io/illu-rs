@@ -1,3 +1,4 @@
+pub mod callpath;
 pub mod context;
 pub mod diff_impact;
 pub mod freshness;

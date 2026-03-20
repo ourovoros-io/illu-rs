@@ -123,6 +123,16 @@ struct DiffImpactParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct CallpathParams {
+    /// Source symbol name
+    from: String,
+    /// Target symbol name
+    to: String,
+    /// Max search depth (default: 10)
+    max_depth: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct FreshnessParams {}
 
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
@@ -273,6 +283,27 @@ impl IlluServer {
         let result =
             tools::diff_impact::handle_diff_impact(&db, repo_path, params.git_ref.as_deref())
                 .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "callpath",
+        description = "Find the shortest call path between two symbols. Shows how function A reaches function B through the call graph."
+    )]
+    async fn callpath(
+        &self,
+        Parameters(params): Parameters<CallpathParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(from = %params.from, to = %params.to, "Tool call: callpath");
+        let _guard = crate::status::StatusGuard::new(
+            &format!("callpath ▸ {} → {}", params.from, params.to),
+        );
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::callpath::handle_callpath(
+            &db, &params.from, &params.to, params.max_depth,
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

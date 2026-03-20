@@ -1234,6 +1234,26 @@ impl Database {
         Ok(results)
     }
 
+    pub fn get_callees_by_name(
+        &self,
+        symbol_name: &str,
+    ) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT ts.name, f.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             WHERE ss.name = ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![symbol_name])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
+
     pub fn get_docs_for_dependency(&self, name: &str) -> SqlResult<Vec<DocResult>> {
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version, d.module \
