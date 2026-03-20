@@ -523,6 +523,22 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM crates", [], |row| row.get(0))
     }
 
+    pub fn get_all_crate_deps(&self) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT sc.name, tc.name \
+             FROM crate_deps cd \
+             JOIN crates sc ON sc.id = cd.source_crate_id \
+             JOIN crates tc ON tc.id = cd.target_crate_id \
+             ORDER BY sc.name, tc.name",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
+
     pub fn insert_crate_dep(
         &self,
         source_crate_id: CrateId,

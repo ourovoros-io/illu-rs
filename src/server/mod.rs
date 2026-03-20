@@ -151,6 +151,9 @@ struct UnusedParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct CrateGraphParams {}
+
+#[derive(Deserialize, JsonSchema)]
 struct FreshnessParams {}
 
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
@@ -381,6 +384,23 @@ impl IlluServer {
             params.include_private.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "crate_graph",
+        description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
+    )]
+    async fn crate_graph(
+        &self,
+        Parameters(_params): Parameters<CrateGraphParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Tool call: crate_graph");
+        let _guard = crate::status::StatusGuard::new("crate_graph");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::crate_graph::handle_crate_graph(&db)
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 }
