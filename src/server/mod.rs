@@ -140,6 +140,10 @@ struct CallpathParams {
     to: String,
     /// Max search depth (default: 10)
     max_depth: Option<i64>,
+    /// Find all paths instead of just the shortest (default: false)
+    all_paths: Option<bool>,
+    /// Max number of paths when `all_paths=true` (default: 5)
+    max_paths: Option<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -349,20 +353,25 @@ impl IlluServer {
 
     #[tool(
         name = "callpath",
-        description = "Find the shortest call path between two symbols. Shows how function A reaches function B through the call graph."
+        description = "Find call paths between two symbols. By default finds the shortest path. Set all_paths=true to find up to max_paths (default 5) distinct paths via DFS."
     )]
     async fn callpath(
         &self,
         Parameters(params): Parameters<CallpathParams>,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!(from = %params.from, to = %params.to, "Tool call: callpath");
+        tracing::info!(from = %params.from, to = %params.to, all_paths = ?params.all_paths, "Tool call: callpath");
         let _guard = crate::status::StatusGuard::new(
             &format!("callpath ▸ {} → {}", params.from, params.to),
         );
         self.refresh()?;
         let db = self.lock_db()?;
         let result = tools::callpath::handle_callpath(
-            &db, &params.from, &params.to, params.max_depth,
+            &db,
+            &params.from,
+            &params.to,
+            params.max_depth,
+            params.all_paths.unwrap_or(false),
+            params.max_paths,
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
