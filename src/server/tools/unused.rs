@@ -20,19 +20,7 @@ pub fn handle_unused(
         symbols.retain(|s| s.kind.to_string().to_lowercase() == k_lower);
     }
 
-    // Exclude entry points
-    symbols.retain(|s| {
-        if s.name == "main" {
-            return false;
-        }
-        if let Some(attrs) = &s.attributes
-            && attrs.contains("test")
-        {
-            return false;
-        }
-        true
-    });
-
+    symbols.retain(|s| !super::is_entry_point(s));
     symbols.retain(|s| s.kind != SymbolKind::EnumVariant);
 
     let mut output = String::new();
@@ -75,16 +63,8 @@ fn handle_untested(
     let k_lower = kind_filter.to_lowercase();
     symbols.retain(|s| s.kind.to_string().to_lowercase() == k_lower);
 
-    // Exclude tests themselves, main, and non-code symbols
+    symbols.retain(|s| !super::is_entry_point(s));
     symbols.retain(|s| {
-        if s.name == "main" {
-            return false;
-        }
-        if let Some(attrs) = &s.attributes
-            && attrs.contains("test")
-        {
-            return false;
-        }
         s.kind != SymbolKind::EnumVariant
             && s.kind != SymbolKind::Use
             && s.kind != SymbolKind::Mod
@@ -132,11 +112,7 @@ fn render_symbol_list(output: &mut String, symbols: &[crate::db::StoredSymbol]) 
             current_file.clone_from(&sym.file_path);
             let _ = writeln!(output, "### {current_file}\n");
         }
-        let qualified = if let Some(impl_type) = &sym.impl_type {
-            format!("{}::{}", impl_type, sym.name)
-        } else {
-            sym.name.clone()
-        };
+        let qualified = super::qualified_name(sym);
         let _ = writeln!(
             output,
             "- **{qualified}** ({}, {}, line {}-{})",

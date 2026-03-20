@@ -80,14 +80,10 @@ fn format_symbols(
     if !symbols.is_empty() {
         output.push_str("## Symbols\n\n");
         for sym in &symbols {
-            let qualified_name = if let Some(impl_type) = &sym.impl_type {
-                format!("{}::{}", impl_type, sym.name)
-            } else {
-                sym.name.clone()
-            };
+            let qname = super::qualified_name(sym);
             let _ = writeln!(
                 output,
-                "- **{qualified_name}** ({}) at {}:{}-{}\n  `{}`",
+                "- **{qname}** ({}) at {}:{}-{}\n  `{}`",
                 sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
             );
             if let Some(doc) = &sym.doc_comment

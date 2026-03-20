@@ -744,7 +744,7 @@ impl Database {
     /// Find test functions that directly or transitively call the given symbol.
     /// Walks the call graph upward (who calls me?) filtering for `#[test]` attributes.
     pub fn get_related_tests(&self, symbol_name: &str) -> SqlResult<Vec<TestEntry>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "WITH RECURSIVE callers(id, name, file_path, line_start, depth, attributes) AS (
                 SELECT s.id, s.name, f.path, s.line_start, 0, s.attributes
                 FROM symbols s
@@ -902,7 +902,7 @@ impl Database {
         impl_type: &str,
         method_name: &str,
     ) -> SqlResult<Vec<StoredSymbol>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
                     s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
@@ -1228,7 +1228,7 @@ impl Database {
         symbol_name: &str,
         target_file: &str,
     ) -> SqlResult<Vec<CalleeInfo>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
@@ -1254,7 +1254,7 @@ impl Database {
         &self,
         symbol_name: &str,
     ) -> SqlResult<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
@@ -1401,7 +1401,7 @@ impl Database {
     ) -> SqlResult<Vec<StoredSymbol>> {
         let prefix = path_prefix.unwrap_or("");
         let like_pattern = format!("{prefix}%");
-        let mut stmt = self.conn.prepare(
+        let sql = if include_private {
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
                     s.doc_comment, s.body, s.details, s.attributes, \
@@ -1412,19 +1412,26 @@ impl Database {
              WHERE sr.id IS NULL \
                AND f.path LIKE ?1 \
                AND s.kind NOT IN ('use', 'mod', 'impl') \
-             ORDER BY f.path, s.line_start",
-        )?;
+             ORDER BY f.path, s.line_start"
+        } else {
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, \
+                    s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             LEFT JOIN symbol_refs sr ON sr.target_symbol_id = s.id \
+             WHERE sr.id IS NULL \
+               AND f.path LIKE ?1 \
+               AND s.kind NOT IN ('use', 'mod', 'impl') \
+               AND s.visibility IN ('public', 'pub(crate)') \
+             ORDER BY f.path, s.line_start"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![like_pattern])?;
         while let Some(row) = rows.next()? {
-            let sym = row_to_stored_symbol(row)?;
-            if !include_private
-                && sym.visibility != Visibility::Public
-                && sym.visibility != Visibility::PublicCrate
-            {
-                continue;
-            }
-            results.push(sym);
+            results.push(row_to_stored_symbol(row)?);
         }
         Ok(results)
     }

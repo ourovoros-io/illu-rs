@@ -1,20 +1,6 @@
-use crate::db::{Database, StoredSymbol};
+use crate::db::Database;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
-
-/// Resolve a symbol name supporting `Type::method` syntax.
-fn resolve_symbol(
-    db: &Database,
-    name: &str,
-) -> Result<Vec<StoredSymbol>, Box<dyn std::error::Error>> {
-    if let Some((impl_type, method)) = name.split_once("::") {
-        let results = db.search_symbols_by_impl(impl_type, method)?;
-        if !results.is_empty() {
-            return Ok(results);
-        }
-    }
-    Ok(db.search_symbols(name)?)
-}
 
 /// Extract the base symbol name (without `Type::` prefix).
 fn base_name(name: &str) -> &str {
@@ -30,11 +16,11 @@ pub fn handle_callpath(
     let max_depth = usize::try_from(max_depth.unwrap_or(10).max(1))
         .unwrap_or(10);
 
-    let from_syms = resolve_symbol(db, from)?;
+    let from_syms = super::resolve_symbol(db, from)?;
     if from_syms.is_empty() {
         return Ok(format!("Source symbol '{from}' not found."));
     }
-    let to_syms = resolve_symbol(db, to)?;
+    let to_syms = super::resolve_symbol(db, to)?;
     if to_syms.is_empty() {
         return Ok(format!("Target symbol '{to}' not found."));
     }
@@ -99,7 +85,7 @@ pub fn handle_callpath(
 
     let _ = writeln!(output, "\n**Locations:**\n");
     for name in &path {
-        let syms = db.search_symbols(name)?;
+        let syms = super::resolve_symbol(db, name)?;
         if let Some(sym) = syms.first() {
             let _ = writeln!(
                 output,
