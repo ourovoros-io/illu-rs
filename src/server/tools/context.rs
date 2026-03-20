@@ -247,14 +247,33 @@ fn render_tested_by(
     output: &mut String,
     sym: &StoredSymbol,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    const MAX_INLINE: usize = 10;
+
     let tests = db.get_related_tests(&sym.name)?;
     if tests.is_empty() {
         return Ok(());
     }
 
     let _ = writeln!(output, "### Tested By\n");
-    for t in &tests {
-        let _ = writeln!(output, "- **{}** ({}:{})", t.name, t.file_path, t.line_start);
+    if tests.len() <= MAX_INLINE {
+        for t in &tests {
+            let _ = writeln!(output, "- **{}** ({}:{})", t.name, t.file_path, t.line_start);
+        }
+    } else {
+        let mut file_counts: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for t in &tests {
+            *file_counts.entry(&t.file_path).or_default() += 1;
+        }
+        let _ = writeln!(
+            output,
+            "{} tests across {} files:\n",
+            tests.len(),
+            file_counts.len()
+        );
+        for (file, count) in &file_counts {
+            let _ = writeln!(output, "- **{file}** ({count} tests)");
+        }
     }
     let _ = writeln!(output);
 

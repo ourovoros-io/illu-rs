@@ -151,6 +151,8 @@ struct UnusedParams {
     kind: Option<String>,
     /// Include private symbols (default: false, shows only pub/pub(crate))
     include_private: Option<bool>,
+    /// Find symbols with no test coverage instead of unused symbols (default: false)
+    untested: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -371,13 +373,13 @@ impl IlluServer {
 
     #[tool(
         name = "unused",
-        description = "Find potentially unused symbols (no incoming references). Excludes entry points like main and #[test]. Useful for dead code detection."
+        description = "Find potentially unused symbols (no incoming references) or untested symbols (no test coverage). Excludes entry points like main and #[test]. Set untested=true to find symbols with no tests."
     )]
     async fn unused(
         &self,
         Parameters(params): Parameters<UnusedParams>,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!(path = ?params.path, kind = ?params.kind, "Tool call: unused");
+        tracing::info!(path = ?params.path, kind = ?params.kind, untested = ?params.untested, "Tool call: unused");
         let _guard = crate::status::StatusGuard::new("unused");
         self.refresh()?;
         let db = self.lock_db()?;
@@ -386,6 +388,7 @@ impl IlluServer {
             params.path.as_deref(),
             params.kind.as_deref(),
             params.include_private.unwrap_or(false),
+            params.untested.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))

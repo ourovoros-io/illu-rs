@@ -176,7 +176,65 @@ pub fn handle_diff_impact(
         }
     }
 
+    render_test_coverage(db, &mut output, &changed_symbols);
+
     Ok(output)
+}
+
+fn render_test_coverage(
+    db: &Database,
+    output: &mut String,
+    changed_symbols: &[(String, crate::db::StoredSymbol)],
+) {
+    let mut all_tests = Vec::new();
+    let mut seen_tests = std::collections::HashSet::new();
+    let mut untested_symbols = Vec::new();
+    for (_file, sym) in changed_symbols {
+        if let Ok(tests) = db.get_related_tests(&sym.name) {
+            if tests.is_empty() {
+                let is_test = sym
+                    .attributes
+                    .as_deref()
+                    .is_some_and(|a| a.contains("test"));
+                if !is_test && sym.kind == crate::indexer::parser::SymbolKind::Function {
+                    untested_symbols.push(sym);
+                }
+            }
+            for t in tests {
+                if seen_tests.insert(t.name.clone()) {
+                    all_tests.push(t);
+                }
+            }
+        }
+    }
+
+    if !untested_symbols.is_empty() {
+        let _ = writeln!(output, "\n### Untested Changes\n");
+        let _ = writeln!(
+            output,
+            "These changed functions have no test coverage:\n"
+        );
+        for sym in &untested_symbols {
+            let _ = writeln!(
+                output,
+                "- **{}** ({}:{}-{})",
+                sym.name, sym.file_path, sym.line_start, sym.line_end
+            );
+        }
+    }
+
+    if !all_tests.is_empty() {
+        let _ = writeln!(output, "\n### Related Tests\n");
+        for t in &all_tests {
+            let _ = writeln!(output, "- **{}** ({}:{})", t.name, t.file_path, t.line_start);
+        }
+        let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
+        let _ = writeln!(
+            output,
+            "\nSuggested: `cargo test {}`",
+            test_names.join(" ")
+        );
+    }
 }
 
 #[cfg(test)]
@@ -319,5 +377,61 @@ diff --git a/src/lib.rs b/src/lib.rs
         let dependents = db.impact_dependents("target_fn").unwrap();
         assert_eq!(dependents.len(), 1);
         assert_eq!(dependents[0].name, "caller_fn");
+    }
+
+    #[test]
+    fn test_diff_impact_includes_related_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "target_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 10,
+                    line_end: 20,
+                    signature: "pub fn target_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "test_target".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 25,
+                    line_end: 35,
+                    signature: "fn test_target()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let target_id = db
+            .get_symbol_id("target_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_id = db
+            .get_symbol_id("test_target", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call").unwrap();
+
+        // Verify get_related_tests finds the test
+        let tests = db.get_related_tests("target_fn").unwrap();
+        assert_eq!(tests.len(), 1);
+        assert_eq!(tests[0].name, "test_target");
     }
 }
