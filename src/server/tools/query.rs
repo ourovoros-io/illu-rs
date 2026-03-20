@@ -23,9 +23,13 @@ pub fn handle_query(
             format_symbols(db, query, kind, attribute, signature, path, &mut output)?;
             format_docs(db, query, &mut output)?;
         }
+        "doc_comments" => format_doc_comments(db, query, kind, path, &mut output)?,
         other => {
             return Err(
-                format!("Unknown scope: '{other}'. Valid: symbols, docs, files, all").into(),
+                format!(
+                    "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, all"
+                )
+                .into(),
             );
         }
     }
@@ -145,6 +149,46 @@ fn format_files(
         output.push_str("## Files\n\n");
         for file in &files {
             let _ = writeln!(output, "- {file}");
+        }
+        output.push('\n');
+    }
+    Ok(())
+}
+
+fn format_doc_comments(
+    db: &Database,
+    query: &str,
+    kind: Option<&str>,
+    path: Option<&str>,
+    output: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut symbols = db.search_symbols_by_doc_comment(query)?;
+    if let Some(p) = path {
+        symbols.retain(|s| s.file_path.starts_with(p));
+    }
+    let symbols: Vec<_> = if let Some(k) = kind {
+        let k_lower = k.to_lowercase();
+        symbols
+            .into_iter()
+            .filter(|s| s.kind.to_string().to_lowercase() == k_lower)
+            .collect()
+    } else {
+        symbols
+    };
+    if !symbols.is_empty() {
+        output.push_str("## Symbols matching doc comments\n\n");
+        for sym in &symbols {
+            let qname = super::qualified_name(sym);
+            let _ = writeln!(
+                output,
+                "- **{qname}** ({}) at {}:{}-{}\n  `{}`",
+                sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
+            );
+            if let Some(doc) = &sym.doc_comment
+                && let Some(first_line) = doc.lines().next()
+            {
+                let _ = writeln!(output, "  *{first_line}*");
+            }
         }
         output.push('\n');
     }
@@ -425,5 +469,75 @@ mod tests {
         .unwrap();
         assert!(result.contains("test_fn"), "should find fn with both attribute and signature match");
         assert!(!result.contains("other_test"), "should exclude fn without matching signature");
+    }
+
+    #[test]
+    fn test_query_doc_comments_scope() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "parse_config".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn parse_config() -> Config".into(),
+                    doc_comment: Some(
+                        "Parse configuration from TOML files.\nHandles errors gracefully."
+                            .into(),
+                    ),
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "save_config".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn save_config()".into(),
+                    doc_comment: Some("Save configuration to disk.".into()),
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "no_docs".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 22,
+                    line_end: 25,
+                    signature: "pub fn no_docs()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let result =
+            handle_query(&db, "TOML", Some("doc_comments"), None, None, None, None).unwrap();
+        assert!(result.contains("parse_config"), "should find symbol with TOML in doc");
+        assert!(!result.contains("save_config"), "should not find unrelated doc");
+        assert!(!result.contains("no_docs"), "should not find symbol without docs");
+        assert!(result.contains("Symbols matching doc comments"));
+
+        let result =
+            handle_query(&db, "nonexistent", Some("doc_comments"), None, None, None, None)
+                .unwrap();
+        assert!(result.contains("No results found"));
     }
 }

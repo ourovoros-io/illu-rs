@@ -1171,6 +1171,26 @@ impl Database {
         Ok(results)
     }
 
+    pub fn search_symbols_by_doc_comment(&self, query: &str) -> SqlResult<Vec<StoredSymbol>> {
+        let pattern = format!("%{}%", escape_like(query));
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.doc_comment LIKE ?1 ESCAPE '\\' \
+             ORDER BY s.name \
+             LIMIT 50",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
     pub fn search_symbols_by_signature(
         &self,
         pattern: &str,
@@ -2190,6 +2210,40 @@ mod tests {
         let results = db.search_symbols_by_attribute("Serialize").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "Config");
+    }
+
+    #[test]
+    fn test_search_by_doc_comment() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, doc_comment) \
+                 VALUES (?1, 'parse_config', 'function', 'public', \
+                         1, 10, 'pub fn parse_config()', \
+                         'Parse configuration from TOML files.')",
+                params![file_id],
+            )
+            .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'no_docs', 'function', 'public', \
+                         11, 15, 'pub fn no_docs()')",
+                params![file_id],
+            )
+            .unwrap();
+
+        let results = db.search_symbols_by_doc_comment("TOML").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "parse_config");
+
+        let results = db.search_symbols_by_doc_comment("nonexistent").unwrap();
+        assert!(results.is_empty());
     }
 
     #[test]
