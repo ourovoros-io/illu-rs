@@ -231,6 +231,14 @@ struct RenamePlanParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct SimilarParams {
+    /// Symbol to find similar symbols for
+    symbol_name: String,
+    /// Filter to files under this path prefix
+    path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -635,6 +643,25 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "similar",
+        description = "Find symbols with similar signatures and call patterns. Useful for discovering duplicates, finding patterns to follow, or identifying refactoring candidates."
+    )]
+    async fn similar(
+        &self,
+        Parameters(params): Parameters<SimilarParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: similar");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("similar \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::similar::handle_similar(&db, &params.symbol_name, params.path.as_deref())
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -677,6 +704,7 @@ impl ServerHandler for IlluServer {
                  'hotspots' for complexity and coupling analysis, \
                  'stats' for codebase statistics and health metrics, \
                  'rename_plan' for rename impact preview, \
+                 'similar' for finding structurally similar symbols, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),

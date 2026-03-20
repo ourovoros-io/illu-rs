@@ -13,6 +13,7 @@ pub mod neighborhood;
 pub mod overview;
 pub mod query;
 pub mod rename_plan;
+pub mod similar;
 pub mod stats;
 pub mod symbols_at;
 pub mod tree;
