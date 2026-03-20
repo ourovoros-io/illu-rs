@@ -7,8 +7,9 @@ pub fn handle_context(
     db: &Database,
     symbol_name: &str,
     full_body: bool,
+    file: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let symbols = db.search_symbols(symbol_name)?;
+    let symbols = resolve_symbols(db, symbol_name, file)?;
     if symbols.is_empty() {
         return Ok(format!(
             "No symbol found matching '{symbol_name}'.\n\
@@ -23,12 +24,41 @@ pub fn handle_context(
         render_symbol_header(&mut output, sym);
         render_symbol_details(&mut output, sym, full_body, repo_root);
         render_trait_info(db, &mut output, sym)?;
+        render_callers(db, &mut output, sym)?;
         render_callees(db, &mut output, sym)?;
     }
 
-    render_related_docs(db, &mut output, symbol_name)?;
+    let base_name = symbol_name
+        .split_once("::")
+        .map_or(symbol_name, |(_, m)| m);
+    render_related_docs(db, &mut output, base_name)?;
 
     Ok(output)
+}
+
+/// Resolve symbols supporting `Type::method` syntax and optional file filter.
+fn resolve_symbols(
+    db: &Database,
+    symbol_name: &str,
+    file: Option<&str>,
+) -> Result<Vec<StoredSymbol>, Box<dyn std::error::Error>> {
+    let mut symbols = if let Some((impl_type, method)) = symbol_name.split_once("::") {
+        let results = db.search_symbols_by_impl(impl_type, method)?;
+        if results.is_empty() {
+            // Fall back to normal search in case `::` was part of a path
+            db.search_symbols(symbol_name)?
+        } else {
+            results
+        }
+    } else {
+        db.search_symbols(symbol_name)?
+    };
+
+    if let Some(fp) = file {
+        symbols.retain(|s| s.file_path == fp);
+    }
+
+    Ok(symbols)
 }
 
 fn render_symbol_header(output: &mut String, sym: &StoredSymbol) {
@@ -50,6 +80,9 @@ fn render_symbol_header(output: &mut String, sym: &StoredSymbol) {
     let _ = writeln!(output, "- **Signature:** `{}`", sym.signature);
     if let Some(attrs) = &sym.attributes {
         let _ = writeln!(output, "- **Attributes:** {attrs}");
+    }
+    if let Some(impl_type) = &sym.impl_type {
+        let _ = writeln!(output, "- **Impl:** {impl_type}");
     }
     let _ = writeln!(output);
 }
@@ -154,6 +187,25 @@ fn render_trait_info(
     Ok(())
 }
 
+fn render_callers(
+    db: &Database,
+    output: &mut String,
+    sym: &StoredSymbol,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let callers = db.get_callers(&sym.name, &sym.file_path)?;
+    if callers.is_empty() {
+        return Ok(());
+    }
+
+    let _ = writeln!(output, "### Called By\n");
+    for c in &callers {
+        let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+    }
+    let _ = writeln!(output);
+
+    Ok(())
+}
+
 fn render_callees(
     db: &Database,
     output: &mut String,
@@ -240,7 +292,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "parse_config", false).unwrap();
+        let result = handle_context(&db, "parse_config", false, None).unwrap();
         assert!(result.contains("parse_config"));
         assert!(result.contains("src/lib.rs"));
         assert!(result.contains("public"));
@@ -249,7 +301,7 @@ mod tests {
     #[test]
     fn test_context_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_context(&db, "nonexistent", false).unwrap();
+        let result = handle_context(&db, "nonexistent", false, None).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
@@ -281,7 +333,7 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "serialize and deserialize data")
             .unwrap();
 
-        let result = handle_context(&db, "serialize", false).unwrap();
+        let result = handle_context(&db, "serialize", false, None).unwrap();
         assert!(result.contains("serialize"));
         assert!(result.contains("Related Documentation"));
     }
@@ -310,7 +362,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "Config", false).unwrap();
+        let result = handle_context(&db, "Config", false, None).unwrap();
         assert!(result.contains("> Application configuration."));
         assert!(result.contains("> Holds all settings."));
         assert!(result.contains("### Fields/Variants"));
@@ -369,7 +421,7 @@ mod tests {
             .unwrap();
         db.insert_symbol_ref(caller_id, callee_id, "call").unwrap();
 
-        let result = handle_context(&db, "caller_fn", false).unwrap();
+        let result = handle_context(&db, "caller_fn", false, None).unwrap();
         assert!(result.contains("### Callees"));
         assert!(result.contains("**Calls:**"));
         assert!(result.contains("callee_fn"));
@@ -404,9 +456,158 @@ mod tests {
         db.insert_trait_impl("MyStruct", "Debug", file_id, 22, 30)
             .unwrap();
 
-        let result = handle_context(&db, "MyStruct", false).unwrap();
+        let result = handle_context(&db, "MyStruct", false, None).unwrap();
         assert!(result.contains("### Trait Implementations"));
         assert!(result.contains("**Display**"));
         assert!(result.contains("**Debug**"));
+    }
+
+    #[test]
+    fn test_context_includes_callers() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "target_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn target_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "caller_a".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn caller_a()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let target_id = db
+            .get_symbol_id("target_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let caller_id = db
+            .get_symbol_id("caller_a", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
+
+        let result = handle_context(&db, "target_fn", false, None).unwrap();
+        assert!(result.contains("### Called By"), "should show callers section");
+        assert!(result.contains("caller_a"), "should list the caller");
+    }
+
+    #[test]
+    fn test_context_qualified_name() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+
+        // Insert two `new` methods with different impl_types via raw SQL
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, impl_type) \
+                 VALUES (?1, 'new', 'function', 'public', \
+                         1, 5, 'pub fn new() -> Database', 'Database')",
+                rusqlite::params![file_id],
+            )
+            .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, impl_type) \
+                 VALUES (?1, 'new', 'function', 'public', \
+                         10, 15, 'pub fn new() -> Server', 'Server')",
+                rusqlite::params![file_id],
+            )
+            .unwrap();
+
+        // Qualified query should return only Database::new
+        let result = handle_context(&db, "Database::new", false, None).unwrap();
+        assert!(
+            result.contains("Database"),
+            "should find Database::new"
+        );
+        assert!(
+            !result.contains("Server"),
+            "should NOT include Server::new"
+        );
+    }
+
+    #[test]
+    fn test_context_file_filter() {
+        let db = Database::open_in_memory().unwrap();
+        let file_a = db.insert_file("src/a.rs", "h1").unwrap();
+        let file_b = db.insert_file("src/b.rs", "h2").unwrap();
+        store_symbols(
+            &db,
+            file_a,
+            &[Symbol {
+                name: "Config".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "src/a.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub struct Config".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+        store_symbols(
+            &db,
+            file_b,
+            &[Symbol {
+                name: "Config".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "src/b.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub struct Config".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        // Without file filter: both appear
+        let result = handle_context(&db, "Config", false, None).unwrap();
+        assert!(result.contains("src/a.rs"));
+        assert!(result.contains("src/b.rs"));
+
+        // With file filter: only one
+        let result = handle_context(&db, "Config", false, Some("src/a.rs")).unwrap();
+        assert!(result.contains("src/a.rs"));
+        assert!(!result.contains("src/b.rs"));
     }
 }
