@@ -91,6 +91,9 @@ struct ContextParams {
     full_body: Option<bool>,
     /// Filter results to a specific file path (e.g. "src/db.rs")
     file: Option<String>,
+    /// Select specific sections to include: `source`, `callers`, `callees`,
+    /// `tested_by`, `traits`, `docs`. Omit for all sections.
+    sections: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -216,11 +219,16 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let full_body = params.full_body.unwrap_or(false);
+        let sections: Option<Vec<&str>> = params
+            .sections
+            .as_ref()
+            .map(|v| v.iter().map(String::as_str).collect());
         let result = tools::context::handle_context(
             &db,
             &params.symbol_name,
             full_body,
             params.file.as_deref(),
+            sections.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))

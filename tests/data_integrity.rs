@@ -393,7 +393,7 @@ impl Server {
 }
 ",
     );
-    let result = context::handle_context(&db, "start", false, None).unwrap();
+    let result = context::handle_context(&db, "start", false, None, None).unwrap();
     assert!(
         result.contains("bind"),
         "self.bind() should be detected as a callee: {result}"
@@ -619,7 +619,7 @@ pub fn use_config() -> AppConfig {
     )]);
 
     let query_result = query::handle_query(&db, "AppConfig", Some("symbols"), None, None, None, None).unwrap();
-    let context_result = context::handle_context(&db, "AppConfig", false, None).unwrap();
+    let context_result = context::handle_context(&db, "AppConfig", false, None, None).unwrap();
     let impact_result = impact::handle_impact(&db, "AppConfig", None, false).unwrap();
 
     // All tools must reference the same file path
@@ -650,7 +650,7 @@ pub struct Config {
 }
 ",
     );
-    let result = context::handle_context(&db, "Config", false, None).unwrap();
+    let result = context::handle_context(&db, "Config", false, None, None).unwrap();
 
     // Every context response MUST include these fields
     assert!(result.contains("**File:**"), "must include file path");
@@ -752,7 +752,7 @@ edition = "2021"
     );
 
     // Context should show the correct file for each
-    let ctx = context::handle_context(&db, "Error", false, None).unwrap();
+    let ctx = context::handle_context(&db, "Error", false, None, None).unwrap();
     assert!(
         ctx.contains("core/src/lib.rs") && ctx.contains("api/src/lib.rs"),
         "context should show both Error structs: {ctx}"
@@ -925,7 +925,7 @@ pub fn noop() {}
 pub fn with_return() -> i32 { 42 }
 ",
     );
-    let result = context::handle_context(&db, "noop", false, None).unwrap();
+    let result = context::handle_context(&db, "noop", false, None, None).unwrap();
     assert!(result.contains("noop"), "empty-body function must be found");
     assert!(
         result.contains("**Signature:**"),
@@ -946,7 +946,7 @@ pub trait Processor {
 }
 ",
     );
-    let result = context::handle_context(&db, "Processor", false, None).unwrap();
+    let result = context::handle_context(&db, "Processor", false, None, None).unwrap();
     assert!(
         result.contains("Processor"),
         "trait must be found: {result}"
@@ -989,7 +989,7 @@ fn multiline_doc_comment_fully_preserved() {
 pub fn my_func() -> i32 { 42 }
 ",
     );
-    let result = context::handle_context(&db, "my_func", false, None).unwrap();
+    let result = context::handle_context(&db, "my_func", false, None, None).unwrap();
     assert!(
         result.contains("First line of docs."),
         "first line: {result}"
@@ -1012,8 +1012,8 @@ pub fn alpha() {}
 pub fn beta() {}
 ",
     );
-    let alpha = context::handle_context(&db, "alpha", false, None).unwrap();
-    let beta = context::handle_context(&db, "beta", false, None).unwrap();
+    let alpha = context::handle_context(&db, "alpha", false, None, None).unwrap();
+    let beta = context::handle_context(&db, "beta", false, None, None).unwrap();
 
     assert!(alpha.contains("belongs to alpha"), "alpha's doc: {alpha}");
     assert!(
@@ -1533,13 +1533,13 @@ fn context_full_body_returns_untruncated_source() {
     };
     index_repo(&db, &config).unwrap();
 
-    let result = context::handle_context(&db, "big_fn", false, None).unwrap();
+    let result = context::handle_context(&db, "big_fn", false, None, None).unwrap();
     assert!(
         result.contains("truncated"),
         "should be truncated without full_body: {result}"
     );
 
-    let result = context::handle_context(&db, "big_fn", true, None).unwrap();
+    let result = context::handle_context(&db, "big_fn", true, None, None).unwrap();
     assert!(
         !result.contains("truncated"),
         "should NOT be truncated with full_body: {result}"
@@ -1825,7 +1825,7 @@ fn refresh_updates_changed_signature() {
     index_repo(&db, &config).unwrap();
 
     // Verify initial signature
-    let result = context::handle_context(&db, "transform", false, None).unwrap();
+    let result = context::handle_context(&db, "transform", false, None, None).unwrap();
     assert!(
         result.contains("transform(x: i32) -> i32"),
         "initial signature should have one param: {result}"
@@ -1839,7 +1839,7 @@ fn refresh_updates_changed_signature() {
     .unwrap();
     refresh_index(&db, &config).unwrap();
 
-    let result = context::handle_context(&db, "transform", false, None).unwrap();
+    let result = context::handle_context(&db, "transform", false, None, None).unwrap();
     assert!(
         result.contains("transform(x: i32, y: i32)"),
         "refreshed signature should have two params: {result}"
@@ -2020,7 +2020,7 @@ impl AppState {
 ",
     );
 
-    let result = context::handle_context(&db, "AppState", false, None).unwrap();
+    let result = context::handle_context(&db, "AppState", false, None, None).unwrap();
 
     // Header: ## SymbolName (kind)
     assert!(

@@ -47,6 +47,7 @@ fn bench_query_after_index(c: &mut Criterion) {
                 black_box("Database"),
                 false,
                 None,
+                None,
             )
             .unwrap();
         });

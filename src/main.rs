@@ -373,7 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Context { symbol }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_context(&db, &symbol, false, None)?;
+            let result = handle_context(&db, &symbol, false, None, None)?;
             print_result(&result);
         }
         Some(Command::Impact { symbol }) => {
