@@ -47,22 +47,24 @@ fn format_symbols(
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut all_symbols = if let Some(attr) = attribute {
-        let mut results = db.search_symbols_by_attribute(attr)?;
-        if !query.is_empty() {
-            let q = query.to_lowercase();
-            results.retain(|s| s.name.to_lowercase().contains(&q));
-        }
-        results
+        db.search_symbols_by_attribute(attr)?
+    } else if !query.is_empty() {
+        db.search_symbols(query)?
     } else if let Some(sig) = signature {
-        let mut results = db.search_symbols_by_signature(sig)?;
-        if !query.is_empty() {
-            let q = query.to_lowercase();
-            results.retain(|s| s.name.to_lowercase().contains(&q));
-        }
-        results
+        db.search_symbols_by_signature(sig)?
     } else {
         db.search_symbols(query)?
     };
+    if attribute.is_some() && !query.is_empty() {
+        let q = query.to_lowercase();
+        all_symbols.retain(|s| s.name.to_lowercase().contains(&q));
+    }
+    if let Some(sig) = signature
+        && (attribute.is_some() || !query.is_empty())
+    {
+        let sig_lower = sig.to_lowercase();
+        all_symbols.retain(|s| s.signature.to_lowercase().contains(&sig_lower));
+    }
     if let Some(p) = path {
         all_symbols.retain(|s| s.file_path.starts_with(p));
     }
@@ -373,5 +375,55 @@ mod tests {
         // With path filter to nonexistent path: no results
         let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), Some("src/other/")).unwrap();
         assert!(result.contains("No results found"), "no symbols under src/other/");
+    }
+
+    #[test]
+    fn test_query_combined_attribute_and_signature() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "test_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn test_fn(db: &Database)".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "other_test".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 10,
+                    signature: "pub fn other_test()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // Combined: attribute=test AND signature contains Database
+        let result = handle_query(
+            &db, "", Some("symbols"), None,
+            Some("test"), Some("Database"), None,
+        )
+        .unwrap();
+        assert!(result.contains("test_fn"), "should find fn with both attribute and signature match");
+        assert!(!result.contains("other_test"), "should exclude fn without matching signature");
     }
 }
