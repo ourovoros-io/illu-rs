@@ -197,6 +197,14 @@ struct FileGraphParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct SymbolsAtParams {
+    /// File path (e.g. "src/db.rs")
+    file: String,
+    /// Line number to look up
+    line: i64,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -527,6 +535,26 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "symbols_at",
+        description = "Look up which symbol(s) exist at a given file path and line number. Use when navigating from compiler errors, stack traces, or git blame output."
+    )]
+    async fn symbols_at(
+        &self,
+        Parameters(params): Parameters<SymbolsAtParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(file = %params.file, line = params.line, "Tool call: symbols_at");
+        let _guard = crate::status::StatusGuard::new(&format!(
+            "symbols_at \u{25b8} {}:{}",
+            params.file, params.line
+        ));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::symbols_at::handle_symbols_at(&db, &params.file, params.line)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -565,6 +593,7 @@ impl ServerHandler for IlluServer {
                  'neighborhood' for bidirectional call graph exploration, \
                  'type_usage' for finding type usage in signatures and fields, \
                  'file_graph' for file-level dependency visualization, \
+                 'symbols_at' for file:line symbol lookup, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),

@@ -11,6 +11,7 @@ pub mod implements;
 pub mod neighborhood;
 pub mod overview;
 pub mod query;
+pub mod symbols_at;
 pub mod tree;
 pub mod type_usage;
 pub mod unused;
