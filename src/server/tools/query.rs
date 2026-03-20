@@ -80,10 +80,15 @@ fn format_symbols(
     if !symbols.is_empty() {
         output.push_str("## Symbols\n\n");
         for sym in &symbols {
+            let qualified_name = if let Some(impl_type) = &sym.impl_type {
+                format!("{}::{}", impl_type, sym.name)
+            } else {
+                sym.name.clone()
+            };
             let _ = writeln!(
                 output,
-                "- **{}** ({}) at {}:{}-{}\n  `{}`",
-                sym.name, sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
+                "- **{qualified_name}** ({}) at {}:{}-{}\n  `{}`",
+                sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
             );
             if let Some(doc) = &sym.doc_comment
                 && let Some(first_line) = doc.lines().next()

@@ -1,4 +1,5 @@
 use crate::db::Database;
+use crate::indexer::parser::SymbolKind;
 use std::fmt::Write;
 
 pub fn handle_unused(
@@ -6,7 +7,12 @@ pub fn handle_unused(
     path: Option<&str>,
     kind: Option<&str>,
     include_private: bool,
+    untested: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    if untested {
+        return handle_untested(db, path, kind, include_private);
+    }
+
     let mut symbols = db.get_unreferenced_symbols(path, include_private)?;
 
     if let Some(k) = kind {
@@ -27,8 +33,7 @@ pub fn handle_unused(
         true
     });
 
-    // Exclude enum variants (referenced through their parent enum)
-    symbols.retain(|s| s.kind != crate::indexer::parser::SymbolKind::EnumVariant);
+    symbols.retain(|s| s.kind != SymbolKind::EnumVariant);
 
     let mut output = String::new();
     let _ = writeln!(output, "## Potentially Unused Symbols\n");
@@ -44,18 +49,7 @@ pub fn handle_unused(
         symbols.len()
     );
 
-    let mut current_file = String::new();
-    for sym in &symbols {
-        if sym.file_path != current_file {
-            current_file.clone_from(&sym.file_path);
-            let _ = writeln!(output, "### {current_file}\n");
-        }
-        let _ = writeln!(
-            output,
-            "- **{}** ({}, {}, line {}-{})",
-            sym.name, sym.kind, sym.visibility, sym.line_start, sym.line_end
-        );
-    }
+    render_symbol_list(&mut output, &symbols);
 
     let _ = writeln!(
         output,
@@ -65,4 +59,88 @@ pub fn handle_unused(
     );
 
     Ok(output)
+}
+
+fn handle_untested(
+    db: &Database,
+    path: Option<&str>,
+    kind: Option<&str>,
+    include_private: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let prefix = path.unwrap_or("");
+    let mut symbols = db.get_symbols_by_path_prefix_filtered(prefix, include_private)?;
+
+    // Only functions are meaningfully "testable"
+    let kind_filter = kind.unwrap_or("function");
+    let k_lower = kind_filter.to_lowercase();
+    symbols.retain(|s| s.kind.to_string().to_lowercase() == k_lower);
+
+    // Exclude tests themselves, main, and non-code symbols
+    symbols.retain(|s| {
+        if s.name == "main" {
+            return false;
+        }
+        if let Some(attrs) = &s.attributes
+            && attrs.contains("test")
+        {
+            return false;
+        }
+        s.kind != SymbolKind::EnumVariant
+            && s.kind != SymbolKind::Use
+            && s.kind != SymbolKind::Mod
+            && s.kind != SymbolKind::Impl
+    });
+
+    // Filter to symbols with no related tests
+    let mut untested = Vec::new();
+    for sym in symbols {
+        let tests = db.get_related_tests(&sym.name)?;
+        if tests.is_empty() {
+            untested.push(sym);
+        }
+    }
+
+    let mut output = String::new();
+    let _ = writeln!(output, "## Untested Symbols\n");
+
+    if untested.is_empty() {
+        let _ = writeln!(output, "All matching symbols have test coverage.");
+        return Ok(output);
+    }
+
+    let _ = writeln!(
+        output,
+        "Found {} symbols with no test coverage:\n",
+        untested.len()
+    );
+
+    render_symbol_list(&mut output, &untested);
+
+    let _ = writeln!(
+        output,
+        "\n*Note: symbols tested only via macros or dynamic \
+         dispatch may appear as false positives.*"
+    );
+
+    Ok(output)
+}
+
+fn render_symbol_list(output: &mut String, symbols: &[crate::db::StoredSymbol]) {
+    let mut current_file = String::new();
+    for sym in symbols {
+        if sym.file_path != current_file {
+            current_file.clone_from(&sym.file_path);
+            let _ = writeln!(output, "### {current_file}\n");
+        }
+        let qualified = if let Some(impl_type) = &sym.impl_type {
+            format!("{}::{}", impl_type, sym.name)
+        } else {
+            sym.name.clone()
+        };
+        let _ = writeln!(
+            output,
+            "- **{qualified}** ({}, {}, line {}-{})",
+            sym.kind, sym.visibility, sym.line_start, sym.line_end
+        );
+    }
 }
