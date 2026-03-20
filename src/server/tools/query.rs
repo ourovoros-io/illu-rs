@@ -24,9 +24,10 @@ pub fn handle_query(
             format_docs(db, query, &mut output)?;
         }
         "doc_comments" => format_doc_comments(db, query, kind, path, &mut output)?,
+        "bodies" => format_body_search(db, query, kind, path, &mut output)?,
         other => {
             return Err(format!(
-                "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, all"
+                "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, bodies, all"
             )
             .into());
         }
@@ -187,6 +188,41 @@ fn format_doc_comments(
             {
                 let _ = writeln!(output, "  *{first_line}*");
             }
+        }
+        output.push('\n');
+    }
+    Ok(())
+}
+
+fn format_body_search(
+    db: &Database,
+    query: &str,
+    kind: Option<&str>,
+    path: Option<&str>,
+    output: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut symbols = db.search_symbols_by_body(query)?;
+    if let Some(p) = path {
+        symbols.retain(|s| s.file_path.starts_with(p));
+    }
+    let symbols: Vec<_> = if let Some(k) = kind {
+        let k_lower = k.to_lowercase();
+        symbols
+            .into_iter()
+            .filter(|s| s.kind.to_string().to_lowercase() == k_lower)
+            .collect()
+    } else {
+        symbols
+    };
+    if !symbols.is_empty() {
+        output.push_str("## Symbols matching body content\n\n");
+        for sym in &symbols {
+            let qname = super::qualified_name(sym);
+            let _ = writeln!(
+                output,
+                "- **{qname}** ({}) at {}:{}-{}\n  `{}`",
+                sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
+            );
         }
         output.push('\n');
     }
@@ -594,6 +630,71 @@ mod tests {
             &db,
             "nonexistent",
             Some("doc_comments"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(result.contains("No results found"));
+    }
+
+    #[test]
+    fn test_query_bodies_scope() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "spawn_task".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn spawn_task()".into(),
+                    doc_comment: None,
+                    body: Some("tokio::spawn(async { do_work().await });".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "sync_work".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn sync_work()".into(),
+                    doc_comment: None,
+                    body: Some("let result = compute(42);".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let result =
+            handle_query(&db, "tokio::spawn", Some("bodies"), None, None, None, None).unwrap();
+        assert!(
+            result.contains("spawn_task"),
+            "should find symbol with tokio::spawn in body"
+        );
+        assert!(
+            !result.contains("sync_work"),
+            "should not find unrelated symbol"
+        );
+        assert!(result.contains("Symbols matching body content"));
+
+        let result = handle_query(
+            &db,
+            "nonexistent_call",
+            Some("bodies"),
             None,
             None,
             None,

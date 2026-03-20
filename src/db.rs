@@ -1191,6 +1191,26 @@ impl Database {
         Ok(results)
     }
 
+    pub fn search_symbols_by_body(&self, query: &str) -> SqlResult<Vec<StoredSymbol>> {
+        let pattern = format!("%{}%", escape_like(query));
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.body LIKE ?1 ESCAPE '\\' \
+             ORDER BY f.path, s.line_start \
+             LIMIT 50",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
     pub fn search_symbols_by_signature(&self, pattern: &str) -> SqlResult<Vec<StoredSymbol>> {
         let like_pattern = format!("%{}%", escape_like(pattern));
         let mut stmt = self.conn.prepare(
@@ -2262,6 +2282,41 @@ mod tests {
         assert_eq!(results[0].name, "parse_config");
 
         let results = db.search_symbols_by_doc_comment("nonexistent").unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_by_body() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, body) \
+                 VALUES (?1, 'risky_fn', 'function', 'public', \
+                         1, 10, 'pub fn risky_fn()', \
+                         'let val = map.get(key).unwrap();')",
+                params![file_id],
+            )
+            .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, body) \
+                 VALUES (?1, 'safe_fn', 'function', 'public', \
+                         11, 20, 'pub fn safe_fn()', \
+                         'let val = map.get(key).unwrap_or_default();')",
+                params![file_id],
+            )
+            .unwrap();
+
+        let results = db.search_symbols_by_body("unwrap()").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "risky_fn");
+
+        let results = db.search_symbols_by_body("nonexistent").unwrap();
         assert!(results.is_empty());
     }
 
