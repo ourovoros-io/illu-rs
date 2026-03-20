@@ -128,6 +128,8 @@ struct TreeParams {
 struct DiffImpactParams {
     /// Git ref range (e.g. "HEAD~3..HEAD", "main"). Omit for unstaged changes.
     git_ref: Option<String>,
+    /// Only list changed symbols, skip downstream impact analysis (default: false)
+    changes_only: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -335,8 +337,13 @@ impl IlluServer {
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
         let result =
-            tools::diff_impact::handle_diff_impact(&db, repo_path, params.git_ref.as_deref())
-                .map_err(to_mcp_err)?;
+            tools::diff_impact::handle_diff_impact(
+                &db,
+                repo_path,
+                params.git_ref.as_deref(),
+                params.changes_only.unwrap_or(false),
+            )
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

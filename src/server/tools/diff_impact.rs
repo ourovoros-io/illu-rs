@@ -90,6 +90,7 @@ pub fn handle_diff_impact(
     db: &Database,
     repo_path: &Path,
     git_ref: Option<&str>,
+    changes_only: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let diff_output = run_git_diff(repo_path, git_ref)?;
     if diff_output.trim().is_empty() {
@@ -151,6 +152,10 @@ pub fn handle_diff_impact(
             "- **{}** ({}, line {}-{})",
             sym.name, sym.kind, sym.line_start, sym.line_end
         );
+    }
+
+    if changes_only {
+        return Ok(output);
     }
 
     // Run impact analysis for each changed symbol
