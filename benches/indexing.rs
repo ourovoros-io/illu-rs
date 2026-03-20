@@ -54,23 +54,14 @@ fn bench_query_after_index(c: &mut Criterion) {
     });
     group.bench_function("impact", |b| {
         b.iter(|| {
-            illu_rs::server::tools::impact::handle_impact(
-                &db,
-                black_box("Database"),
-                None,
-                false,
-            )
-            .unwrap();
+            illu_rs::server::tools::impact::handle_impact(&db, black_box("Database"), None, false)
+                .unwrap();
         });
     });
     group.bench_function("overview", |b| {
         b.iter(|| {
-            illu_rs::server::tools::overview::handle_overview(
-                &db,
-                black_box("src/"),
-                false,
-            )
-            .unwrap();
+            illu_rs::server::tools::overview::handle_overview(&db, black_box("src/"), false)
+                .unwrap();
         });
     });
     group.finish();

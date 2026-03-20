@@ -91,7 +91,8 @@ fn index_multi_file(files: &[(&str, &str)]) -> (tempfile::TempDir, Database) {
 #[test]
 fn query_on_empty_crate_returns_no_results() {
     let (_dir, db) = empty_crate();
-    let result = query::handle_query(&db, "anything", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "anything", Some("symbols"), None, None, None, None).unwrap();
     let has_no_symbols = result.contains("No symbols")
         || result.contains("No results")
         || !result.contains("(function)")
@@ -133,9 +134,7 @@ fn impact_on_nonexistent_symbol_does_not_panic() {
 
 #[test]
 fn malformed_rust_source_does_not_crash() {
-    let (_dir, _db) = index_source(
-        "pub fn broken( { }}}}} struct @@@\n",
-    );
+    let (_dir, _db) = index_source("pub fn broken( { }}}}} struct @@@\n");
     // Reaching this point means indexing did not panic
 }
 
@@ -176,9 +175,6 @@ fn deeply_nested_module_files_indexed() {
         ("a/b/c/mod.rs", "pub fn deep_fn() {}\n"),
     ]);
     let syms = db.search_symbols("deep_fn").unwrap();
-    assert!(
-        !syms.is_empty(),
-        "deeply nested deep_fn should be indexed"
-    );
+    assert!(!syms.is_empty(), "deeply nested deep_fn should be indexed");
     assert_eq!(syms[0].name, "deep_fn");
 }

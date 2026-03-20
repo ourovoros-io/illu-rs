@@ -39,11 +39,7 @@ pub fn handle_type_usage(
     let field_matches: Vec<_> = all_symbols
         .into_iter()
         .filter(|s| s.kind == SymbolKind::Struct && s.name != type_name)
-        .filter(|s| {
-            s.details
-                .as_deref()
-                .is_some_and(|d| d.contains(type_name))
-        })
+        .filter(|s| s.details.as_deref().is_some_and(|d| d.contains(type_name)))
         .collect();
 
     let mut output = String::new();
@@ -251,8 +247,7 @@ mod tests {
         store_symbols(&db, file1, &symbols1).unwrap();
         store_symbols(&db, file2, &symbols2).unwrap();
 
-        let result =
-            handle_type_usage(&db, "Config", Some("src/server/")).unwrap();
+        let result = handle_type_usage(&db, "Config", Some("src/server/")).unwrap();
         assert!(result.contains("serve_config"));
         assert!(!result.contains("use_config"));
     }

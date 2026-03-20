@@ -94,12 +94,10 @@ pub fn handle_diff_impact(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let diff_output = run_git_diff(repo_path, git_ref)?;
     if diff_output.trim().is_empty() {
-        return Ok(
-            "No changes detected. Check the git ref \
+        return Ok("No changes detected. Check the git ref \
              (e.g., git_ref: \"HEAD~1..HEAD\" for last commit, \
              or omit for unstaged changes)."
-                .to_string(),
-        );
+            .to_string());
     }
 
     let hunks = parse_diff(&diff_output);
@@ -215,10 +213,7 @@ fn render_test_coverage(
 
     if !untested_symbols.is_empty() {
         let _ = writeln!(output, "\n### Untested Changes\n");
-        let _ = writeln!(
-            output,
-            "These changed functions have no test coverage:\n"
-        );
+        let _ = writeln!(output, "These changed functions have no test coverage:\n");
         for sym in &untested_symbols {
             let _ = writeln!(
                 output,
@@ -231,14 +226,14 @@ fn render_test_coverage(
     if !all_tests.is_empty() {
         let _ = writeln!(output, "\n### Related Tests\n");
         for t in &all_tests {
-            let _ = writeln!(output, "- **{}** ({}:{})", t.name, t.file_path, t.line_start);
+            let _ = writeln!(
+                output,
+                "- **{}** ({}:{})",
+                t.name, t.file_path, t.line_start
+            );
         }
         let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
-        let _ = writeln!(
-            output,
-            "\nSuggested: `cargo test {}`",
-            test_names.join(" ")
-        );
+        let _ = writeln!(output, "\nSuggested: `cargo test {}`", test_names.join(" "));
     }
 }
 

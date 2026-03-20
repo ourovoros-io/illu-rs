@@ -321,7 +321,12 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("overview ▸ {}", params.path));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::overview::handle_overview(&db, &params.path, params.include_private.unwrap_or(false)).map_err(to_mcp_err)?;
+        let result = tools::overview::handle_overview(
+            &db,
+            &params.path,
+            params.include_private.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -354,14 +359,13 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
-        let result =
-            tools::diff_impact::handle_diff_impact(
-                &db,
-                repo_path,
-                params.git_ref.as_deref(),
-                params.changes_only.unwrap_or(false),
-            )
-            .map_err(to_mcp_err)?;
+        let result = tools::diff_impact::handle_diff_impact(
+            &db,
+            repo_path,
+            params.git_ref.as_deref(),
+            params.changes_only.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -374,9 +378,8 @@ impl IlluServer {
         Parameters(params): Parameters<CallpathParams>,
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(from = %params.from, to = %params.to, all_paths = ?params.all_paths, "Tool call: callpath");
-        let _guard = crate::status::StatusGuard::new(
-            &format!("callpath ▸ {} → {}", params.from, params.to),
-        );
+        let _guard =
+            crate::status::StatusGuard::new(&format!("callpath ▸ {} → {}", params.from, params.to));
         self.refresh()?;
         let db = self.lock_db()?;
         let result = tools::callpath::handle_callpath(
@@ -403,8 +406,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new("freshness");
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
-        let result = tools::freshness::handle_freshness(&db, repo_path)
-            .map_err(to_mcp_err)?;
+        let result = tools::freshness::handle_freshness(&db, repo_path).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -421,10 +423,8 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let full_body = params.full_body.unwrap_or(false);
-        let result = tools::batch_context::handle_batch_context(
-            &db, &params.symbols, full_body,
-        )
-        .map_err(to_mcp_err)?;
+        let result = tools::batch_context::handle_batch_context(&db, &params.symbols, full_body)
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -500,16 +500,12 @@ impl IlluServer {
         Parameters(params): Parameters<TypeUsageParams>,
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(type_name = %params.type_name, "Tool call: type_usage");
-        let _guard =
-            crate::status::StatusGuard::new(&format!("type_usage ▸ {}", params.type_name));
+        let _guard = crate::status::StatusGuard::new(&format!("type_usage ▸ {}", params.type_name));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::type_usage::handle_type_usage(
-            &db,
-            &params.type_name,
-            params.path.as_deref(),
-        )
-        .map_err(to_mcp_err)?;
+        let result =
+            tools::type_usage::handle_type_usage(&db, &params.type_name, params.path.as_deref())
+                .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -522,11 +518,11 @@ impl IlluServer {
         Parameters(params): Parameters<FileGraphParams>,
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = %params.path, "Tool call: file_graph");
-        let _guard = crate::status::StatusGuard::new(&format!("file_graph \u{25b8} {}", params.path));
+        let _guard =
+            crate::status::StatusGuard::new(&format!("file_graph \u{25b8} {}", params.path));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::file_graph::handle_file_graph(&db, &params.path).map_err(to_mcp_err)?;
+        let result = tools::file_graph::handle_file_graph(&db, &params.path).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -542,8 +538,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new("crate_graph");
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::crate_graph::handle_crate_graph(&db)
-            .map_err(to_mcp_err)?;
+        let result = tools::crate_graph::handle_crate_graph(&db).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 }

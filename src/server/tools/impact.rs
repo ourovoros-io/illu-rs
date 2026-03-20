@@ -78,11 +78,7 @@ pub fn handle_impact(
             );
         }
         let test_names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
-        let _ = writeln!(
-            output,
-            "\nSuggested: `cargo test {}`",
-            test_names.join(" ")
-        );
+        let _ = writeln!(output, "\nSuggested: `cargo test {}`", test_names.join(" "));
     }
 
     Ok(output)
@@ -115,10 +111,7 @@ fn render_depth_entries(
         for (file, count) in &file_counts {
             let _ = writeln!(output, "- **{file}** ({count} symbols)");
         }
-        let _ = writeln!(
-            output,
-            "\n*Use `summary: false` to expand all entries.*\n"
-        );
+        let _ = writeln!(output, "\n*Use `summary: false` to expand all entries.*\n");
     } else {
         let _ = writeln!(output, "### Depth {depth}\n");
         for dep in entries {
@@ -463,10 +456,7 @@ mod tests {
         .unwrap();
 
         // test_via_wrapper -> wrapper_fn -> inner_fn
-        let inner_id = db
-            .get_symbol_id("inner_fn", "src/lib.rs")
-            .unwrap()
-            .unwrap();
+        let inner_id = db.get_symbol_id("inner_fn", "src/lib.rs").unwrap().unwrap();
         let wrapper_id = db
             .get_symbol_id("wrapper_fn", "src/lib.rs")
             .unwrap()
@@ -654,11 +644,17 @@ mod tests {
         // depth=1: only direct callers
         let result = handle_impact(&db, "base", Some(1), false).unwrap();
         assert!(result.contains("mid"), "should show direct caller");
-        assert!(!result.contains("top"), "should NOT show transitive caller at depth 1");
+        assert!(
+            !result.contains("top"),
+            "should NOT show transitive caller at depth 1"
+        );
 
         // default depth: shows both
         let result = handle_impact(&db, "base", None, false).unwrap();
         assert!(result.contains("mid"));
-        assert!(result.contains("top"), "should show transitive caller at default depth");
+        assert!(
+            result.contains("top"),
+            "should show transitive caller at default depth"
+        );
     }
 }

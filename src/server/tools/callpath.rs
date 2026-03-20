@@ -15,8 +15,7 @@ pub fn handle_callpath(
     all_paths: bool,
     max_paths: Option<i64>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let max_depth = usize::try_from(max_depth.unwrap_or(10).max(1))
-        .unwrap_or(10);
+    let max_depth = usize::try_from(max_depth.unwrap_or(10).max(1)).unwrap_or(10);
 
     let from_syms = super::resolve_symbol(db, from)?;
     if from_syms.is_empty() {
@@ -31,8 +30,7 @@ pub fn handle_callpath(
     let to_name = base_name(to);
 
     if all_paths {
-        let max_paths = usize::try_from(max_paths.unwrap_or(5).max(1))
-            .unwrap_or(5);
+        let max_paths = usize::try_from(max_paths.unwrap_or(5).max(1)).unwrap_or(5);
         handle_all_paths(db, from, to, from_name, to_name, max_depth, max_paths)
     } else {
         handle_shortest_path(db, from, to, from_name, to_name, max_depth)
@@ -152,8 +150,13 @@ fn find_all_paths(
         visited.insert(callee_name.clone());
         current_path.push(callee_name.clone());
         find_all_paths(
-            db, target, max_depth, max_paths,
-            current_path, visited, results,
+            db,
+            target,
+            max_depth,
+            max_paths,
+            current_path,
+            visited,
+            results,
         )?;
         current_path.pop();
         visited.remove(&callee_name);
@@ -177,8 +180,13 @@ fn handle_all_paths(
     let mut results: Vec<Vec<String>> = Vec::new();
 
     find_all_paths(
-        db, to_name, max_depth, max_paths,
-        &mut current_path, &mut visited, &mut results,
+        db,
+        to_name,
+        max_depth,
+        max_paths,
+        &mut current_path,
+        &mut visited,
+        &mut results,
     )?;
 
     let mut output = String::new();

@@ -368,7 +368,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             kind,
         }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_query(&db, &search, Some(&scope), kind.as_deref(), None, None, None)?;
+            let result = handle_query(
+                &db,
+                &search,
+                Some(&scope),
+                kind.as_deref(),
+                None,
+                None,
+                None,
+            )?;
             print_result(&result);
         }
         Some(Command::Context { symbol }) => {

@@ -28,10 +28,7 @@ pub fn handle_implements(
             let impls = db.get_trait_impls_for_type(ty)?;
             let _ = writeln!(output, "## Traits implemented by `{ty}`\n");
             if impls.is_empty() {
-                let _ = writeln!(
-                    output,
-                    "No trait implementations found for type `{ty}`."
-                );
+                let _ = writeln!(output, "No trait implementations found for type `{ty}`.");
             } else {
                 for ti in &impls {
                     let _ = writeln!(
@@ -82,8 +79,7 @@ mod tests {
         db.insert_trait_impl("MyStruct", "Display", file_id, 10, 20)
             .unwrap();
 
-        let result =
-            handle_implements(&db, Some("Display"), None).unwrap();
+        let result = handle_implements(&db, Some("Display"), None).unwrap();
         assert!(result.contains("Types implementing `Display`"));
         assert!(result.contains("MyStruct"));
         assert!(result.contains("src/lib.rs:10-20"));
@@ -98,8 +94,7 @@ mod tests {
         db.insert_trait_impl("MyStruct", "Debug", file_id, 22, 30)
             .unwrap();
 
-        let result =
-            handle_implements(&db, None, Some("MyStruct")).unwrap();
+        let result = handle_implements(&db, None, Some("MyStruct")).unwrap();
         assert!(result.contains("Traits implemented by `MyStruct`"));
         assert!(result.contains("Display"));
         assert!(result.contains("Debug"));

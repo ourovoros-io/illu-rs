@@ -18,9 +18,8 @@ pub fn handle_context(
         ));
     }
 
-    let show = |name: &str| -> bool {
-        sections.is_none() || sections.is_some_and(|s| s.contains(&name))
-    };
+    let show =
+        |name: &str| -> bool { sections.is_none() || sections.is_some_and(|s| s.contains(&name)) };
 
     let repo_root = db.repo_root();
     let mut output = String::new();
@@ -45,9 +44,7 @@ pub fn handle_context(
     }
 
     if show("docs") {
-        let base_name = symbol_name
-            .split_once("::")
-            .map_or(symbol_name, |(_, m)| m);
+        let base_name = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);
         render_related_docs(db, &mut output, base_name)?;
     }
 
@@ -264,7 +261,11 @@ fn render_tested_by(
     let _ = writeln!(output, "### Tested By\n");
     if tests.len() <= MAX_INLINE {
         for t in &tests {
-            let _ = writeln!(output, "- **{}** ({}:{})", t.name, t.file_path, t.line_start);
+            let _ = writeln!(
+                output,
+                "- **{}** ({}:{})",
+                t.name, t.file_path, t.line_start
+            );
         }
     } else {
         let mut file_counts: std::collections::BTreeMap<&str, usize> =
@@ -552,14 +553,14 @@ mod tests {
             .get_symbol_id("target_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        let caller_id = db
-            .get_symbol_id("caller_a", "src/lib.rs")
-            .unwrap()
-            .unwrap();
+        let caller_id = db.get_symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
 
         let result = handle_context(&db, "target_fn", false, None, None).unwrap();
-        assert!(result.contains("### Called By"), "should show callers section");
+        assert!(
+            result.contains("### Called By"),
+            "should show callers section"
+        );
         assert!(result.contains("caller_a"), "should list the caller");
     }
 
@@ -592,14 +593,8 @@ mod tests {
 
         // Qualified query should return only Database::new
         let result = handle_context(&db, "Database::new", false, None, None).unwrap();
-        assert!(
-            result.contains("Database"),
-            "should find Database::new"
-        );
-        assert!(
-            !result.contains("Server"),
-            "should NOT include Server::new"
-        );
+        assert!(result.contains("Database"), "should find Database::new");
+        assert!(!result.contains("Server"), "should NOT include Server::new");
     }
 
     #[test]
@@ -698,15 +693,11 @@ mod tests {
         .unwrap();
 
         let my_fn_id = db.get_symbol_id("my_fn", "src/lib.rs").unwrap().unwrap();
-        let helper_id = db
-            .get_symbol_id("helper", "src/lib.rs")
-            .unwrap()
-            .unwrap();
+        let helper_id = db.get_symbol_id("helper", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(my_fn_id, helper_id, "call").unwrap();
 
         let sections: &[&str] = &["source"];
-        let result =
-            handle_context(&db, "my_fn", false, None, Some(sections)).unwrap();
+        let result = handle_context(&db, "my_fn", false, None, Some(sections)).unwrap();
         assert!(result.contains("### Source"), "source section present");
         assert!(!result.contains("### Callees"), "callees section absent");
     }
@@ -751,20 +742,12 @@ mod tests {
         )
         .unwrap();
 
-        let invoker_id = db
-            .get_symbol_id("invoker", "src/lib.rs")
-            .unwrap()
-            .unwrap();
-        let target_id = db
-            .get_symbol_id("target", "src/lib.rs")
-            .unwrap()
-            .unwrap();
-        db.insert_symbol_ref(invoker_id, target_id, "call")
-            .unwrap();
+        let invoker_id = db.get_symbol_id("invoker", "src/lib.rs").unwrap().unwrap();
+        let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(invoker_id, target_id, "call").unwrap();
 
         let sections: &[&str] = &["callers"];
-        let result =
-            handle_context(&db, "target", false, None, Some(sections)).unwrap();
+        let result = handle_context(&db, "target", false, None, Some(sections)).unwrap();
         assert!(result.contains("### Called By"), "callers section present");
         assert!(!result.contains("### Source"), "source section absent");
     }
@@ -809,15 +792,11 @@ mod tests {
         )
         .unwrap();
 
-        let all_fn_id = db
-            .get_symbol_id("all_fn", "src/lib.rs")
-            .unwrap()
-            .unwrap();
+        let all_fn_id = db.get_symbol_id("all_fn", "src/lib.rs").unwrap().unwrap();
         let dep_id = db.get_symbol_id("dep", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(all_fn_id, dep_id, "call").unwrap();
 
-        let result =
-            handle_context(&db, "all_fn", false, None, None).unwrap();
+        let result = handle_context(&db, "all_fn", false, None, None).unwrap();
         assert!(result.contains("### Source"), "source present");
         assert!(result.contains("### Callees"), "callees present");
     }

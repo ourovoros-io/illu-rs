@@ -14,9 +14,7 @@ pub fn handle_neighborhood(
         return Ok(format!("Symbol '{symbol_name}' not found."));
     }
 
-    let base = symbol_name
-        .split_once("::")
-        .map_or(symbol_name, |(_, m)| m);
+    let base = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);
 
     // BFS outward (callees)
     let mut outward: BTreeMap<String, usize> = BTreeMap::new();
@@ -58,10 +56,7 @@ pub fn handle_neighborhood(
         "## Neighborhood: {symbol_name} (depth {max_depth})\n"
     );
 
-    let callers: Vec<_> = inward
-        .iter()
-        .filter(|(n, _)| n.as_str() != base)
-        .collect();
+    let callers: Vec<_> = inward.iter().filter(|(n, _)| n.as_str() != base).collect();
     if !callers.is_empty() {
         let _ = writeln!(output, "### Callers (upstream)\n");
         for (name, d) in &callers {
@@ -80,10 +75,7 @@ pub fn handle_neighborhood(
     }
     let _ = writeln!(output);
 
-    let callees: Vec<_> = outward
-        .iter()
-        .filter(|(n, _)| n.as_str() != base)
-        .collect();
+    let callees: Vec<_> = outward.iter().filter(|(n, _)| n.as_str() != base).collect();
     if !callees.is_empty() {
         let _ = writeln!(output, "### Callees (downstream)\n");
         for (name, d) in &callees {

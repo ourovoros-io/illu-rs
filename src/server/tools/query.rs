@@ -25,12 +25,10 @@ pub fn handle_query(
         }
         "doc_comments" => format_doc_comments(db, query, kind, path, &mut output)?,
         other => {
-            return Err(
-                format!(
-                    "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, all"
-                )
-                .into(),
-            );
+            return Err(format!(
+                "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, all"
+            )
+            .into());
         }
     }
 
@@ -202,6 +200,23 @@ mod tests {
     use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
+    fn make_fn(name: &str, file: &str, line: usize, sig: &str) -> Symbol {
+        Symbol {
+            name: name.into(),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Public,
+            file_path: file.into(),
+            line_start: line,
+            line_end: line + 5,
+            signature: sig.into(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: None,
+            impl_type: None,
+        }
+    }
+
     #[test]
     fn test_query_symbols() {
         let db = Database::open_in_memory().unwrap();
@@ -238,7 +253,8 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "Serde serialization framework")
             .unwrap();
 
-        let result = handle_query(&db, "serialization", Some("docs"), None, None, None, None).unwrap();
+        let result =
+            handle_query(&db, "serialization", Some("docs"), None, None, None, None).unwrap();
         assert!(result.contains("serialization"));
     }
 
@@ -294,7 +310,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_query(&db, "parse_config", Some("symbols"), None, None, None, None).unwrap();
+        let result =
+            handle_query(&db, "parse_config", Some("symbols"), None, None, None, None).unwrap();
         assert!(result.contains("*Parse configuration from file.*"));
         assert!(!result.contains("Supports TOML"));
     }
@@ -339,14 +356,32 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_query(&db, "Config", Some("symbols"), Some("struct"), None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "Config",
+            Some("symbols"),
+            Some("struct"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(result.contains("Config"), "should find Config struct");
         assert!(
             !result.contains("configure"),
             "should not include functions"
         );
 
-        let result = handle_query(&db, "Config", Some("symbols"), Some("function"), None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "Config",
+            Some("symbols"),
+            Some("function"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(!result.contains("Config"), "struct should be filtered out");
     }
 
@@ -360,65 +395,66 @@ mod tests {
     #[test]
     fn test_query_path_filter() {
         let db = Database::open_in_memory().unwrap();
-        let file_a = db.insert_file("src/server/mod.rs", "hash_a").unwrap();
-        let file_b = db.insert_file("src/db.rs", "hash_b").unwrap();
+        let fa = db.insert_file("src/server/mod.rs", "ha").unwrap();
+        let fb = db.insert_file("src/db.rs", "hb").unwrap();
         store_symbols(
             &db,
-            file_a,
-            &[Symbol {
-                name: "serve".into(),
-                kind: SymbolKind::Function,
-                visibility: Visibility::Public,
-                file_path: "src/server/mod.rs".into(),
-                line_start: 1,
-                line_end: 10,
-                signature: "pub fn serve()".into(),
-                doc_comment: None,
-                body: None,
-                details: None,
-                attributes: None,
-                impl_type: None,
-            }],
+            fa,
+            &[make_fn("serve", "src/server/mod.rs", 1, "pub fn serve()")],
         )
         .unwrap();
         store_symbols(
             &db,
-            file_b,
-            &[Symbol {
-                name: "query_db".into(),
-                kind: SymbolKind::Function,
-                visibility: Visibility::Public,
-                file_path: "src/db.rs".into(),
-                line_start: 1,
-                line_end: 5,
-                signature: "pub fn query_db()".into(),
-                doc_comment: None,
-                body: None,
-                details: None,
-                attributes: None,
-                impl_type: None,
-            }],
+            fb,
+            &[make_fn("query_db", "src/db.rs", 1, "pub fn query_db()")],
         )
         .unwrap();
 
-        // Without path filter: both symbols found via signature search
-        let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), None).unwrap();
-        assert!(result.contains("serve"), "should find serve without path filter");
-        assert!(result.contains("query_db"), "should find query_db without path filter");
+        // No path filter: both found
+        let r = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), None).unwrap();
+        assert!(r.contains("serve"));
+        assert!(r.contains("query_db"));
 
-        // With path filter to src/server/: only serve
-        let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), Some("src/server/")).unwrap();
-        assert!(result.contains("serve"), "should find serve under src/server/");
-        assert!(!result.contains("query_db"), "should not find query_db under src/server/");
+        // Filter to src/server/
+        let r = handle_query(
+            &db,
+            "",
+            Some("symbols"),
+            None,
+            None,
+            Some("pub fn"),
+            Some("src/server/"),
+        )
+        .unwrap();
+        assert!(r.contains("serve"));
+        assert!(!r.contains("query_db"));
 
-        // With path filter to src/db.rs: only query_db
-        let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), Some("src/db.rs")).unwrap();
-        assert!(!result.contains("serve"), "should not find serve under src/db.rs");
-        assert!(result.contains("query_db"), "should find query_db under src/db.rs");
+        // Filter to src/db.rs
+        let r = handle_query(
+            &db,
+            "",
+            Some("symbols"),
+            None,
+            None,
+            Some("pub fn"),
+            Some("src/db.rs"),
+        )
+        .unwrap();
+        assert!(!r.contains("serve"));
+        assert!(r.contains("query_db"));
 
-        // With path filter to nonexistent path: no results
-        let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), Some("src/other/")).unwrap();
-        assert!(result.contains("No results found"), "no symbols under src/other/");
+        // Nonexistent path
+        let r = handle_query(
+            &db,
+            "",
+            Some("symbols"),
+            None,
+            None,
+            Some("pub fn"),
+            Some("src/other/"),
+        )
+        .unwrap();
+        assert!(r.contains("No results found"));
     }
 
     #[test]
@@ -463,12 +499,23 @@ mod tests {
 
         // Combined: attribute=test AND signature contains Database
         let result = handle_query(
-            &db, "", Some("symbols"), None,
-            Some("test"), Some("Database"), None,
+            &db,
+            "",
+            Some("symbols"),
+            None,
+            Some("test"),
+            Some("Database"),
+            None,
         )
         .unwrap();
-        assert!(result.contains("test_fn"), "should find fn with both attribute and signature match");
-        assert!(!result.contains("other_test"), "should exclude fn without matching signature");
+        assert!(
+            result.contains("test_fn"),
+            "should find fn with both attribute and signature match"
+        );
+        assert!(
+            !result.contains("other_test"),
+            "should exclude fn without matching signature"
+        );
     }
 
     #[test]
@@ -488,8 +535,7 @@ mod tests {
                     line_end: 10,
                     signature: "pub fn parse_config() -> Config".into(),
                     doc_comment: Some(
-                        "Parse configuration from TOML files.\nHandles errors gracefully."
-                            .into(),
+                        "Parse configuration from TOML files.\nHandles errors gracefully.".into(),
                     ),
                     body: None,
                     details: None,
@@ -530,14 +576,30 @@ mod tests {
 
         let result =
             handle_query(&db, "TOML", Some("doc_comments"), None, None, None, None).unwrap();
-        assert!(result.contains("parse_config"), "should find symbol with TOML in doc");
-        assert!(!result.contains("save_config"), "should not find unrelated doc");
-        assert!(!result.contains("no_docs"), "should not find symbol without docs");
+        assert!(
+            result.contains("parse_config"),
+            "should find symbol with TOML in doc"
+        );
+        assert!(
+            !result.contains("save_config"),
+            "should not find unrelated doc"
+        );
+        assert!(
+            !result.contains("no_docs"),
+            "should not find symbol without docs"
+        );
         assert!(result.contains("Symbols matching doc comments"));
 
-        let result =
-            handle_query(&db, "nonexistent", Some("doc_comments"), None, None, None, None)
-                .unwrap();
+        let result = handle_query(
+            &db,
+            "nonexistent",
+            Some("doc_comments"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(result.contains("No results found"));
     }
 }

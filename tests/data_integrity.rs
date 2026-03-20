@@ -618,7 +618,8 @@ pub fn use_config() -> AppConfig {
 ",
     )]);
 
-    let query_result = query::handle_query(&db, "AppConfig", Some("symbols"), None, None, None, None).unwrap();
+    let query_result =
+        query::handle_query(&db, "AppConfig", Some("symbols"), None, None, None, None).unwrap();
     let context_result = context::handle_context(&db, "AppConfig", false, None, None).unwrap();
     let impact_result = impact::handle_impact(&db, "AppConfig", None, false).unwrap();
 
@@ -741,7 +742,8 @@ edition = "2021"
     );
 
     // Both Error structs should appear, disambiguated by file path
-    let result = query::handle_query(&db, "Error", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "Error", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("core/src/lib.rs"),
         "should show core's Error: {result}"
@@ -859,7 +861,8 @@ pub struct ConfigLoader;
 pub struct Config;
 ",
     );
-    let result = query::handle_query(&db, "Config", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "Config", Some("symbols"), None, None, None, None).unwrap();
 
     // Find positions of exact match vs others
     let exact_pos = result.find("**Config** (struct)");
@@ -1046,10 +1049,7 @@ fn docs_tool_shows_version_and_source() {
         result.contains("1.0.210"),
         "docs must include version: {result}"
     );
-    assert!(
-        result.contains("cargo_doc"),
-        "must show source: {result}"
-    );
+    assert!(result.contains("cargo_doc"), "must show source: {result}");
 }
 
 #[test]
@@ -1415,10 +1415,7 @@ pub fn depth3() { depth2(); }
     assert!(result.contains("depth1"), "depth1 at depth 1: {result}");
     assert!(result.contains("depth2"), "depth2 at depth 2: {result}");
     assert!(result.contains("depth3"), "depth3 at depth 3: {result}");
-    assert!(
-        result.contains("via"),
-        "must show via chain: {result}"
-    );
+    assert!(result.contains("via"), "must show via chain: {result}");
 }
 
 #[test]
@@ -1458,11 +1455,7 @@ fn refresh_cleans_refs_from_unchanged_caller_to_deleted_target() {
     );
 
     // Remove helper_target definition, caller stops calling it
-    std::fs::write(
-        src_dir.join("lib.rs"),
-        "pub fn caller() { }\n",
-    )
-    .unwrap();
+    std::fs::write(src_dir.join("lib.rs"), "pub fn caller() { }\n").unwrap();
     refresh_index(&db, &config).unwrap();
 
     let syms = db.search_symbols("helper_target").unwrap();
@@ -1492,11 +1485,7 @@ fn refresh_updates_line_numbers() {
     let syms = db.search_symbols("foo").unwrap();
     assert_eq!(syms[0].line_start, 1, "initially at line 1");
 
-    std::fs::write(
-        src_dir.join("lib.rs"),
-        "\n\n\n\n\npub fn foo() {}\n",
-    )
-    .unwrap();
+    std::fs::write(src_dir.join("lib.rs"), "\n\n\n\n\npub fn foo() {}\n").unwrap();
     refresh_index(&db, &config).unwrap();
 
     let syms = db.search_symbols("foo").unwrap();
@@ -1553,9 +1542,7 @@ fn context_full_body_returns_untruncated_source() {
 #[test]
 fn docs_no_topic_lists_modules() {
     let (_dir, db) = index_source("pub fn placeholder() {}\n");
-    let dep_id = db
-        .insert_dependency("tokio", "1.35.0", true, None)
-        .unwrap();
+    let dep_id = db.insert_dependency("tokio", "1.35.0", true, None).unwrap();
     db.store_doc_with_module(dep_id, "cargo_doc", "Tokio summary", "")
         .unwrap();
     db.store_doc_with_module(dep_id, "cargo_doc", "Sync primitives", "sync")
@@ -1564,14 +1551,8 @@ fn docs_no_topic_lists_modules() {
         .unwrap();
 
     let result = docs::handle_docs(&db, "tokio", None).unwrap();
-    assert!(
-        result.contains("sync"),
-        "must list sync module: {result}"
-    );
-    assert!(
-        result.contains("fs"),
-        "must list fs module: {result}"
-    );
+    assert!(result.contains("sync"), "must list sync module: {result}");
+    assert!(result.contains("fs"), "must list fs module: {result}");
 }
 
 #[test]
@@ -1611,7 +1592,10 @@ fn empty_file_indexed_without_error() {
 fn comment_only_file_indexed_without_error() {
     let (_dir, db) = index_multi_file(&[
         ("lib.rs", "pub mod comments;\npub fn real() {}\n"),
-        ("comments.rs", "// This file has only comments\n// Nothing else\n"),
+        (
+            "comments.rs",
+            "// This file has only comments\n// Nothing else\n",
+        ),
     ]);
     let syms = db.search_symbols("real").unwrap();
     assert_eq!(syms.len(), 1);
@@ -1666,7 +1650,8 @@ fn refresh_handles_new_file_added() {
 
     refresh_index(&db, &config).unwrap();
 
-    let result = query::handle_query(&db, "bonus", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "bonus", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("bonus"),
         "refresh should pick up new file's symbols"
@@ -1705,7 +1690,8 @@ fn refresh_handles_file_content_change() {
         old_syms.is_empty(),
         "old symbol should be gone after refresh"
     );
-    let new_result = query::handle_query(&db, "version_two", Some("symbols"), None, None, None, None).unwrap();
+    let new_result =
+        query::handle_query(&db, "version_two", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         new_result.contains("version_two"),
         "new symbol should appear after refresh"
@@ -2191,7 +2177,14 @@ fn query_with_colon_does_not_crash() {
 #[test]
 fn query_with_fts_operators_does_not_crash() {
     let (_dir, db) = index_source("pub fn hello() {}\n");
-    for q in &["OR DROP", "NOT something", "foo{bar}", "test -flag", "a&b", "\"quoted\""] {
+    for q in &[
+        "OR DROP",
+        "NOT something",
+        "foo{bar}",
+        "test -flag",
+        "a&b",
+        "\"quoted\"",
+    ] {
         let result = query::handle_query(&db, q, Some("symbols"), None, None, None, None);
         assert!(result.is_ok(), "query '{q}' must not crash: {result:?}");
     }
@@ -2201,7 +2194,19 @@ fn query_with_fts_operators_does_not_crash() {
 fn query_with_special_chars_falls_back_to_like() {
     let (_dir, db) = index_source("pub fn config_parser() {}\n");
     // Underscore query should still find results via LIKE fallback
-    let result = query::handle_query(&db, "config.parser", Some("symbols"), None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "config.parser",
+        Some("symbols"),
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     // Should not crash — may or may not find results depending on LIKE matching
-    assert!(!result.contains("error"), "should not contain error: {result}");
+    assert!(
+        !result.contains("error"),
+        "should not contain error: {result}"
+    );
 }

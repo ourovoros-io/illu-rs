@@ -104,7 +104,8 @@ impl std::fmt::Display for Config {
 #[test]
 fn test_query_tool_symbols() {
     let (_dir, db) = setup_indexed_db();
-    let result = query::handle_query(&db, "parse", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "parse", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("parse_config"),
         "query should find parse_config"
@@ -114,7 +115,8 @@ fn test_query_tool_symbols() {
 #[test]
 fn test_query_tool_docs() {
     let (_dir, db) = setup_indexed_db();
-    let result = query::handle_query(&db, "serializ", Some("docs"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "serializ", Some("docs"), None, None, None, None).unwrap();
     assert!(result.contains("Serde"), "query should find serde docs");
 }
 
@@ -278,7 +280,8 @@ pub fn run() -> SharedConfig {
 #[test]
 fn test_workspace_query_across_crates() {
     let (_dir, db) = setup_workspace_db();
-    let result = query::handle_query(&db, "SharedConfig", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "SharedConfig", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("SharedConfig"),
         "query should find SharedConfig from shared crate"
@@ -363,7 +366,8 @@ fn test_context_callees() {
 #[test]
 fn test_query_doc_snippet() {
     let (_dir, db) = setup_indexed_db();
-    let result = query::handle_query(&db, "parse_config", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "parse_config", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("Parse configuration"),
         "query should show doc comment snippet"

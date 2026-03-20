@@ -1191,10 +1191,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn search_symbols_by_signature(
-        &self,
-        pattern: &str,
-    ) -> SqlResult<Vec<StoredSymbol>> {
+    pub fn search_symbols_by_signature(&self, pattern: &str) -> SqlResult<Vec<StoredSymbol>> {
         let like_pattern = format!("%{}%", escape_like(pattern));
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
@@ -1215,11 +1212,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees(
-        &self,
-        symbol_name: &str,
-        source_file: &str,
-    ) -> SqlResult<Vec<CalleeInfo>> {
+    pub fn get_callees(&self, symbol_name: &str, source_file: &str) -> SqlResult<Vec<CalleeInfo>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind \
              FROM symbol_refs sr \
@@ -1243,11 +1236,7 @@ impl Database {
     }
 
     /// Find symbols that directly reference the given symbol (reverse of `get_callees`).
-    pub fn get_callers(
-        &self,
-        symbol_name: &str,
-        target_file: &str,
-    ) -> SqlResult<Vec<CalleeInfo>> {
+    pub fn get_callers(&self, symbol_name: &str, target_file: &str) -> SqlResult<Vec<CalleeInfo>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind \
              FROM symbol_refs sr \
@@ -1270,10 +1259,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees_by_name(
-        &self,
-        symbol_name: &str,
-    ) -> SqlResult<Vec<(String, String)>> {
+    pub fn get_callees_by_name(&self, symbol_name: &str) -> SqlResult<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
@@ -1290,10 +1276,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callers_by_name(
-        &self,
-        symbol_name: &str,
-    ) -> SqlResult<Vec<(String, String)>> {
+    pub fn get_callers_by_name(&self, symbol_name: &str) -> SqlResult<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT ss.name, sf.path \
              FROM symbol_refs sr \
@@ -1365,13 +1348,9 @@ impl Database {
             let path: String = row.get(2)?;
             let impl_type: Option<String> = row.get(3)?;
 
-            file_qualified
-                .entry((name.clone(), path))
-                .or_insert(id);
+            file_qualified.entry((name.clone(), path)).or_insert(id);
             if let Some(it) = impl_type {
-                impl_qualified
-                    .entry((name.clone(), it))
-                    .or_insert(id);
+                impl_qualified.entry((name.clone(), it)).or_insert(id);
             }
             name_only.entry(name).or_insert(id);
         }
@@ -1476,10 +1455,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_file_dependencies(
-        &self,
-        path_prefix: &str,
-    ) -> SqlResult<Vec<(String, String)>> {
+    pub fn get_file_dependencies(&self, path_prefix: &str) -> SqlResult<Vec<(String, String)>> {
         let pattern = format!("{path_prefix}%");
         let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT sf.path, tf.path \
