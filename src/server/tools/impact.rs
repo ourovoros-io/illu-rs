@@ -7,10 +7,6 @@ pub fn handle_impact(
     max_depth: Option<i64>,
     summary: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    // Summarization threshold: depth 3+ with >10 entries gets grouped by file
-    const SUMMARY_DEPTH: i64 = 3;
-    const SUMMARY_THRESHOLD: usize = 10;
-
     let symbols = db.search_symbols(symbol_name)?;
     if symbols.is_empty() {
         return Ok(format!(
@@ -49,7 +45,7 @@ pub fn handle_impact(
         if dep.depth != current_depth {
             // Flush previous depth
             if !depth_buf.is_empty() {
-                render_depth_entries(&mut output, current_depth, &depth_buf, summary, SUMMARY_DEPTH, SUMMARY_THRESHOLD);
+                render_depth_entries(&mut output, current_depth, &depth_buf, summary);
                 depth_buf.clear();
             }
             current_depth = dep.depth;
@@ -58,7 +54,7 @@ pub fn handle_impact(
     }
     // Flush last depth
     if !depth_buf.is_empty() {
-        render_depth_entries(&mut output, current_depth, &depth_buf, summary, SUMMARY_DEPTH, SUMMARY_THRESHOLD);
+        render_depth_entries(&mut output, current_depth, &depth_buf, summary);
     }
 
     if dependents.is_empty() {
@@ -97,10 +93,11 @@ fn render_depth_entries(
     depth: i64,
     entries: &[&crate::db::ImpactEntry],
     summary: bool,
-    summary_depth: i64,
-    summary_threshold: usize,
 ) {
-    let should_summarize = summary && depth >= summary_depth && entries.len() > summary_threshold;
+    const SUMMARY_DEPTH: i64 = 3;
+    const SUMMARY_THRESHOLD: usize = 10;
+
+    let should_summarize = summary && depth >= SUMMARY_DEPTH && entries.len() > SUMMARY_THRESHOLD;
 
     if should_summarize {
         // Group by file

@@ -43,17 +43,7 @@ fn resolve_symbols(
     symbol_name: &str,
     file: Option<&str>,
 ) -> Result<Vec<StoredSymbol>, Box<dyn std::error::Error>> {
-    let mut symbols = if let Some((impl_type, method)) = symbol_name.split_once("::") {
-        let results = db.search_symbols_by_impl(impl_type, method)?;
-        if results.is_empty() {
-            // Fall back to normal search in case `::` was part of a path
-            db.search_symbols(symbol_name)?
-        } else {
-            results
-        }
-    } else {
-        db.search_symbols(symbol_name)?
-    };
+    let mut symbols = super::resolve_symbol(db, symbol_name)?;
 
     if let Some(fp) = file {
         symbols.retain(|s| s.file_path == fp);
