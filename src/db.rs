@@ -1290,6 +1290,26 @@ impl Database {
         Ok(results)
     }
 
+    pub fn get_callers_by_name(
+        &self,
+        symbol_name: &str,
+    ) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT ss.name, sf.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             WHERE ts.name = ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![symbol_name])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
+
     pub fn get_docs_for_dependency(&self, name: &str) -> SqlResult<Vec<DocResult>> {
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version, d.module \
@@ -2500,5 +2520,43 @@ mod tests {
         // Non-existent impl type
         let missing = db.get_symbol_id_in_impl("method", "Nonexistent").unwrap();
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_get_callers_by_name() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'caller_fn', 'function', 'public', \
+                         1, 10, 'fn caller_fn()')",
+                params![file_id],
+            )
+            .unwrap();
+        let caller_id = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'target_fn', 'function', 'public', \
+                         12, 20, 'fn target_fn()')",
+                params![file_id],
+            )
+            .unwrap();
+        let target_id = SymbolId(db.conn.last_insert_rowid());
+        db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
+
+        let callers = db.get_callers_by_name("target_fn").unwrap();
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0].0, "caller_fn");
+        assert_eq!(callers[0].1, "src/lib.rs");
+
+        // No callers for caller_fn
+        let empty = db.get_callers_by_name("caller_fn").unwrap();
+        assert!(empty.is_empty());
     }
 }

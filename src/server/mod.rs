@@ -169,6 +169,14 @@ struct ImplementsParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct NeighborhoodParams {
+    /// Symbol to explore around
+    symbol_name: String,
+    /// Max hops in each direction (default: 2)
+    depth: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -435,6 +443,25 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "neighborhood",
+        description = "Explore the local call graph around a symbol. Shows callers (upstream) and callees (downstream) within N hops. Use for understanding a symbol's role in the architecture."
+    )]
+    async fn neighborhood(
+        &self,
+        Parameters(params): Parameters<NeighborhoodParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, depth = ?params.depth, "Tool call: neighborhood");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("neighborhood ▸ {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::neighborhood::handle_neighborhood(&db, &params.symbol_name, params.depth)
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -471,6 +498,7 @@ impl ServerHandler for IlluServer {
                  'overview' for structural maps, \
                  'tree' for file/module tree, \
                  'implements' for trait/type relationships, \
+                 'neighborhood' for bidirectional call graph exploration, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
