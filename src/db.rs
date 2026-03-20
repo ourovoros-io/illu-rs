@@ -1377,6 +1377,41 @@ impl Database {
         }
         Ok(count)
     }
+
+    pub fn get_unreferenced_symbols(
+        &self,
+        path_prefix: Option<&str>,
+        include_private: bool,
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        let prefix = path_prefix.unwrap_or("");
+        let like_pattern = format!("{prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, \
+                    s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             LEFT JOIN symbol_refs sr ON sr.target_symbol_id = s.id \
+             WHERE sr.id IS NULL \
+               AND f.path LIKE ?1 \
+               AND s.kind NOT IN ('use', 'mod', 'impl') \
+             ORDER BY f.path, s.line_start",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![like_pattern])?;
+        while let Some(row) = rows.next()? {
+            let sym = row_to_stored_symbol(row)?;
+            if !include_private
+                && sym.visibility != Visibility::Public
+                && sym.visibility != Visibility::PublicCrate
+            {
+                continue;
+            }
+            results.push(sym);
+        }
+        Ok(results)
+    }
 }
 
 pub struct SymbolIdMap {

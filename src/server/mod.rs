@@ -141,6 +141,16 @@ struct BatchContextParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct UnusedParams {
+    /// Filter to files under this path prefix (e.g. "src/server/")
+    path: Option<String>,
+    /// Filter by symbol kind: function, struct, enum, trait, etc.
+    kind: Option<String>,
+    /// Include private symbols (default: false, shows only pub/pub(crate))
+    include_private: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct FreshnessParams {}
 
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
@@ -347,6 +357,28 @@ impl IlluServer {
         let full_body = params.full_body.unwrap_or(false);
         let result = tools::batch_context::handle_batch_context(
             &db, &params.symbols, full_body,
+        )
+        .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "unused",
+        description = "Find potentially unused symbols (no incoming references). Excludes entry points like main and #[test]. Useful for dead code detection."
+    )]
+    async fn unused(
+        &self,
+        Parameters(params): Parameters<UnusedParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = ?params.path, kind = ?params.kind, "Tool call: unused");
+        let _guard = crate::status::StatusGuard::new("unused");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::unused::handle_unused(
+            &db,
+            params.path.as_deref(),
+            params.kind.as_deref(),
+            params.include_private.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
