@@ -5,6 +5,7 @@ pub enum SymbolKind {
     Function,
     Struct,
     Enum,
+    EnumVariant,
     Trait,
     Impl,
     Use,
@@ -22,6 +23,7 @@ impl std::fmt::Display for SymbolKind {
             Self::Function => "function",
             Self::Struct => "struct",
             Self::Enum => "enum",
+            Self::EnumVariant => "enum_variant",
             Self::Trait => "trait",
             Self::Impl => "impl",
             Self::Use => "use",
@@ -43,6 +45,7 @@ impl std::str::FromStr for SymbolKind {
             "function" => Ok(Self::Function),
             "struct" => Ok(Self::Struct),
             "enum" => Ok(Self::Enum),
+            "enum_variant" => Ok(Self::EnumVariant),
             "trait" => Ok(Self::Trait),
             "impl" => Ok(Self::Impl),
             "use" => Ok(Self::Use),
@@ -281,6 +284,16 @@ fn extract_symbols(
                     _ => continue,
                 };
                 if let Some(sym) = extract_named_item(&child, source, file_path, kind) {
+                    if child.kind() == "enum_item" {
+                        extract_enum_variants(
+                            &child,
+                            source,
+                            file_path,
+                            &sym.name,
+                            &sym.visibility,
+                            symbols,
+                        );
+                    }
                     symbols.push(sym);
                 }
             }
@@ -409,6 +422,45 @@ fn extract_enum_details(node: &Node, source: &str) -> Option<String> {
         return None;
     }
     Some(variants.join("\n"))
+}
+
+fn extract_enum_variants(
+    enum_node: &Node,
+    source: &str,
+    file_path: &str,
+    enum_name: &str,
+    enum_vis: &Visibility,
+    symbols: &mut Vec<Symbol>,
+) {
+    let Some(list) = find_child_by_kind(enum_node, "enum_variant_list") else {
+        return;
+    };
+    let mut cursor = list.walk();
+    for child in list.children(&mut cursor) {
+        if child.kind() == "enum_variant" {
+            let Some(name_node) = find_child_by_kind(&child, "identifier") else {
+                continue;
+            };
+            let variant_name = node_text(&name_node, source);
+            let text = node_text(&child, source).trim_end().to_string();
+            let text = text.strip_suffix(',').unwrap_or(&text).to_string();
+            let (line_start, line_end) = line_range(&child);
+            symbols.push(Symbol {
+                name: variant_name,
+                kind: SymbolKind::EnumVariant,
+                visibility: enum_vis.clone(),
+                file_path: file_path.to_string(),
+                line_start,
+                line_end,
+                signature: text,
+                doc_comment: extract_doc_comment(&child, source),
+                body: None,
+                details: None,
+                attributes: extract_attributes(&child, source),
+                impl_type: Some(enum_name.to_string()),
+            });
+        }
+    }
 }
 
 fn extract_trait_details(node: &Node, source: &str) -> Option<String> {
@@ -606,11 +658,6 @@ pub struct TraitImpl {
 }
 
 const NOISY_SYMBOL_NAMES: &[&str] = &[
-    "new",
-    "default",
-    "from",
-    "into",
-    "clone",
     "fmt",
     "eq",
     "ne",
@@ -628,8 +675,6 @@ const NOISY_SYMBOL_NAMES: &[&str] = &[
     "to_owned",
     "try_from",
     "try_into",
-    "build",
-    "init",
 ];
 
 fn is_noisy_symbol(name: &str) -> bool {
@@ -1237,6 +1282,35 @@ pub enum Color {
     }
 
     #[test]
+    fn test_enum_variants_as_symbols() {
+        let source = r"
+pub enum Color {
+    Red,
+    Green(u8),
+    Blue { intensity: f32 },
+}
+";
+        let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
+        let variants: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::EnumVariant)
+            .collect();
+        assert_eq!(variants.len(), 3, "should extract 3 variants");
+
+        let red = variants.iter().find(|v| v.name == "Red").unwrap();
+        assert_eq!(red.impl_type.as_deref(), Some("Color"));
+        assert_eq!(red.visibility, Visibility::Public);
+
+        let green = variants.iter().find(|v| v.name == "Green").unwrap();
+        assert!(green.signature.contains("Green(u8)"));
+        assert_eq!(green.impl_type.as_deref(), Some("Color"));
+
+        let blue = variants.iter().find(|v| v.name == "Blue").unwrap();
+        assert!(blue.signature.contains("Blue"));
+        assert_eq!(blue.impl_type.as_deref(), Some("Color"));
+    }
+
+    #[test]
     fn test_extract_trait_methods() {
         let source = r"
 pub trait Drawable {
@@ -1327,8 +1401,8 @@ pub fn caller() -> Config {
             "should find Config as a target"
         );
         assert!(
-            !refs.iter().any(|r| r.target_name == "new"),
-            "should NOT find 'new' as a target (noisy symbol)"
+            refs.iter().any(|r| r.target_name == "new"),
+            "should find 'new' as a target (no longer filtered)"
         );
     }
 
