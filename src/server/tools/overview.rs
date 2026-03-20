@@ -5,6 +5,7 @@ pub fn handle_overview(
     db: &Database,
     path: &str,
     include_private: bool,
+    limit: Option<i64>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = db.get_symbols_by_path_prefix_filtered(path, include_private)?;
 
@@ -16,16 +17,24 @@ pub fn handle_overview(
         ));
     }
 
+    let max_symbols = limit.map(|l| usize::try_from(l.max(1)).unwrap_or(usize::MAX));
     let mut output = String::new();
     let mut current_file = "";
     let mut file_count = 0u32;
     let mut kind_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut shown = 0usize;
 
     for sym in &symbols {
         // Variants are shown in their parent enum's details
         if sym.kind == crate::indexer::parser::SymbolKind::EnumVariant {
             continue;
         }
+        if let Some(max) = max_symbols
+            && shown >= max
+        {
+            break;
+        }
+        shown += 1;
         if sym.file_path != current_file {
             current_file = &sym.file_path;
             file_count += 1;
@@ -49,11 +58,17 @@ pub fn handle_overview(
         let _ = writeln!(output);
     }
 
+    let truncated = max_symbols.is_some_and(|max| shown >= max && symbols.len() > shown);
     let _ = writeln!(
         output,
-        "\n---\n**Summary:** {} symbols across {} files",
-        symbols.len(),
-        file_count
+        "\n---\n**Summary:** {} symbols across {} files{}",
+        shown,
+        file_count,
+        if truncated {
+            format!(" (limited to {shown}, {} total)", symbols.len())
+        } else {
+            String::new()
+        },
     );
     let mut kinds: Vec<_> = kind_counts.into_iter().collect();
     kinds.sort_by(|a, b| b.1.cmp(&a.1));
@@ -114,7 +129,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_overview(&db, "src/server/", false).unwrap();
+        let result = handle_overview(&db, "src/server/", false, None).unwrap();
         assert!(result.contains("### src/server/mod.rs"));
         assert!(result.contains("### src/server/tools.rs"));
         assert!(result.contains("**serve**"));
@@ -161,7 +176,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_overview(&db, "src/", false).unwrap();
+        let result = handle_overview(&db, "src/", false, None).unwrap();
         assert!(result.contains("**public_fn**"));
         assert!(!result.contains("private_fn"));
     }
@@ -169,7 +184,7 @@ mod tests {
     #[test]
     fn test_overview_no_results() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_overview(&db, "nonexistent/", false).unwrap();
+        let result = handle_overview(&db, "nonexistent/", false, None).unwrap();
         assert!(result.contains("No public symbols found under 'nonexistent/'"));
     }
 
@@ -213,11 +228,43 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_overview(&db, "src/", true).unwrap();
+        let result = handle_overview(&db, "src/", true, None).unwrap();
         assert!(result.contains("**public_fn**"));
         assert!(
             result.contains("**private_fn**"),
             "should include private symbols"
         );
+    }
+
+    #[test]
+    fn test_overview_limit() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "h1").unwrap();
+        let symbols: Vec<_> = (0..10)
+            .map(|i| Symbol {
+                name: format!("fn_{i}"),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: i * 10 + 1,
+                line_end: i * 10 + 5,
+                signature: format!("pub fn fn_{i}()"),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            })
+            .collect();
+        store_symbols(&db, file_id, &symbols).unwrap();
+
+        // Without limit: all 10
+        let result = handle_overview(&db, "src/", false, None).unwrap();
+        assert_eq!(result.matches("**fn_").count(), 10);
+
+        // With limit=3: only 3
+        let result = handle_overview(&db, "src/", false, Some(3)).unwrap();
+        assert_eq!(result.matches("**fn_").count(), 3);
+        assert!(result.contains("limited to 3"));
     }
 }

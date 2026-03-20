@@ -393,7 +393,7 @@ impl Server {
 }
 ",
     );
-    let result = context::handle_context(&db, "start", false, None, None).unwrap();
+    let result = context::handle_context(&db, "start", false, None, None, None).unwrap();
     assert!(
         result.contains("bind"),
         "self.bind() should be detected as a callee: {result}"
@@ -618,9 +618,19 @@ pub fn use_config() -> AppConfig {
 ",
     )]);
 
-    let query_result =
-        query::handle_query(&db, "AppConfig", Some("symbols"), None, None, None, None).unwrap();
-    let context_result = context::handle_context(&db, "AppConfig", false, None, None).unwrap();
+    let query_result = query::handle_query(
+        &db,
+        "AppConfig",
+        Some("symbols"),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let context_result =
+        context::handle_context(&db, "AppConfig", false, None, None, None).unwrap();
     let impact_result = impact::handle_impact(&db, "AppConfig", None, false).unwrap();
 
     // All tools must reference the same file path
@@ -651,7 +661,7 @@ pub struct Config {
 }
 ",
     );
-    let result = context::handle_context(&db, "Config", false, None, None).unwrap();
+    let result = context::handle_context(&db, "Config", false, None, None, None).unwrap();
 
     // Every context response MUST include these fields
     assert!(result.contains("**File:**"), "must include file path");
@@ -680,7 +690,8 @@ pub trait MyTrait { fn method(&self); }
 pub enum MyEnum { A, B }
 ",
     );
-    let result = query::handle_query(&db, "My", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "My", Some("symbols"), None, None, None, None, None).unwrap();
 
     // Every symbol in query results must have kind and signature
     for name in &["my_func", "MyStruct", "MyTrait", "MyEnum"] {
@@ -743,7 +754,7 @@ edition = "2021"
 
     // Both Error structs should appear, disambiguated by file path
     let result =
-        query::handle_query(&db, "Error", Some("symbols"), None, None, None, None).unwrap();
+        query::handle_query(&db, "Error", Some("symbols"), None, None, None, None, None).unwrap();
     assert!(
         result.contains("core/src/lib.rs"),
         "should show core's Error: {result}"
@@ -754,7 +765,7 @@ edition = "2021"
     );
 
     // Context should show the correct file for each
-    let ctx = context::handle_context(&db, "Error", false, None, None).unwrap();
+    let ctx = context::handle_context(&db, "Error", false, None, None, None).unwrap();
     assert!(
         ctx.contains("core/src/lib.rs") && ctx.contains("api/src/lib.rs"),
         "context should show both Error structs: {ctx}"
@@ -862,7 +873,7 @@ pub struct Config;
 ",
     );
     let result =
-        query::handle_query(&db, "Config", Some("symbols"), None, None, None, None).unwrap();
+        query::handle_query(&db, "Config", Some("symbols"), None, None, None, None, None).unwrap();
 
     // Find positions of exact match vs others
     let exact_pos = result.find("**Config** (struct)");
@@ -928,7 +939,7 @@ pub fn noop() {}
 pub fn with_return() -> i32 { 42 }
 ",
     );
-    let result = context::handle_context(&db, "noop", false, None, None).unwrap();
+    let result = context::handle_context(&db, "noop", false, None, None, None).unwrap();
     assert!(result.contains("noop"), "empty-body function must be found");
     assert!(
         result.contains("**Signature:**"),
@@ -949,7 +960,7 @@ pub trait Processor {
 }
 ",
     );
-    let result = context::handle_context(&db, "Processor", false, None, None).unwrap();
+    let result = context::handle_context(&db, "Processor", false, None, None, None).unwrap();
     assert!(
         result.contains("Processor"),
         "trait must be found: {result}"
@@ -992,7 +1003,7 @@ fn multiline_doc_comment_fully_preserved() {
 pub fn my_func() -> i32 { 42 }
 ",
     );
-    let result = context::handle_context(&db, "my_func", false, None, None).unwrap();
+    let result = context::handle_context(&db, "my_func", false, None, None, None).unwrap();
     assert!(
         result.contains("First line of docs."),
         "first line: {result}"
@@ -1015,8 +1026,8 @@ pub fn alpha() {}
 pub fn beta() {}
 ",
     );
-    let alpha = context::handle_context(&db, "alpha", false, None, None).unwrap();
-    let beta = context::handle_context(&db, "beta", false, None, None).unwrap();
+    let alpha = context::handle_context(&db, "alpha", false, None, None, None).unwrap();
+    let beta = context::handle_context(&db, "beta", false, None, None, None).unwrap();
 
     assert!(alpha.contains("belongs to alpha"), "alpha's doc: {alpha}");
     assert!(
@@ -1119,7 +1130,7 @@ pub fn start_server() {}
 pub trait Handler {}
 ",
     );
-    let result = overview::handle_overview(&db, "src/", false).unwrap();
+    let result = overview::handle_overview(&db, "src/", false, None).unwrap();
 
     // Every symbol must show kind and signature
     assert!(result.contains("(struct)"), "struct kind: {result}");
@@ -1151,7 +1162,7 @@ fn overview_scoped_to_path_prefix() {
         ("models/user.rs", "pub struct User { pub id: u64 }\n"),
         ("models/post.rs", "pub struct Post { pub title: String }\n"),
     ]);
-    let result = overview::handle_overview(&db, "src/models/", false).unwrap();
+    let result = overview::handle_overview(&db, "src/models/", false, None).unwrap();
 
     assert!(result.contains("User"), "should include User: {result}");
     assert!(result.contains("Post"), "should include Post: {result}");
@@ -1169,7 +1180,7 @@ pub fn alpha() {}
 pub fn beta() {}
 ",
     );
-    let result = overview::handle_overview(&db, "src/", false).unwrap();
+    let result = overview::handle_overview(&db, "src/", false, None).unwrap();
     assert!(result.contains("alpha"), "alpha: {result}");
     assert!(result.contains("beta"), "beta: {result}");
 }
@@ -1522,13 +1533,13 @@ fn context_full_body_returns_untruncated_source() {
     };
     index_repo(&db, &config).unwrap();
 
-    let result = context::handle_context(&db, "big_fn", false, None, None).unwrap();
+    let result = context::handle_context(&db, "big_fn", false, None, None, None).unwrap();
     assert!(
         result.contains("truncated"),
         "should be truncated without full_body: {result}"
     );
 
-    let result = context::handle_context(&db, "big_fn", true, None, None).unwrap();
+    let result = context::handle_context(&db, "big_fn", true, None, None, None).unwrap();
     assert!(
         !result.contains("truncated"),
         "should NOT be truncated with full_body: {result}"
@@ -1651,7 +1662,7 @@ fn refresh_handles_new_file_added() {
     refresh_index(&db, &config).unwrap();
 
     let result =
-        query::handle_query(&db, "bonus", Some("symbols"), None, None, None, None).unwrap();
+        query::handle_query(&db, "bonus", Some("symbols"), None, None, None, None, None).unwrap();
     assert!(
         result.contains("bonus"),
         "refresh should pick up new file's symbols"
@@ -1690,8 +1701,17 @@ fn refresh_handles_file_content_change() {
         old_syms.is_empty(),
         "old symbol should be gone after refresh"
     );
-    let new_result =
-        query::handle_query(&db, "version_two", Some("symbols"), None, None, None, None).unwrap();
+    let new_result = query::handle_query(
+        &db,
+        "version_two",
+        Some("symbols"),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         new_result.contains("version_two"),
         "new symbol should appear after refresh"
@@ -1811,7 +1831,7 @@ fn refresh_updates_changed_signature() {
     index_repo(&db, &config).unwrap();
 
     // Verify initial signature
-    let result = context::handle_context(&db, "transform", false, None, None).unwrap();
+    let result = context::handle_context(&db, "transform", false, None, None, None).unwrap();
     assert!(
         result.contains("transform(x: i32) -> i32"),
         "initial signature should have one param: {result}"
@@ -1825,7 +1845,7 @@ fn refresh_updates_changed_signature() {
     .unwrap();
     refresh_index(&db, &config).unwrap();
 
-    let result = context::handle_context(&db, "transform", false, None, None).unwrap();
+    let result = context::handle_context(&db, "transform", false, None, None, None).unwrap();
     assert!(
         result.contains("transform(x: i32, y: i32)"),
         "refreshed signature should have two params: {result}"
@@ -1920,7 +1940,7 @@ fn refresh_removes_deleted_file_completely() {
     assert!(syms.is_empty(), "help must be removed after file deletion");
 
     // Verify overview does not mention helper.rs
-    let ov = overview::handle_overview(&db, "src/", false).unwrap();
+    let ov = overview::handle_overview(&db, "src/", false, None).unwrap();
     assert!(
         !ov.contains("helper.rs"),
         "overview must not mention deleted helper.rs: {ov}"
@@ -2006,7 +2026,7 @@ impl AppState {
 ",
     );
 
-    let result = context::handle_context(&db, "AppState", false, None, None).unwrap();
+    let result = context::handle_context(&db, "AppState", false, None, None, None).unwrap();
 
     // Header: ## SymbolName (kind)
     assert!(
@@ -2049,7 +2069,8 @@ pub fn beta_fn() -> i32 { 2 }
 ",
     );
 
-    let result = query::handle_query(&db, "fn", Some("symbols"), None, None, None, None).unwrap();
+    let result =
+        query::handle_query(&db, "fn", Some("symbols"), None, None, None, None, None).unwrap();
 
     // Must start with ## Symbols header
     assert!(
@@ -2127,7 +2148,7 @@ pub struct MyPublicStruct {
 ",
     );
 
-    let result = overview::handle_overview(&db, "src/", false).unwrap();
+    let result = overview::handle_overview(&db, "src/", false, None).unwrap();
 
     // File section header: ### path/to/file.rs
     assert!(
@@ -2163,14 +2184,23 @@ pub struct MyPublicStruct {
 #[test]
 fn query_with_dot_does_not_crash() {
     let (_dir, db) = index_source("pub fn hello() {}\n");
-    let result = query::handle_query(&db, "self.method", Some("symbols"), None, None, None, None);
+    let result = query::handle_query(
+        &db,
+        "self.method",
+        Some("symbols"),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     assert!(result.is_ok(), "dot in query must not crash: {result:?}");
 }
 
 #[test]
 fn query_with_colon_does_not_crash() {
     let (_dir, db) = index_source("pub fn hello() {}\n");
-    let result = query::handle_query(&db, "a:b", Some("symbols"), None, None, None, None);
+    let result = query::handle_query(&db, "a:b", Some("symbols"), None, None, None, None, None);
     assert!(result.is_ok(), "colon in query must not crash: {result:?}");
 }
 
@@ -2185,7 +2215,7 @@ fn query_with_fts_operators_does_not_crash() {
         "a&b",
         "\"quoted\"",
     ] {
-        let result = query::handle_query(&db, q, Some("symbols"), None, None, None, None);
+        let result = query::handle_query(&db, q, Some("symbols"), None, None, None, None, None);
         assert!(result.is_ok(), "query '{q}' must not crash: {result:?}");
     }
 }
@@ -2198,6 +2228,7 @@ fn query_with_special_chars_falls_back_to_like() {
         &db,
         "config.parser",
         Some("symbols"),
+        None,
         None,
         None,
         None,

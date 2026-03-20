@@ -9,6 +9,7 @@ pub fn handle_context(
     full_body: bool,
     file: Option<&str>,
     sections: Option<&[&str]>,
+    callers_path: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = resolve_symbols(db, symbol_name, file)?;
     if symbols.is_empty() {
@@ -33,10 +34,10 @@ pub fn handle_context(
             render_trait_info(db, &mut output, sym)?;
         }
         if show("callers") {
-            render_callers(db, &mut output, sym)?;
+            render_callers(db, &mut output, sym, callers_path)?;
         }
         if show("callees") {
-            render_callees(db, &mut output, sym)?;
+            render_callees(db, &mut output, sym, callers_path)?;
         }
         if show("tested_by") {
             render_tested_by(db, &mut output, sym)?;
@@ -196,8 +197,12 @@ fn render_callers(
     db: &Database,
     output: &mut String,
     sym: &StoredSymbol,
+    callers_path: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let callers = db.get_callers(&sym.name, &sym.file_path)?;
+    let mut callers = db.get_callers(&sym.name, &sym.file_path)?;
+    if let Some(p) = callers_path {
+        callers.retain(|c| c.file_path.starts_with(p));
+    }
     if callers.is_empty() {
         return Ok(());
     }
@@ -215,8 +220,12 @@ fn render_callees(
     db: &Database,
     output: &mut String,
     sym: &StoredSymbol,
+    callers_path: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let callees = db.get_callees(&sym.name, &sym.file_path)?;
+    let mut callees = db.get_callees(&sym.name, &sym.file_path)?;
+    if let Some(p) = callers_path {
+        callees.retain(|c| c.file_path.starts_with(p));
+    }
     if callees.is_empty() {
         return Ok(());
     }
@@ -339,7 +348,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "parse_config", false, None, None).unwrap();
+        let result = handle_context(&db, "parse_config", false, None, None, None).unwrap();
         assert!(result.contains("parse_config"));
         assert!(result.contains("src/lib.rs"));
         assert!(result.contains("public"));
@@ -348,7 +357,7 @@ mod tests {
     #[test]
     fn test_context_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_context(&db, "nonexistent", false, None, None).unwrap();
+        let result = handle_context(&db, "nonexistent", false, None, None, None).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
@@ -380,7 +389,7 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "serialize and deserialize data")
             .unwrap();
 
-        let result = handle_context(&db, "serialize", false, None, None).unwrap();
+        let result = handle_context(&db, "serialize", false, None, None, None).unwrap();
         assert!(result.contains("serialize"));
         assert!(result.contains("Related Documentation"));
     }
@@ -409,7 +418,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "Config", false, None, None).unwrap();
+        let result = handle_context(&db, "Config", false, None, None, None).unwrap();
         assert!(result.contains("> Application configuration."));
         assert!(result.contains("> Holds all settings."));
         assert!(result.contains("### Fields/Variants"));
@@ -468,7 +477,7 @@ mod tests {
             .unwrap();
         db.insert_symbol_ref(caller_id, callee_id, "call").unwrap();
 
-        let result = handle_context(&db, "caller_fn", false, None, None).unwrap();
+        let result = handle_context(&db, "caller_fn", false, None, None, None).unwrap();
         assert!(result.contains("### Callees"));
         assert!(result.contains("**Calls:**"));
         assert!(result.contains("callee_fn"));
@@ -503,7 +512,7 @@ mod tests {
         db.insert_trait_impl("MyStruct", "Debug", file_id, 22, 30)
             .unwrap();
 
-        let result = handle_context(&db, "MyStruct", false, None, None).unwrap();
+        let result = handle_context(&db, "MyStruct", false, None, None, None).unwrap();
         assert!(result.contains("### Trait Implementations"));
         assert!(result.contains("**Display**"));
         assert!(result.contains("**Debug**"));
@@ -556,7 +565,7 @@ mod tests {
         let caller_id = db.get_symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
 
-        let result = handle_context(&db, "target_fn", false, None, None).unwrap();
+        let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
         assert!(
             result.contains("### Called By"),
             "should show callers section"
@@ -592,7 +601,7 @@ mod tests {
             .unwrap();
 
         // Qualified query should return only Database::new
-        let result = handle_context(&db, "Database::new", false, None, None).unwrap();
+        let result = handle_context(&db, "Database::new", false, None, None, None).unwrap();
         assert!(result.contains("Database"), "should find Database::new");
         assert!(!result.contains("Server"), "should NOT include Server::new");
     }
@@ -642,12 +651,12 @@ mod tests {
         .unwrap();
 
         // Without file filter: both appear
-        let result = handle_context(&db, "Config", false, None, None).unwrap();
+        let result = handle_context(&db, "Config", false, None, None, None).unwrap();
         assert!(result.contains("src/a.rs"));
         assert!(result.contains("src/b.rs"));
 
         // With file filter: only one
-        let result = handle_context(&db, "Config", false, Some("src/a.rs"), None).unwrap();
+        let result = handle_context(&db, "Config", false, Some("src/a.rs"), None, None).unwrap();
         assert!(result.contains("src/a.rs"));
         assert!(!result.contains("src/b.rs"));
     }
@@ -697,7 +706,7 @@ mod tests {
         db.insert_symbol_ref(my_fn_id, helper_id, "call").unwrap();
 
         let sections: &[&str] = &["source"];
-        let result = handle_context(&db, "my_fn", false, None, Some(sections)).unwrap();
+        let result = handle_context(&db, "my_fn", false, None, Some(sections), None).unwrap();
         assert!(result.contains("### Source"), "source section present");
         assert!(!result.contains("### Callees"), "callees section absent");
     }
@@ -747,7 +756,7 @@ mod tests {
         db.insert_symbol_ref(invoker_id, target_id, "call").unwrap();
 
         let sections: &[&str] = &["callers"];
-        let result = handle_context(&db, "target", false, None, Some(sections)).unwrap();
+        let result = handle_context(&db, "target", false, None, Some(sections), None).unwrap();
         assert!(result.contains("### Called By"), "callers section present");
         assert!(!result.contains("### Source"), "source section absent");
     }
@@ -796,8 +805,97 @@ mod tests {
         let dep_id = db.get_symbol_id("dep", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(all_fn_id, dep_id, "call").unwrap();
 
-        let result = handle_context(&db, "all_fn", false, None, None).unwrap();
+        let result = handle_context(&db, "all_fn", false, None, None, None).unwrap();
         assert!(result.contains("### Source"), "source present");
         assert!(result.contains("### Callees"), "callees present");
+    }
+
+    #[test]
+    fn test_context_callers_path_filter() {
+        let db = Database::open_in_memory().unwrap();
+        let src_file = db.insert_file("src/lib.rs", "h1").unwrap();
+        let test_file = db.insert_file("tests/test.rs", "h2").unwrap();
+        store_symbols(
+            &db,
+            src_file,
+            &[
+                Symbol {
+                    name: "target_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn target_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "src_caller".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn src_caller()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+        store_symbols(
+            &db,
+            test_file,
+            &[Symbol {
+                name: "test_caller".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "tests/test.rs".into(),
+                line_start: 1,
+                line_end: 10,
+                signature: "fn test_caller()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        let target_id = db
+            .get_symbol_id("target_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let src_id = db
+            .get_symbol_id("src_caller", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_id = db
+            .get_symbol_id("test_caller", "tests/test.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(src_id, target_id, "call").unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call").unwrap();
+
+        // Without callers_path: both callers shown
+        let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
+        assert!(result.contains("src_caller"), "src caller present");
+        assert!(result.contains("test_caller"), "test caller present");
+
+        // With callers_path="src/": only src caller
+        let result = handle_context(&db, "target_fn", false, None, None, Some("src/")).unwrap();
+        assert!(result.contains("src_caller"), "src caller present");
+        assert!(
+            !result.contains("test_caller"),
+            "test caller should be filtered out"
+        );
     }
 }

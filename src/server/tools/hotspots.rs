@@ -31,11 +31,7 @@ pub fn handle_hotspots(
     if !most_referencing.is_empty() {
         let _ = writeln!(output, "### Most Referencing (high complexity)\n");
         for (i, (name, file, count)) in most_referencing.iter().enumerate() {
-            let _ = writeln!(
-                output,
-                "{}. **{name}** ({file}) — {count} callees",
-                i + 1
-            );
+            let _ = writeln!(output, "{}. **{name}** ({file}) — {count} callees", i + 1);
         }
         let _ = writeln!(output);
     }
@@ -100,11 +96,9 @@ mod tests {
 
     fn sym_id(db: &Database, name: &str) -> SymbolId {
         db.conn
-            .query_row(
-                "SELECT id FROM symbols WHERE name = ?1",
-                [name],
-                |row| row.get(0),
-            )
+            .query_row("SELECT id FROM symbols WHERE name = ?1", [name], |row| {
+                row.get(0)
+            })
             .unwrap()
     }
 
@@ -151,9 +145,7 @@ mod tests {
         assert!(result.contains("### Largest Functions (by line count)"));
         // complex is 101 lines, hub is 50 lines
         // In "Largest Functions" section, complex should appear before hub
-        let largest_section = result
-            .find("### Largest Functions")
-            .unwrap();
+        let largest_section = result.find("### Largest Functions").unwrap();
         let complex_in_largest = result[largest_section..].find("**complex**");
         let hub_in_largest = result[largest_section..].find("**hub**");
         assert!(complex_in_largest < hub_in_largest);

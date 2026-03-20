@@ -36,6 +36,7 @@ fn bench_query_after_index(c: &mut Criterion) {
                 None,
                 None,
                 None,
+                None,
             )
             .unwrap();
         });
@@ -46,6 +47,7 @@ fn bench_query_after_index(c: &mut Criterion) {
                 &db,
                 black_box("Database"),
                 false,
+                None,
                 None,
                 None,
             )
@@ -60,7 +62,7 @@ fn bench_query_after_index(c: &mut Criterion) {
     });
     group.bench_function("overview", |b| {
         b.iter(|| {
-            illu_rs::server::tools::overview::handle_overview(&db, black_box("src/"), false)
+            illu_rs::server::tools::overview::handle_overview(&db, black_box("src/"), false, None)
                 .unwrap();
         });
     });

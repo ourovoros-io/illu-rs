@@ -291,6 +291,7 @@ fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>
 }
 
 #[tokio::main]
+#[expect(clippy::too_many_lines, reason = "CLI dispatch with many subcommands")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -376,12 +377,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None,
                 None,
                 None,
+                None,
             )?;
             print_result(&result);
         }
         Some(Command::Context { symbol }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_context(&db, &symbol, false, None, None)?;
+            let result = handle_context(&db, &symbol, false, None, None, None)?;
             print_result(&result);
         }
         Some(Command::Impact { symbol }) => {

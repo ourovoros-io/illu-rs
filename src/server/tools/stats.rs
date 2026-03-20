@@ -33,22 +33,14 @@ pub fn handle_stats(
     // Test count
     let test_count = symbols
         .iter()
-        .filter(|s| {
-            s.attributes
-                .as_deref()
-                .is_some_and(|a| a.contains("test"))
-        })
+        .filter(|s| s.attributes.as_deref().is_some_and(|a| a.contains("test")))
         .count();
 
     // Non-test, non-main function count for coverage calc
     let fn_count = symbols
         .iter()
         .filter(|s| s.kind == SymbolKind::Function)
-        .filter(|s| {
-            !s.attributes
-                .as_deref()
-                .is_some_and(|a| a.contains("test"))
-        })
+        .filter(|s| !s.attributes.as_deref().is_some_and(|a| a.contains("test")))
         .filter(|s| s.name != "main")
         .count();
 
@@ -131,12 +123,7 @@ mod tests {
     use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
-    fn make_sym(
-        name: &str,
-        kind: SymbolKind,
-        file: &str,
-        attrs: Option<&str>,
-    ) -> Symbol {
+    fn make_sym(name: &str, kind: SymbolKind, file: &str, attrs: Option<&str>) -> Symbol {
         Symbol {
             name: name.into(),
             kind,
@@ -155,11 +142,9 @@ mod tests {
 
     fn sym_id(db: &Database, name: &str) -> SymbolId {
         db.conn
-            .query_row(
-                "SELECT id FROM symbols WHERE name = ?1",
-                [name],
-                |row| row.get(0),
-            )
+            .query_row("SELECT id FROM symbols WHERE name = ?1", [name], |row| {
+                row.get(0)
+            })
             .unwrap()
     }
 
@@ -224,12 +209,7 @@ mod tests {
             &db,
             f2,
             &[
-                make_sym(
-                    "server_fn",
-                    SymbolKind::Function,
-                    "src/server/mod.rs",
-                    None,
-                ),
+                make_sym("server_fn", SymbolKind::Function, "src/server/mod.rs", None),
                 make_sym(
                     "server_fn2",
                     SymbolKind::Function,

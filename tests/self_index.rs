@@ -37,8 +37,17 @@ fn self_index_finds_database_struct() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result =
-        query::handle_query(&db, "Database", Some("symbols"), None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "Database",
+        Some("symbols"),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("Database"),
         "query should find Database: {result}"
@@ -54,8 +63,17 @@ fn self_index_finds_index_repo_function() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result =
-        query::handle_query(&db, "index_repo", Some("symbols"), None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "index_repo",
+        Some("symbols"),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("index_repo"),
         "query should find index_repo: {result}"
@@ -71,8 +89,17 @@ fn self_index_finds_illu_server() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result =
-        query::handle_query(&db, "IlluServer", Some("symbols"), None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "IlluServer",
+        Some("symbols"),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("IlluServer"),
         "query should find IlluServer: {result}"
@@ -92,7 +119,7 @@ fn self_context_database_has_source() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = context::handle_context(&db, "Database", false, None, None).unwrap();
+    let result = context::handle_context(&db, "Database", false, None, None, None).unwrap();
     assert!(
         result.contains("pub struct Database"),
         "context should show pub struct Database: {result}"
@@ -108,7 +135,8 @@ fn self_context_parse_rust_source_has_signature() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = context::handle_context(&db, "parse_rust_source", false, None, None).unwrap();
+    let result =
+        context::handle_context(&db, "parse_rust_source", false, None, None, None).unwrap();
     assert!(
         result.contains("pub fn parse_rust_source"),
         "context should show pub fn parse_rust_source: {result}"
@@ -124,7 +152,7 @@ fn self_context_handle_query_shows_callees() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = context::handle_context(&db, "handle_query", false, None, None).unwrap();
+    let result = context::handle_context(&db, "handle_query", false, None, None, None).unwrap();
     assert!(
         result.contains("format_symbols") || result.contains("format_docs"),
         "handle_query should show callees like format_symbols or format_docs: {result}"
@@ -169,7 +197,7 @@ fn self_overview_lists_known_public_api() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = overview::handle_overview(&db, "src/", false).unwrap();
+    let result = overview::handle_overview(&db, "src/", false, None).unwrap();
     for name in &["Database", "index_repo", "IlluServer", "parse_rust_source"] {
         assert!(
             result.contains(name),
@@ -183,7 +211,7 @@ fn self_overview_db_module() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = overview::handle_overview(&db, "src/db.rs", false).unwrap();
+    let result = overview::handle_overview(&db, "src/db.rs", false, None).unwrap();
     for name in &["open", "search_symbols", "insert_file", "impact_dependents"] {
         assert!(
             result.contains(name),
@@ -197,9 +225,19 @@ fn self_query_and_context_agree_on_file_path() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let query_result =
-        query::handle_query(&db, "extract_refs", Some("symbols"), None, None, None, None).unwrap();
-    let context_result = context::handle_context(&db, "extract_refs", false, None, None).unwrap();
+    let query_result = query::handle_query(
+        &db,
+        "extract_refs",
+        Some("symbols"),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let context_result =
+        context::handle_context(&db, "extract_refs", false, None, None, None).unwrap();
     assert!(
         query_result.contains("parser.rs"),
         "query should reference parser.rs: {query_result}"
@@ -215,7 +253,7 @@ fn self_index_symbol_count_sanity() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = overview::handle_overview(&db, "src/", false).unwrap();
+    let result = overview::handle_overview(&db, "src/", false, None).unwrap();
     let line_count = result.lines().count();
     assert!(
         line_count > 50,
@@ -249,7 +287,7 @@ fn tool_queries_complete_under_100ms() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let start = Instant::now();
-    let _ = query::handle_query(&db, "Database", None, None, None, None, None).unwrap();
+    let _ = query::handle_query(&db, "Database", None, None, None, None, None, None).unwrap();
     let query_time = start.elapsed();
     assert!(
         query_time.as_millis() < 100,
@@ -257,7 +295,7 @@ fn tool_queries_complete_under_100ms() {
     );
 
     let start = Instant::now();
-    let _ = context::handle_context(&db, "Database", false, None, None).unwrap();
+    let _ = context::handle_context(&db, "Database", false, None, None, None).unwrap();
     let context_time = start.elapsed();
     assert!(
         context_time.as_millis() < 100,
@@ -273,7 +311,7 @@ fn tool_queries_complete_under_100ms() {
     );
 
     let start = Instant::now();
-    let _ = overview::handle_overview(&db, "src/", false).unwrap();
+    let _ = overview::handle_overview(&db, "src/", false, None).unwrap();
     let overview_time = start.elapsed();
     assert!(
         overview_time.as_millis() < 100,
@@ -378,7 +416,7 @@ fn self_every_query_result_has_valid_context() {
         "truncate_at",
     ];
     for name in &known_symbols {
-        let result = context::handle_context(&db, name, false, None, None).unwrap();
+        let result = context::handle_context(&db, name, false, None, None, None).unwrap();
         assert!(
             result.contains("## "),
             "context for '{name}' missing header: {result}"
@@ -405,7 +443,7 @@ fn self_overview_covers_all_public_functions() {
         .filter(|s| s.kind == SymbolKind::Function && s.visibility == Visibility::Public)
         .map(|s| s.name.as_str())
         .collect();
-    let overview_output = overview::handle_overview(&db, "src/", false).unwrap();
+    let overview_output = overview::handle_overview(&db, "src/", false, None).unwrap();
     for name in &public_fns {
         assert!(
             overview_output.contains(name),
