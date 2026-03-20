@@ -418,7 +418,7 @@ pub fn caller() -> u32 {
         "caller should reference helper in callees: {result}"
     );
 
-    let result = impact::handle_impact(&db, "helper", None).unwrap();
+    let result = impact::handle_impact(&db, "helper", None, false).unwrap();
     assert!(
         result.contains("caller"),
         "helper's impact should show caller: {result}"
@@ -456,7 +456,7 @@ pub fn mid() -> i32 { base() + 1 }
 pub fn top() -> i32 { mid() + 1 }
 ",
     );
-    let result = impact::handle_impact(&db, "base", None).unwrap();
+    let result = impact::handle_impact(&db, "base", None, false).unwrap();
     assert!(result.contains("mid"), "direct dependent: {result}");
     assert!(result.contains("top"), "transitive dependent: {result}");
     assert!(
@@ -484,7 +484,7 @@ pub fn make_foo() -> Foo {
 }
 ",
     );
-    let result = impact::handle_impact(&db, "new", None).unwrap();
+    let result = impact::handle_impact(&db, "new", None, false).unwrap();
     let line_count = result.lines().count();
     assert!(
         line_count < 20,
@@ -643,7 +643,7 @@ pub fn leaf() -> i32 { 1 }
 pub fn middle() -> i32 { leaf() }
 ",
     );
-    let result = impact::handle_impact(&db, "leaf", None).unwrap();
+    let result = impact::handle_impact(&db, "leaf", None, false).unwrap();
 
     assert!(
         result.contains("## Impact Analysis: leaf"),
@@ -822,7 +822,7 @@ fn cross_file_reference_in_impact() {
         ),
     ]);
 
-    let result = impact::handle_impact(&db, "User", None).unwrap();
+    let result = impact::handle_impact(&db, "User", None, false).unwrap();
     assert!(
         result.contains("create_user"),
         "cross-file ref should appear in impact: {result}"
@@ -915,7 +915,7 @@ fn index_workspace() -> (tempfile::TempDir, Database) {
 #[test]
 fn workspace_crate_impact_propagation() {
     let (_dir, db) = index_workspace();
-    let result = impact::handle_impact(&db, "User", None).unwrap();
+    let result = impact::handle_impact(&db, "User", None, false).unwrap();
 
     assert!(
         result.contains("Affected Crates"),
@@ -1061,7 +1061,7 @@ fn context_no_symbol_gives_clear_message() {
 #[test]
 fn impact_no_dependents_gives_clear_message() {
     let (_dir, db) = index_source("pub fn isolated() {}");
-    let result = impact::handle_impact(&db, "isolated", None).unwrap();
+    let result = impact::handle_impact(&db, "isolated", None, false).unwrap();
     assert!(
         result.contains("No dependents found"),
         "clear message: {result}"
@@ -1508,7 +1508,7 @@ fn realistic_codebase_trait_impl_detected() {
 fn realistic_codebase_cross_file_impact() {
     let (_dir, db) = index_realistic_codebase();
 
-    let result = impact::handle_impact(&db, "AppConfig", None).unwrap();
+    let result = impact::handle_impact(&db, "AppConfig", None, false).unwrap();
     assert!(
         result.contains("UserService") || result.contains("new"),
         "AppConfig impact should show UserService dependency: {result}"
@@ -1518,7 +1518,7 @@ fn realistic_codebase_cross_file_impact() {
         "AppConfig impact should show ConfigBuilder relationship: {result}"
     );
 
-    let result = impact::handle_impact(&db, "AppError", None).unwrap();
+    let result = impact::handle_impact(&db, "AppError", None, false).unwrap();
     assert!(
         result.contains("handle") || result.contains("UserService"),
         "AppError impact should show usage in service: {result}"

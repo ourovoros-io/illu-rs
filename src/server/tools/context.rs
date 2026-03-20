@@ -26,6 +26,7 @@ pub fn handle_context(
         render_trait_info(db, &mut output, sym)?;
         render_callers(db, &mut output, sym)?;
         render_callees(db, &mut output, sym)?;
+        render_tested_by(db, &mut output, sym)?;
     }
 
     let base_name = symbol_name
@@ -237,6 +238,25 @@ fn render_callees(
         }
         let _ = writeln!(output);
     }
+
+    Ok(())
+}
+
+fn render_tested_by(
+    db: &Database,
+    output: &mut String,
+    sym: &StoredSymbol,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let tests = db.get_related_tests(&sym.name)?;
+    if tests.is_empty() {
+        return Ok(());
+    }
+
+    let _ = writeln!(output, "### Tested By\n");
+    for t in &tests {
+        let _ = writeln!(output, "- **{}** ({}:{})", t.name, t.file_path, t.line_start);
+    }
+    let _ = writeln!(output);
 
     Ok(())
 }

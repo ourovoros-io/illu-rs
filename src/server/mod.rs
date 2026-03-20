@@ -96,6 +96,9 @@ struct ImpactParams {
     symbol_name: String,
     /// Max recursion depth (default: 5). Use 1 for direct callers only.
     depth: Option<i64>,
+    /// Summarize deep levels by file instead of listing every symbol (default: true).
+    /// Set to false for full verbose output at all depths.
+    summary: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -230,7 +233,8 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("impact ▸ {}", params.symbol_name));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::impact::handle_impact(&db, &params.symbol_name, params.depth)
+        let summary = params.summary.unwrap_or(true);
+        let result = tools::impact::handle_impact(&db, &params.symbol_name, params.depth, summary)
             .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
