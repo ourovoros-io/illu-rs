@@ -205,6 +205,12 @@ struct SymbolsAtParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct StatsParams {
+    /// Filter to files under this path prefix (default: all)
+    path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct HotspotsParams {
     /// Filter to files under this path prefix
     path: Option<String>,
@@ -581,6 +587,23 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "stats",
+        description = "Show codebase statistics: file and symbol counts, test coverage ratio, most-referenced symbols, and largest files."
+    )]
+    async fn stats(
+        &self,
+        Parameters(params): Parameters<StatsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = ?params.path, "Tool call: stats");
+        let _guard = crate::status::StatusGuard::new("stats");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::stats::handle_stats(&db, params.path.as_deref())
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -621,6 +644,7 @@ impl ServerHandler for IlluServer {
                  'file_graph' for file-level dependency visualization, \
                  'symbols_at' for file:line symbol lookup, \
                  'hotspots' for complexity and coupling analysis, \
+                 'stats' for codebase statistics and health metrics, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
