@@ -161,6 +161,14 @@ struct UnusedParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct ImplementsParams {
+    /// Trait name to find implementors of
+    trait_name: Option<String>,
+    /// Type name to find trait implementations for
+    type_name: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -406,6 +414,27 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "implements",
+        description = "Query trait/type relationships. Use trait_name to find all types implementing a trait, type_name to find all traits a type implements, or both to check a specific implementation."
+    )]
+    async fn implements(
+        &self,
+        Parameters(params): Parameters<ImplementsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(trait_name = ?params.trait_name, type_name = ?params.type_name, "Tool call: implements");
+        let _guard = crate::status::StatusGuard::new("implements");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::implements::handle_implements(
+            &db,
+            params.trait_name.as_deref(),
+            params.type_name.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -441,6 +470,7 @@ impl ServerHandler for IlluServer {
                  'docs' for dependency docs, \
                  'overview' for structural maps, \
                  'tree' for file/module tree, \
+                 'implements' for trait/type relationships, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),

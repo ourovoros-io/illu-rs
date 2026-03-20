@@ -4,6 +4,7 @@ pub mod context;
 pub mod crate_graph;
 pub mod diff_impact;
 pub mod freshness;
+pub mod implements;
 pub mod docs;
 pub mod impact;
 pub mod overview;
