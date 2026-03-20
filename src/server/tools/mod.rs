@@ -6,6 +6,7 @@ pub mod diff_impact;
 pub mod docs;
 pub mod file_graph;
 pub mod freshness;
+pub mod hotspots;
 pub mod impact;
 pub mod implements;
 pub mod neighborhood;

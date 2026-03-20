@@ -1494,6 +1494,56 @@ impl Database {
         }
         Ok(results)
     }
+
+    /// Get symbols with the most incoming references (most depended-upon).
+    pub fn get_most_referenced_symbols(
+        &self,
+        limit: i64,
+        path_prefix: &str,
+    ) -> SqlResult<Vec<(String, String, i64)>> {
+        let pattern = format!("{path_prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT ts.name, f.path, COUNT(DISTINCT sr.source_symbol_id) as ref_count \
+             FROM symbol_refs sr \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             WHERE f.path LIKE ?1 \
+             GROUP BY ts.id \
+             ORDER BY ref_count DESC \
+             LIMIT ?2",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern, limit])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        }
+        Ok(results)
+    }
+
+    /// Get symbols with the most outgoing references (most complex).
+    pub fn get_most_referencing_symbols(
+        &self,
+        limit: i64,
+        path_prefix: &str,
+    ) -> SqlResult<Vec<(String, String, i64)>> {
+        let pattern = format!("{path_prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT ss.name, f.path, COUNT(DISTINCT sr.target_symbol_id) as ref_count \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN files f ON f.id = ss.file_id \
+             WHERE f.path LIKE ?1 \
+             GROUP BY ss.id \
+             ORDER BY ref_count DESC \
+             LIMIT ?2",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern, limit])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        }
+        Ok(results)
+    }
 }
 
 pub struct SymbolIdMap {
@@ -2686,5 +2736,98 @@ mod tests {
 
         let edges = db.get_file_dependencies("src/").unwrap();
         assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn test_get_most_referenced_symbols() {
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/lib.rs", "h1").unwrap();
+        // Create 3 symbols: a (target), b (source1), c (source2)
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'a', 'fn', 'public', 1, 5, 'fn a()')",
+                params![f1],
+            )
+            .unwrap();
+        let a = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'b', 'fn', 'public', 6, 10, 'fn b()')",
+                params![f1],
+            )
+            .unwrap();
+        let b = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'c', 'fn', 'public', 11, 15, 'fn c()')",
+                params![f1],
+            )
+            .unwrap();
+        let c = SymbolId(db.conn.last_insert_rowid());
+
+        // b -> a, c -> a (a has 2 incoming refs)
+        db.insert_symbol_ref(b, a, "call").unwrap();
+        db.insert_symbol_ref(c, a, "call").unwrap();
+        // b -> c (c has 1 incoming ref)
+        db.insert_symbol_ref(b, c, "call").unwrap();
+
+        let results = db.get_most_referenced_symbols(10, "").unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "a");
+        assert_eq!(results[0].2, 2);
+        assert_eq!(results[1].0, "c");
+        assert_eq!(results[1].2, 1);
+    }
+
+    #[test]
+    fn test_get_most_referencing_symbols() {
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/lib.rs", "h1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'a', 'fn', 'public', 1, 5, 'fn a()')",
+                params![f1],
+            )
+            .unwrap();
+        let a = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'b', 'fn', 'public', 6, 10, 'fn b()')",
+                params![f1],
+            )
+            .unwrap();
+        let b = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'c', 'fn', 'public', 11, 15, 'fn c()')",
+                params![f1],
+            )
+            .unwrap();
+        let c = SymbolId(db.conn.last_insert_rowid());
+
+        // b -> a, b -> c (b has 2 outgoing refs)
+        db.insert_symbol_ref(b, a, "call").unwrap();
+        db.insert_symbol_ref(b, c, "call").unwrap();
+        // a -> c (a has 1 outgoing ref)
+        db.insert_symbol_ref(a, c, "call").unwrap();
+
+        let results = db.get_most_referencing_symbols(10, "").unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, "b");
+        assert_eq!(results[0].2, 2);
+        assert_eq!(results[1].0, "a");
+        assert_eq!(results[1].2, 1);
     }
 }

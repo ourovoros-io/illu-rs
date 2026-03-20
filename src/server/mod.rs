@@ -205,6 +205,14 @@ struct SymbolsAtParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct HotspotsParams {
+    /// Filter to files under this path prefix
+    path: Option<String>,
+    /// Max entries per section (default: 10)
+    limit: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -555,6 +563,24 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "hotspots",
+        description = "Identify complexity and coupling hotspots: most-referenced symbols (fragile), most-referencing symbols (complex), and largest functions."
+    )]
+    async fn hotspots(
+        &self,
+        Parameters(params): Parameters<HotspotsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = ?params.path, "Tool call: hotspots");
+        let _guard = crate::status::StatusGuard::new("hotspots");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::hotspots::handle_hotspots(&db, params.path.as_deref(), params.limit)
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -594,6 +620,7 @@ impl ServerHandler for IlluServer {
                  'type_usage' for finding type usage in signatures and fields, \
                  'file_graph' for file-level dependency visualization, \
                  'symbols_at' for file:line symbol lookup, \
+                 'hotspots' for complexity and coupling analysis, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
