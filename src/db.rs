@@ -1475,6 +1475,29 @@ impl Database {
         }
         Ok(results)
     }
+
+    pub fn get_file_dependencies(
+        &self,
+        path_prefix: &str,
+    ) -> SqlResult<Vec<(String, String)>> {
+        let pattern = format!("{path_prefix}%");
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT sf.path, tf.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             JOIN files tf ON tf.id = ts.file_id \
+             WHERE sf.path LIKE ?1 AND sf.path != tf.path \
+             ORDER BY sf.path, tf.path",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
 }
 
 pub struct SymbolIdMap {
@@ -2558,5 +2581,79 @@ mod tests {
         // No callers for caller_fn
         let empty = db.get_callers_by_name("caller_fn").unwrap();
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_get_file_dependencies() {
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/a.rs", "h1").unwrap();
+        let f2 = db.insert_file("src/b.rs", "h2").unwrap();
+
+        // Symbol in file a
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'foo', 'function', 'public', 1, 5, 'fn foo()')",
+                params![f1],
+            )
+            .unwrap();
+        let src_id = SymbolId(db.conn.last_insert_rowid());
+
+        // Symbol in file b
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'bar', 'function', 'public', 1, 5, 'fn bar()')",
+                params![f2],
+            )
+            .unwrap();
+        let tgt_id = SymbolId(db.conn.last_insert_rowid());
+
+        db.insert_symbol_ref(src_id, tgt_id, "call").unwrap();
+
+        let edges = db.get_file_dependencies("src/").unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0], ("src/a.rs".to_string(), "src/b.rs".to_string()));
+
+        // Wrong prefix returns empty
+        let empty = db.get_file_dependencies("other/").unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_get_file_dependencies_excludes_self() {
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/a.rs", "h1").unwrap();
+
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'foo', 'function', 'public', 1, 5, 'fn foo()')",
+                params![f1],
+            )
+            .unwrap();
+        let s1 = SymbolId(db.conn.last_insert_rowid());
+
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'bar', 'function', 'public', 6, 10, 'fn bar()')",
+                params![f1],
+            )
+            .unwrap();
+        let s2 = SymbolId(db.conn.last_insert_rowid());
+
+        db.insert_symbol_ref(s1, s2, "call").unwrap();
+
+        let edges = db.get_file_dependencies("src/").unwrap();
+        assert!(edges.is_empty());
     }
 }

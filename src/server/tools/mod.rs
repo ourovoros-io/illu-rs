@@ -7,6 +7,7 @@ pub mod freshness;
 pub mod implements;
 pub mod neighborhood;
 pub mod docs;
+pub mod file_graph;
 pub mod impact;
 pub mod overview;
 pub mod query;

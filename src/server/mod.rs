@@ -191,6 +191,12 @@ struct NeighborhoodParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct FileGraphParams {
+    /// Path prefix to scope the graph (e.g. "src/server/")
+    path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -508,6 +514,23 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "file_graph",
+        description = "Show the file-level dependency graph under a path prefix. Derived from symbol references — shows which files depend on which other files."
+    )]
+    async fn file_graph(
+        &self,
+        Parameters(params): Parameters<FileGraphParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = %params.path, "Tool call: file_graph");
+        let _guard = crate::status::StatusGuard::new(&format!("file_graph \u{25b8} {}", params.path));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::file_graph::handle_file_graph(&db, &params.path).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -546,6 +569,7 @@ impl ServerHandler for IlluServer {
                  'implements' for trait/type relationships, \
                  'neighborhood' for bidirectional call graph exploration, \
                  'type_usage' for finding type usage in signatures and fields, \
+                 'file_graph' for file-level dependency visualization, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
