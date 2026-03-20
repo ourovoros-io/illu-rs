@@ -76,6 +76,10 @@ struct QueryParams {
     query: String,
     scope: Option<String>,
     kind: Option<String>,
+    /// Filter by attribute/derive (e.g. "test", "derive(Serialize)")
+    attribute: Option<String>,
+    /// Filter by signature pattern (e.g. "&Database", "-> Result")
+    signature: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -83,11 +87,15 @@ struct ContextParams {
     symbol_name: String,
     /// Return full untruncated source body (default: false)
     full_body: Option<bool>,
+    /// Filter results to a specific file path (e.g. "src/db.rs")
+    file: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct ImpactParams {
     symbol_name: String,
+    /// Max recursion depth (default: 5). Use 1 for direct callers only.
+    depth: Option<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -99,6 +107,8 @@ struct DocsParams {
 #[derive(Deserialize, JsonSchema)]
 struct OverviewParams {
     path: String,
+    /// Include private symbols (default: false, shows only public/pub(crate))
+    include_private: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -124,7 +134,7 @@ fn text_result(text: String) -> CallToolResult {
 impl IlluServer {
     #[tool(
         name = "query",
-        description = "Search the codebase for symbols, documentation, or files. Scope: symbols, docs, files, or all (default). Kind: function, struct, enum, trait, impl, const, static, type_alias, macro (filters symbol results)."
+        description = "Search the codebase for symbols, documentation, or files. Scope: symbols, docs, files, or all (default). Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results)."
     )]
     async fn query(
         &self,
@@ -144,6 +154,8 @@ impl IlluServer {
             &params.query,
             params.scope.as_deref(),
             params.kind.as_deref(),
+            params.attribute.as_deref(),
+            params.signature.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -151,25 +163,30 @@ impl IlluServer {
 
     #[tool(
         name = "context",
-        description = "Get full context for a symbol: definition, signature, file location, and related documentation."
+        description = "Get full context for a symbol: definition, signature, file location, and related documentation. Supports Type::method syntax (e.g. 'Database::new') and optional file filter."
     )]
     async fn context(
         &self,
         Parameters(params): Parameters<ContextParams>,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!(symbol = %params.symbol_name, "Tool call: context");
+        tracing::info!(symbol = %params.symbol_name, file = ?params.file, "Tool call: context");
         let _guard = crate::status::StatusGuard::new(&format!("context ▸ {}", params.symbol_name));
         self.refresh()?;
         let db = self.lock_db()?;
         let full_body = params.full_body.unwrap_or(false);
-        let result = tools::context::handle_context(&db, &params.symbol_name, full_body)
-            .map_err(to_mcp_err)?;
+        let result = tools::context::handle_context(
+            &db,
+            &params.symbol_name,
+            full_body,
+            params.file.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
     #[tool(
         name = "impact",
-        description = "Analyze the impact of changing a symbol by finding all transitive dependents."
+        description = "Analyze the impact of changing a symbol by finding all transitive dependents. Use depth=1 for direct callers only."
     )]
     async fn impact(
         &self,
@@ -179,7 +196,8 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("impact ▸ {}", params.symbol_name));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::impact::handle_impact(&db, &params.symbol_name).map_err(to_mcp_err)?;
+        let result = tools::impact::handle_impact(&db, &params.symbol_name, params.depth)
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -206,7 +224,7 @@ impl IlluServer {
 
     #[tool(
         name = "overview",
-        description = "List public symbols under a file path prefix, grouped by file. Shows name, kind, signature, and first line of doc comment."
+        description = "List public symbols under a file path prefix, grouped by file. Shows name, kind, signature, and first line of doc comment. Set include_private to see all symbols."
     )]
     async fn overview(
         &self,
@@ -216,7 +234,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("overview ▸ {}", params.path));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::overview::handle_overview(&db, &params.path).map_err(to_mcp_err)?;
+        let result = tools::overview::handle_overview(&db, &params.path, params.include_private.unwrap_or(false)).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -264,10 +282,13 @@ impl ServerHandler for IlluServer {
                 "illu-rs: Code intelligence server for Rust projects. \
                  Use 'query' to search, 'context' for symbol details \
                  (includes source body, doc comments, struct fields, \
-                 trait impls, and callees), 'impact' for single-symbol \
-                 change analysis, 'diff_impact' for git diff-based \
-                 batch impact analysis, 'docs' for dependency docs, \
-                 'overview' for structural maps."
+                 trait impls, callees, and callers — supports Type::method \
+                 syntax and file filtering), 'impact' for single-symbol \
+                 change analysis (with depth control and related test \
+                 discovery), 'diff_impact' for git diff-based batch \
+                 impact analysis with test suggestions, 'docs' for \
+                 dependency docs, 'overview' for structural maps \
+                 (with include_private option)."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),

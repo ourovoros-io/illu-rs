@@ -33,6 +33,8 @@ fn bench_query_after_index(c: &mut Criterion) {
                 black_box("Database"),
                 Some("symbols"),
                 None,
+                None,
+                None,
             )
             .unwrap();
         });
@@ -43,6 +45,7 @@ fn bench_query_after_index(c: &mut Criterion) {
                 &db,
                 black_box("Database"),
                 false,
+                None,
             )
             .unwrap();
         });
@@ -52,6 +55,7 @@ fn bench_query_after_index(c: &mut Criterion) {
             illu_rs::server::tools::impact::handle_impact(
                 &db,
                 black_box("Database"),
+                None,
             )
             .unwrap();
         });
@@ -61,6 +65,7 @@ fn bench_query_after_index(c: &mut Criterion) {
             illu_rs::server::tools::overview::handle_overview(
                 &db,
                 black_box("src/"),
+                false,
             )
             .unwrap();
         });

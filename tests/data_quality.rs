@@ -103,7 +103,7 @@ where
 }
 ",
     );
-    let result = context::handle_context(&db, "collect_items", false).unwrap();
+    let result = context::handle_context(&db, "collect_items", false, None).unwrap();
     assert!(result.contains("collect_items"), "should find the function");
     assert!(
         result.contains("<T, I>") || result.contains("<T,I>"),
@@ -124,7 +124,7 @@ pub async fn fetch_data(url: &str) -> Result<String, Box<dyn std::error::Error>>
 }
 ",
     );
-    let result = context::handle_context(&db, "fetch_data", false).unwrap();
+    let result = context::handle_context(&db, "fetch_data", false, None).unwrap();
     assert!(
         result.contains("async"),
         "signature must include async keyword: {result}"
@@ -146,7 +146,7 @@ pub struct BorrowedSlice<'a, T: Clone> {
 }
 ",
     );
-    let result = context::handle_context(&db, "BorrowedSlice", false).unwrap();
+    let result = context::handle_context(&db, "BorrowedSlice", false, None).unwrap();
     assert!(
         result.contains("'a") && result.contains('T'),
         "signature must include lifetime and generic: {result}"
@@ -180,7 +180,7 @@ pub enum Value {
 }
 ",
     );
-    let result = context::handle_context(&db, "Value", false).unwrap();
+    let result = context::handle_context(&db, "Value", false, None).unwrap();
     for variant in &["Null", "Bool(bool)", "Int(i64)", "Text(String)", "Map("] {
         assert!(
             result.contains(variant),
@@ -207,7 +207,7 @@ pub trait Store {
 }
 ",
     );
-    let result = context::handle_context(&db, "Store", false).unwrap();
+    let result = context::handle_context(&db, "Store", false, None).unwrap();
     assert!(
         result.contains("data store abstraction"),
         "trait doc comment: {result}"
@@ -230,13 +230,13 @@ pub static COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 ",
     );
-    let result = query::handle_query(&db, "MAX_RETRIES", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "MAX_RETRIES", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("MAX_RETRIES") && result.contains("const"),
         "const should be findable: {result}"
     );
 
-    let result = query::handle_query(&db, "COUNTER", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "COUNTER", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("COUNTER") && result.contains("static"),
         "static should be findable: {result}"
@@ -251,7 +251,7 @@ fn type_alias_preserved() {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 ",
     );
-    let result = context::handle_context(&db, "BoxError", false).unwrap();
+    let result = context::handle_context(&db, "BoxError", false, None).unwrap();
     assert!(
         result.contains("type_alias"),
         "should be identified as type_alias: {result}"
@@ -276,7 +276,7 @@ macro_rules! hashmap {
 }
 ",
     );
-    let result = query::handle_query(&db, "hashmap", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "hashmap", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("hashmap") && result.contains("macro"),
         "macro should be found: {result}"
@@ -305,7 +305,7 @@ impl Default for Point {
 }
 "#,
     );
-    let result = context::handle_context(&db, "Point", false).unwrap();
+    let result = context::handle_context(&db, "Point", false, None).unwrap();
     assert!(
         result.contains("Display"),
         "Display impl must be shown: {result}"
@@ -330,19 +330,19 @@ pub fn beta() {}
 pub fn gamma() {}
 ";
     let (_dir, db) = index_source(source);
-    let result = context::handle_context(&db, "alpha", false).unwrap();
+    let result = context::handle_context(&db, "alpha", false, None).unwrap();
     assert!(
         result.contains("1-1") || result.contains(":1-"),
         "alpha should start at line 1: {result}"
     );
 
-    let result = context::handle_context(&db, "beta", false).unwrap();
+    let result = context::handle_context(&db, "beta", false, None).unwrap();
     assert!(
         result.contains(":3-"),
         "beta should start at line 3: {result}"
     );
 
-    let result = context::handle_context(&db, "gamma", false).unwrap();
+    let result = context::handle_context(&db, "gamma", false, None).unwrap();
     assert!(
         result.contains(":5-"),
         "gamma should start at line 5: {result}"
@@ -365,7 +365,7 @@ fn multiline_doc_comment_fully_captured() {
 pub fn documented() {}
 ",
     );
-    let result = context::handle_context(&db, "documented", false).unwrap();
+    let result = context::handle_context(&db, "documented", false, None).unwrap();
     assert!(
         result.contains("First line of docs"),
         "first line: {result}"
@@ -389,7 +389,7 @@ pub struct Packet {
 }
 ",
     );
-    let result = context::handle_context(&db, "Packet", false).unwrap();
+    let result = context::handle_context(&db, "Packet", false, None).unwrap();
     assert!(
         result.contains("derive(Debug, Clone)"),
         "derive attribute: {result}"
@@ -412,13 +412,13 @@ pub fn caller() -> u32 {
 }
 ",
     );
-    let result = context::handle_context(&db, "caller", false).unwrap();
+    let result = context::handle_context(&db, "caller", false, None).unwrap();
     assert!(
         result.contains("helper"),
         "caller should reference helper in callees: {result}"
     );
 
-    let result = impact::handle_impact(&db, "helper").unwrap();
+    let result = impact::handle_impact(&db, "helper", None).unwrap();
     assert!(
         result.contains("caller"),
         "helper's impact should show caller: {result}"
@@ -438,7 +438,7 @@ pub fn make_config() -> Config {
 }
 ",
     );
-    let result = context::handle_context(&db, "make_config", false).unwrap();
+    let result = context::handle_context(&db, "make_config", false, None).unwrap();
     assert!(
         result.contains("Config"),
         "make_config should reference Config: {result}"
@@ -456,7 +456,7 @@ pub fn mid() -> i32 { base() + 1 }
 pub fn top() -> i32 { mid() + 1 }
 ",
     );
-    let result = impact::handle_impact(&db, "base").unwrap();
+    let result = impact::handle_impact(&db, "base", None).unwrap();
     assert!(result.contains("mid"), "direct dependent: {result}");
     assert!(result.contains("top"), "transitive dependent: {result}");
     assert!(
@@ -484,7 +484,7 @@ pub fn make_foo() -> Foo {
 }
 ",
     );
-    let result = impact::handle_impact(&db, "new").unwrap();
+    let result = impact::handle_impact(&db, "new", None).unwrap();
     let line_count = result.lines().count();
     assert!(
         line_count < 20,
@@ -505,7 +505,7 @@ pub fn configuration_manager() {}
 pub struct Config {}
 ",
     );
-    let result = query::handle_query(&db, "Config", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "Config", Some("symbols"), None, None, None).unwrap();
     let config_pos = result.find("**Config**");
     let configure_pos = result.find("configure");
     assert!(config_pos.is_some(), "exact match must appear: {result}");
@@ -526,7 +526,7 @@ pub struct Process {}
 pub trait Processable {}
 ",
     );
-    let result = query::handle_query(&db, "Process", Some("symbols"), Some("struct")).unwrap();
+    let result = query::handle_query(&db, "Process", Some("symbols"), Some("struct"), None, None).unwrap();
     assert!(result.contains("Process"), "struct should appear: {result}");
     assert!(
         !result.contains("(function)"),
@@ -545,7 +545,7 @@ fn query_files_scope_returns_unique_paths() {
         ("server.rs", "pub fn serve() {}\npub fn handle() {}\n"),
         ("db.rs", "pub fn query() {}\n"),
     ]);
-    let result = query::handle_query(&db, "serve", Some("files"), None).unwrap();
+    let result = query::handle_query(&db, "serve", Some("files"), None, None, None).unwrap();
     assert!(
         result.contains("src/server.rs"),
         "should find file: {result}"
@@ -555,7 +555,7 @@ fn query_files_scope_returns_unique_paths() {
 #[test]
 fn empty_query_returns_no_results() {
     let (_dir, db) = index_source("pub fn hello() {}");
-    let result = query::handle_query(&db, "", None, None).unwrap();
+    let result = query::handle_query(&db, "", None, None, None, None).unwrap();
     assert!(
         result.contains("No results found"),
         "empty query should find nothing: {result}"
@@ -577,7 +577,7 @@ pub fn tokenize(input: &str) -> Vec<String> {
 }
 ",
     );
-    let result = context::handle_context(&db, "tokenize", false).unwrap();
+    let result = context::handle_context(&db, "tokenize", false, None).unwrap();
 
     assert!(
         result.contains("## tokenize (function)"),
@@ -615,7 +615,7 @@ pub fn make_widget(name: &str) -> Widget {
 }
 ",
     );
-    let result = query::handle_query(&db, "Widget", None, None).unwrap();
+    let result = query::handle_query(&db, "Widget", None, None, None, None).unwrap();
 
     assert!(
         result.contains("## Symbols"),
@@ -643,7 +643,7 @@ pub fn leaf() -> i32 { 1 }
 pub fn middle() -> i32 { leaf() }
 ",
     );
-    let result = impact::handle_impact(&db, "leaf").unwrap();
+    let result = impact::handle_impact(&db, "leaf", None).unwrap();
 
     assert!(
         result.contains("## Impact Analysis: leaf"),
@@ -672,7 +672,7 @@ pub fn load_config() -> Config {
 fn private_helper() {}
 "#,
     );
-    let result = overview::handle_overview(&db, "src/").unwrap();
+    let result = overview::handle_overview(&db, "src/", false).unwrap();
 
     assert!(result.contains("### src/lib.rs"), "file header: {result}");
     assert!(
@@ -822,7 +822,7 @@ fn cross_file_reference_in_impact() {
         ),
     ]);
 
-    let result = impact::handle_impact(&db, "User").unwrap();
+    let result = impact::handle_impact(&db, "User", None).unwrap();
     assert!(
         result.contains("create_user"),
         "cross-file ref should appear in impact: {result}"
@@ -842,7 +842,7 @@ fn overview_shows_multi_file_structure() {
             "/// A user model.\npub struct User {}\n/// A post model.\npub struct Post {}\n",
         ),
     ]);
-    let result = overview::handle_overview(&db, "src/").unwrap();
+    let result = overview::handle_overview(&db, "src/", false).unwrap();
 
     assert!(
         result.contains("### src/handlers.rs"),
@@ -915,7 +915,7 @@ fn index_workspace() -> (tempfile::TempDir, Database) {
 #[test]
 fn workspace_crate_impact_propagation() {
     let (_dir, db) = index_workspace();
-    let result = impact::handle_impact(&db, "User").unwrap();
+    let result = impact::handle_impact(&db, "User", None).unwrap();
 
     assert!(
         result.contains("Affected Crates"),
@@ -928,13 +928,13 @@ fn workspace_crate_impact_propagation() {
 #[test]
 fn workspace_context_shows_correct_file_paths() {
     let (_dir, db) = index_workspace();
-    let result = context::handle_context(&db, "User", false).unwrap();
+    let result = context::handle_context(&db, "User", false, None).unwrap();
     assert!(
         result.contains("core/src/lib.rs"),
         "file path should be crate-relative: {result}"
     );
 
-    let result = context::handle_context(&db, "create_user", false).unwrap();
+    let result = context::handle_context(&db, "create_user", false, None).unwrap();
     assert!(
         result.contains("api/src/lib.rs"),
         "api function path: {result}"
@@ -944,7 +944,7 @@ fn workspace_context_shows_correct_file_paths() {
 #[test]
 fn workspace_query_finds_across_crates() {
     let (_dir, db) = index_workspace();
-    let result = query::handle_query(&db, "user", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "user", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("User"),
         "should find User from core: {result}"
@@ -959,7 +959,7 @@ fn workspace_query_finds_across_crates() {
 fn workspace_overview_scoped_to_crate() {
     let (_dir, db) = index_workspace();
 
-    let result = overview::handle_overview(&db, "core/").unwrap();
+    let result = overview::handle_overview(&db, "core/", false).unwrap();
     assert!(
         result.contains("User") && result.contains("validate_name"),
         "core overview: {result}"
@@ -969,7 +969,7 @@ fn workspace_overview_scoped_to_crate() {
         "api symbols should not leak into core overview: {result}"
     );
 
-    let result = overview::handle_overview(&db, "api/").unwrap();
+    let result = overview::handle_overview(&db, "api/", false).unwrap();
     assert!(result.contains("create_user"), "api overview: {result}");
 }
 
@@ -980,7 +980,7 @@ fn workspace_overview_scoped_to_crate() {
 #[test]
 fn empty_source_file() {
     let (_dir, db) = index_source("");
-    let result = overview::handle_overview(&db, "src/").unwrap();
+    let result = overview::handle_overview(&db, "src/", false).unwrap();
     assert!(result.contains("No public symbols"), "empty file: {result}");
 }
 
@@ -988,7 +988,7 @@ fn empty_source_file() {
 fn source_with_only_private_items() {
     let (_dir, db) =
         index_source("fn private_one() {}\nfn private_two() {}\nstruct InternalState {}\n");
-    let result = overview::handle_overview(&db, "src/").unwrap();
+    let result = overview::handle_overview(&db, "src/", false).unwrap();
     assert!(
         result.contains("No public symbols"),
         "only private items: {result}"
@@ -1025,13 +1025,13 @@ pub fn error() -> String {
 }
 "#,
     );
-    let result = query::handle_query(&db, "Error", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "Error", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("struct") || result.contains("enum"),
         "should find both type definitions: {result}"
     );
 
-    let result = query::handle_query(&db, "Error", Some("symbols"), Some("function")).unwrap();
+    let result = query::handle_query(&db, "Error", Some("symbols"), Some("function"), None, None).unwrap();
     assert!(
         result.contains("error") && result.contains("function"),
         "function filter: {result}"
@@ -1041,7 +1041,7 @@ pub fn error() -> String {
 #[test]
 fn pub_crate_visibility_shown() {
     let (_dir, db) = index_source("pub(crate) fn internal_api() -> u32 { 42 }\n");
-    let result = context::handle_context(&db, "internal_api", false).unwrap();
+    let result = context::handle_context(&db, "internal_api", false, None).unwrap();
     assert!(
         result.contains("pub(crate)"),
         "pub(crate) visibility: {result}"
@@ -1051,7 +1051,7 @@ fn pub_crate_visibility_shown() {
 #[test]
 fn context_no_symbol_gives_clear_message() {
     let (_dir, db) = index_source("pub fn something() {}");
-    let result = context::handle_context(&db, "nonexistent_symbol", false).unwrap();
+    let result = context::handle_context(&db, "nonexistent_symbol", false, None).unwrap();
     assert!(
         result.contains("No symbol found matching 'nonexistent_symbol'"),
         "clear error message: {result}"
@@ -1061,7 +1061,7 @@ fn context_no_symbol_gives_clear_message() {
 #[test]
 fn impact_no_dependents_gives_clear_message() {
     let (_dir, db) = index_source("pub fn isolated() {}");
-    let result = impact::handle_impact(&db, "isolated").unwrap();
+    let result = impact::handle_impact(&db, "isolated", None).unwrap();
     assert!(
         result.contains("No dependents found"),
         "clear message: {result}"
@@ -1081,7 +1081,7 @@ pub fn process<T>(item: T) -> String where T: std::fmt::Display + Clone {
 }
 ",
     );
-    let result = query::handle_query(&db, "process", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "process", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("process"),
         "should find function with where clause: {result}"
@@ -1097,7 +1097,7 @@ pub struct FixedArray<const N: usize> {
 }
 ",
     );
-    let result = context::handle_context(&db, "FixedArray", false).unwrap();
+    let result = context::handle_context(&db, "FixedArray", false, None).unwrap();
     assert!(
         result.contains("FixedArray"),
         "should find struct with const generic: {result}"
@@ -1119,7 +1119,7 @@ impl<'a> Parser<'a> {
 }
 ",
     );
-    let result = context::handle_context(&db, "Parser", false).unwrap();
+    let result = context::handle_context(&db, "Parser", false, None).unwrap();
     assert!(
         result.contains("Parser"),
         "should find struct with lifetime: {result}"
@@ -1145,7 +1145,7 @@ impl Builder {
 }
 ",
     );
-    let result = context::handle_context(&db, "Builder", false).unwrap();
+    let result = context::handle_context(&db, "Builder", false, None).unwrap();
     assert!(
         result.contains("new"),
         "should show method from first impl block: {result}"
@@ -1169,7 +1169,7 @@ pub fn prod_only() {}
 pub fn always() {}
 ",
     );
-    let result = query::handle_query(&db, "always", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "always", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("always"),
         "should find non-gated function: {result}"
@@ -1185,7 +1185,7 @@ pub unsafe fn dangerous(ptr: *const u8) -> u8 {
 }
 ",
     );
-    let result = query::handle_query(&db, "dangerous", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "dangerous", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("dangerous"),
         "should find unsafe function: {result}"
@@ -1205,7 +1205,7 @@ pub fn config_parser() {}
 pub fn parse_config_file() {}
 ",
     );
-    let result = query::handle_query(&db, "config", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "config", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("config"),
         "exact match should appear in results: {result}"
@@ -1221,7 +1221,7 @@ pub struct Process {}
 ",
     );
     let result =
-        query::handle_query(&db, "process", Some("symbols"), Some("function")).unwrap();
+        query::handle_query(&db, "process", Some("symbols"), Some("function"), None, None).unwrap();
     assert!(
         result.contains("process"),
         "function should be found: {result}"
@@ -1242,7 +1242,7 @@ fn file_scope_handles_dots_in_filename() {
         ("lib.rs", "pub mod server;\n"),
         ("server.rs", "pub fn serve() {}\n"),
     ]);
-    let result = query::handle_query(&db, "server.rs", Some("files"), None).unwrap();
+    let result = query::handle_query(&db, "server.rs", Some("files"), None, None, None).unwrap();
     assert!(
         result.contains("server.rs"),
         "file scope should handle dots: {result}"
@@ -1254,7 +1254,7 @@ fn default_query_excludes_use_and_mod() {
     let (_dir, db) = index_source(
         "use std::fmt::Write;\npub mod child;\npub fn real_fn() {}\npub struct RealStruct;\n",
     );
-    let result = query::handle_query(&db, "real", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "real", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("real_fn"),
         "should find function: {result}"
@@ -1272,7 +1272,7 @@ fn default_query_excludes_use_and_mod() {
 #[test]
 fn kind_use_filter_still_works() {
     let (_dir, db) = index_source("use std::fmt::Write;\npub fn real_fn() {}\n");
-    let result = query::handle_query(&db, "Write", Some("symbols"), Some("use")).unwrap();
+    let result = query::handle_query(&db, "Write", Some("symbols"), Some("use"), None, None).unwrap();
     assert!(
         result.contains("(use)"),
         "kind=use should still return use items: {result}"
@@ -1286,8 +1286,8 @@ fn callees_scoped_to_source_file() {
         ("a.rs", "pub fn caller_a() { shared(); }\n"),
         ("b.rs", "pub fn caller_b() { shared(); }\n"),
     ]);
-    let result_a = context::handle_context(&db, "caller_a", false).unwrap();
-    let result_b = context::handle_context(&db, "caller_b", false).unwrap();
+    let result_a = context::handle_context(&db, "caller_a", false, None).unwrap();
+    let result_b = context::handle_context(&db, "caller_b", false, None).unwrap();
     // Each should show shared as callee, but caller_a's callees should not
     // include anything from caller_b and vice versa
     assert!(
@@ -1448,14 +1448,14 @@ fn realistic_codebase_indexes_all_symbols() {
         "Middleware",
     ] {
         let result =
-            query::handle_query(&db, name, Some("symbols"), None).unwrap();
+            query::handle_query(&db, name, Some("symbols"), None, None, None).unwrap();
         assert!(
             result.contains(name),
             "query for '{name}' should find it: {result}"
         );
     }
 
-    let result = overview::handle_overview(&db, "src/").unwrap();
+    let result = overview::handle_overview(&db, "src/", false).unwrap();
     for name in &[
         "AppError",
         "AppConfig",
@@ -1483,21 +1483,21 @@ fn realistic_codebase_trait_impl_detected() {
     let (_dir, db) = index_realistic_codebase();
 
     let result =
-        context::handle_context(&db, "UserService", false).unwrap();
+        context::handle_context(&db, "UserService", false, None).unwrap();
     assert!(
         result.contains("Handler"),
         "UserService context should mention Handler trait impl: {result}"
     );
 
     let result =
-        context::handle_context(&db, "Handler", false).unwrap();
+        context::handle_context(&db, "Handler", false, None).unwrap();
     assert!(
         result.contains("UserService"),
         "Handler context should show UserService as implementor: {result}"
     );
 
     let result =
-        context::handle_context(&db, "AppError", false).unwrap();
+        context::handle_context(&db, "AppError", false, None).unwrap();
     assert!(
         result.contains("Display"),
         "AppError context should show Display trait impl: {result}"
@@ -1508,7 +1508,7 @@ fn realistic_codebase_trait_impl_detected() {
 fn realistic_codebase_cross_file_impact() {
     let (_dir, db) = index_realistic_codebase();
 
-    let result = impact::handle_impact(&db, "AppConfig").unwrap();
+    let result = impact::handle_impact(&db, "AppConfig", None).unwrap();
     assert!(
         result.contains("UserService") || result.contains("new"),
         "AppConfig impact should show UserService dependency: {result}"
@@ -1518,7 +1518,7 @@ fn realistic_codebase_cross_file_impact() {
         "AppConfig impact should show ConfigBuilder relationship: {result}"
     );
 
-    let result = impact::handle_impact(&db, "AppError").unwrap();
+    let result = impact::handle_impact(&db, "AppError", None).unwrap();
     assert!(
         result.contains("handle") || result.contains("UserService"),
         "AppError impact should show usage in service: {result}"
@@ -1538,7 +1538,7 @@ fn search_exact_name_beats_contains() {
          pub struct ConfigManager {}\n",
     );
     let result =
-        query::handle_query(&db, "Config", Some("symbols"), None).unwrap();
+        query::handle_query(&db, "Config", Some("symbols"), None, None, None).unwrap();
     let config_pos = result.find("**Config**");
     let config_manager_pos = result.find("ConfigManager");
     let configure_pos = result.find("configure");
@@ -1578,7 +1578,7 @@ fn search_common_name_new_returns_results() {
         ),
     ]);
     let result =
-        query::handle_query(&db, "new", Some("symbols"), None).unwrap();
+        query::handle_query(&db, "new", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("new"),
         "query for 'new' should find results: {result}"
@@ -1599,7 +1599,7 @@ fn search_by_doc_comment_content() {
          pub fn save_data() {}\n",
     );
     let result =
-        query::handle_query(&db, "TOML", Some("all"), None).unwrap();
+        query::handle_query(&db, "TOML", Some("all"), None, None, None).unwrap();
     // FTS indexes symbol names, not doc comments, so this may not find
     // results. The key assertion is no error or panic.
     assert!(
@@ -1614,7 +1614,7 @@ fn search_short_query_works() {
         "pub fn go() {}\npub fn do_work() {}\n",
     );
     let result =
-        query::handle_query(&db, "go", Some("symbols"), None).unwrap();
+        query::handle_query(&db, "go", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("go"),
         "short 2-char query should find 'go': {result}"

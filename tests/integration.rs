@@ -104,7 +104,7 @@ impl std::fmt::Display for Config {
 #[test]
 fn test_query_tool_symbols() {
     let (_dir, db) = setup_indexed_db();
-    let result = query::handle_query(&db, "parse", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "parse", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("parse_config"),
         "query should find parse_config"
@@ -114,21 +114,21 @@ fn test_query_tool_symbols() {
 #[test]
 fn test_query_tool_docs() {
     let (_dir, db) = setup_indexed_db();
-    let result = query::handle_query(&db, "serializ", Some("docs"), None).unwrap();
+    let result = query::handle_query(&db, "serializ", Some("docs"), None, None, None).unwrap();
     assert!(result.contains("Serde"), "query should find serde docs");
 }
 
 #[test]
 fn test_query_tool_all() {
     let (_dir, db) = setup_indexed_db();
-    let result = query::handle_query(&db, "Config", None, None).unwrap();
+    let result = query::handle_query(&db, "Config", None, None, None, None).unwrap();
     assert!(result.contains("Config"), "query all should find Config");
 }
 
 #[test]
 fn test_context_tool() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "Config", false).unwrap();
+    let result = context::handle_context(&db, "Config", false, None).unwrap();
     assert!(result.contains("Config"), "context should find Config");
     assert!(
         result.contains("src/lib.rs"),
@@ -139,7 +139,7 @@ fn test_context_tool() {
 #[test]
 fn test_impact_tool() {
     let (_dir, db) = setup_indexed_db();
-    let result = impact::handle_impact(&db, "Config").unwrap();
+    let result = impact::handle_impact(&db, "Config", None).unwrap();
     assert!(
         result.contains("Impact Analysis"),
         "impact should show header"
@@ -278,7 +278,7 @@ pub fn run() -> SharedConfig {
 #[test]
 fn test_workspace_query_across_crates() {
     let (_dir, db) = setup_workspace_db();
-    let result = query::handle_query(&db, "SharedConfig", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "SharedConfig", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("SharedConfig"),
         "query should find SharedConfig from shared crate"
@@ -288,7 +288,7 @@ fn test_workspace_query_across_crates() {
 #[test]
 fn test_workspace_impact_crate_summary() {
     let (_dir, db) = setup_workspace_db();
-    let result = impact::handle_impact(&db, "SharedConfig").unwrap();
+    let result = impact::handle_impact(&db, "SharedConfig", None).unwrap();
     assert!(
         result.contains("Affected Crates"),
         "impact should show crate-level summary"
@@ -303,7 +303,7 @@ fn test_workspace_impact_crate_summary() {
 #[test]
 fn test_workspace_context_shows_file_path() {
     let (_dir, db) = setup_workspace_db();
-    let result = context::handle_context(&db, "SharedConfig", false).unwrap();
+    let result = context::handle_context(&db, "SharedConfig", false, None).unwrap();
     assert!(
         result.contains("shared/src/lib.rs"),
         "context should show crate-relative path"
@@ -325,7 +325,7 @@ fn test_workspace_skill_file() {
 #[test]
 fn test_context_tool_enriched() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "Config", false).unwrap();
+    let result = context::handle_context(&db, "Config", false, None).unwrap();
     assert!(
         result.contains("Application configuration"),
         "context should include doc comment"
@@ -343,7 +343,7 @@ fn test_context_tool_enriched() {
 #[test]
 fn test_context_trait_impls() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "Config", false).unwrap();
+    let result = context::handle_context(&db, "Config", false, None).unwrap();
     assert!(
         result.contains("Display"),
         "context should show Display trait impl for Config"
@@ -353,7 +353,7 @@ fn test_context_trait_impls() {
 #[test]
 fn test_context_callees() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "parse_config", false).unwrap();
+    let result = context::handle_context(&db, "parse_config", false, None).unwrap();
     assert!(
         result.contains("Config") || result.contains("new"),
         "parse_config should show callees"
@@ -363,7 +363,7 @@ fn test_context_callees() {
 #[test]
 fn test_query_doc_snippet() {
     let (_dir, db) = setup_indexed_db();
-    let result = query::handle_query(&db, "parse_config", Some("symbols"), None).unwrap();
+    let result = query::handle_query(&db, "parse_config", Some("symbols"), None, None, None).unwrap();
     assert!(
         result.contains("Parse configuration"),
         "query should show doc comment snippet"
@@ -373,7 +373,7 @@ fn test_query_doc_snippet() {
 #[test]
 fn test_overview_tool() {
     let (_dir, db) = setup_indexed_db();
-    let result = overview::handle_overview(&db, "src/").unwrap();
+    let result = overview::handle_overview(&db, "src/", false).unwrap();
     assert!(result.contains("Config"), "overview should list Config");
     assert!(
         result.contains("parse_config"),
@@ -392,7 +392,7 @@ fn test_overview_tool() {
 #[test]
 fn test_enum_details_in_context() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "LogLevel", false).unwrap();
+    let result = context::handle_context(&db, "LogLevel", false, None).unwrap();
     assert!(result.contains("Debug"), "should show enum variants");
     assert!(
         result.contains("Error(String)"),

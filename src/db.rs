@@ -1155,6 +1155,30 @@ impl Database {
         Ok(results)
     }
 
+    pub fn search_symbols_by_signature(
+        &self,
+        pattern: &str,
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        let like_pattern = format!("%{}%", escape_like(pattern));
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, \
+                    s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.signature LIKE ?1 ESCAPE '\\' \
+             ORDER BY s.name \
+             LIMIT 50",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![like_pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
     pub fn get_callees(
         &self,
         symbol_name: &str,

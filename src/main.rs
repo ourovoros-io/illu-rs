@@ -130,7 +130,10 @@ before grep, before guessing at code structure.
 | `{cmd_prefix} query <term>` | `{tool_prefix}query` | `query: \"<term>\"` |
 | `{cmd_prefix} query <term> --scope <s>` | `{tool_prefix}query` | `query: \"<term>\", scope: \"<s>\"` |
 | `{cmd_prefix} context <symbol>` | `{tool_prefix}context` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} context Type::method` | `{tool_prefix}context` | `symbol_name: \"Type::method\"` |
+| `{cmd_prefix} context <symbol> --file <f>` | `{tool_prefix}context` | `symbol_name: \"<symbol>\", file: \"<f>\"` |
 | `{cmd_prefix} impact <symbol>` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} impact <symbol> --depth 1` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\", depth: 1` |
 | `{cmd_prefix} docs <dep>` | `{tool_prefix}docs` | `dependency: \"<dep>\"` |
 | `{cmd_prefix} docs <dep> --topic <t>` | `{tool_prefix}docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
 
@@ -356,17 +359,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             kind,
         }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_query(&db, &search, Some(&scope), kind.as_deref())?;
+            let result = handle_query(&db, &search, Some(&scope), kind.as_deref(), None, None)?;
             print_result(&result);
         }
         Some(Command::Context { symbol }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_context(&db, &symbol, false)?;
+            let result = handle_context(&db, &symbol, false, None)?;
             print_result(&result);
         }
         Some(Command::Impact { symbol }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_impact(&db, &symbol)?;
+            let result = handle_impact(&db, &symbol, None)?;
             print_result(&result);
         }
         Some(Command::Docs { dep, topic }) => {
