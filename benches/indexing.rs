@@ -35,6 +35,7 @@ fn bench_query_after_index(c: &mut Criterion) {
                 None,
                 None,
                 None,
+                None,
             )
             .unwrap();
         });

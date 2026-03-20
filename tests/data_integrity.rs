@@ -618,7 +618,7 @@ pub fn use_config() -> AppConfig {
 ",
     )]);
 
-    let query_result = query::handle_query(&db, "AppConfig", Some("symbols"), None, None, None).unwrap();
+    let query_result = query::handle_query(&db, "AppConfig", Some("symbols"), None, None, None, None).unwrap();
     let context_result = context::handle_context(&db, "AppConfig", false, None).unwrap();
     let impact_result = impact::handle_impact(&db, "AppConfig", None, false).unwrap();
 
@@ -679,7 +679,7 @@ pub trait MyTrait { fn method(&self); }
 pub enum MyEnum { A, B }
 ",
     );
-    let result = query::handle_query(&db, "My", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "My", Some("symbols"), None, None, None, None).unwrap();
 
     // Every symbol in query results must have kind and signature
     for name in &["my_func", "MyStruct", "MyTrait", "MyEnum"] {
@@ -741,7 +741,7 @@ edition = "2021"
     );
 
     // Both Error structs should appear, disambiguated by file path
-    let result = query::handle_query(&db, "Error", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "Error", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("core/src/lib.rs"),
         "should show core's Error: {result}"
@@ -859,7 +859,7 @@ pub struct ConfigLoader;
 pub struct Config;
 ",
     );
-    let result = query::handle_query(&db, "Config", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "Config", Some("symbols"), None, None, None, None).unwrap();
 
     // Find positions of exact match vs others
     let exact_pos = result.find("**Config** (struct)");
@@ -1666,7 +1666,7 @@ fn refresh_handles_new_file_added() {
 
     refresh_index(&db, &config).unwrap();
 
-    let result = query::handle_query(&db, "bonus", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "bonus", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("bonus"),
         "refresh should pick up new file's symbols"
@@ -1705,7 +1705,7 @@ fn refresh_handles_file_content_change() {
         old_syms.is_empty(),
         "old symbol should be gone after refresh"
     );
-    let new_result = query::handle_query(&db, "version_two", Some("symbols"), None, None, None).unwrap();
+    let new_result = query::handle_query(&db, "version_two", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         new_result.contains("version_two"),
         "new symbol should appear after refresh"
@@ -2063,7 +2063,7 @@ pub fn beta_fn() -> i32 { 2 }
 ",
     );
 
-    let result = query::handle_query(&db, "fn", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "fn", Some("symbols"), None, None, None, None).unwrap();
 
     // Must start with ## Symbols header
     assert!(
@@ -2177,14 +2177,14 @@ pub struct MyPublicStruct {
 #[test]
 fn query_with_dot_does_not_crash() {
     let (_dir, db) = index_source("pub fn hello() {}\n");
-    let result = query::handle_query(&db, "self.method", Some("symbols"), None, None, None);
+    let result = query::handle_query(&db, "self.method", Some("symbols"), None, None, None, None);
     assert!(result.is_ok(), "dot in query must not crash: {result:?}");
 }
 
 #[test]
 fn query_with_colon_does_not_crash() {
     let (_dir, db) = index_source("pub fn hello() {}\n");
-    let result = query::handle_query(&db, "a:b", Some("symbols"), None, None, None);
+    let result = query::handle_query(&db, "a:b", Some("symbols"), None, None, None, None);
     assert!(result.is_ok(), "colon in query must not crash: {result:?}");
 }
 
@@ -2192,7 +2192,7 @@ fn query_with_colon_does_not_crash() {
 fn query_with_fts_operators_does_not_crash() {
     let (_dir, db) = index_source("pub fn hello() {}\n");
     for q in &["OR DROP", "NOT something", "foo{bar}", "test -flag", "a&b", "\"quoted\""] {
-        let result = query::handle_query(&db, q, Some("symbols"), None, None, None);
+        let result = query::handle_query(&db, q, Some("symbols"), None, None, None, None);
         assert!(result.is_ok(), "query '{q}' must not crash: {result:?}");
     }
 }
@@ -2201,7 +2201,7 @@ fn query_with_fts_operators_does_not_crash() {
 fn query_with_special_chars_falls_back_to_like() {
     let (_dir, db) = index_source("pub fn config_parser() {}\n");
     // Underscore query should still find results via LIKE fallback
-    let result = query::handle_query(&db, "config.parser", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "config.parser", Some("symbols"), None, None, None, None).unwrap();
     // Should not crash — may or may not find results depending on LIKE matching
     assert!(!result.contains("error"), "should not contain error: {result}");
 }

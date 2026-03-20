@@ -35,7 +35,7 @@ fn self_db() -> &'static Mutex<Database> {
 #[test]
 fn self_index_finds_database_struct() {
     let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = query::handle_query(&db, "Database", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "Database", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("Database"),
         "query should find Database: {result}"
@@ -49,7 +49,7 @@ fn self_index_finds_database_struct() {
 #[test]
 fn self_index_finds_index_repo_function() {
     let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = query::handle_query(&db, "index_repo", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "index_repo", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("index_repo"),
         "query should find index_repo: {result}"
@@ -63,7 +63,7 @@ fn self_index_finds_index_repo_function() {
 #[test]
 fn self_index_finds_illu_server() {
     let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = query::handle_query(&db, "IlluServer", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "IlluServer", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("IlluServer"),
         "query should find IlluServer: {result}"
@@ -173,7 +173,7 @@ fn self_overview_db_module() {
 fn self_query_and_context_agree_on_file_path() {
     let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let query_result =
-        query::handle_query(&db, "extract_refs", Some("symbols"), None, None, None).unwrap();
+        query::handle_query(&db, "extract_refs", Some("symbols"), None, None, None, None).unwrap();
     let context_result = context::handle_context(&db, "extract_refs", false, None).unwrap();
     assert!(
         query_result.contains("parser.rs"),
@@ -220,7 +220,7 @@ fn tool_queries_complete_under_100ms() {
     let db = self_db().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let start = Instant::now();
-    let _ = query::handle_query(&db, "Database", None, None, None, None).unwrap();
+    let _ = query::handle_query(&db, "Database", None, None, None, None, None).unwrap();
     let query_time = start.elapsed();
     assert!(
         query_time.as_millis() < 100,

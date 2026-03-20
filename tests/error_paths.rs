@@ -91,7 +91,7 @@ fn index_multi_file(files: &[(&str, &str)]) -> (tempfile::TempDir, Database) {
 #[test]
 fn query_on_empty_crate_returns_no_results() {
     let (_dir, db) = empty_crate();
-    let result = query::handle_query(&db, "anything", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "anything", Some("symbols"), None, None, None, None).unwrap();
     let has_no_symbols = result.contains("No symbols")
         || result.contains("No results")
         || !result.contains("(function)")

@@ -8,18 +8,19 @@ pub fn handle_query(
     kind: Option<&str>,
     attribute: Option<&str>,
     signature: Option<&str>,
+    path: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let scope = scope.unwrap_or("all");
     let mut output = String::new();
 
     match scope {
         "symbols" => {
-            format_symbols(db, query, kind, attribute, signature, &mut output)?;
+            format_symbols(db, query, kind, attribute, signature, path, &mut output)?;
         }
         "docs" => format_docs(db, query, &mut output)?,
-        "files" => format_files(db, query, &mut output)?,
+        "files" => format_files(db, query, path, &mut output)?,
         "all" => {
-            format_symbols(db, query, kind, attribute, signature, &mut output)?;
+            format_symbols(db, query, kind, attribute, signature, path, &mut output)?;
             format_docs(db, query, &mut output)?;
         }
         other => {
@@ -42,9 +43,10 @@ fn format_symbols(
     kind: Option<&str>,
     attribute: Option<&str>,
     signature: Option<&str>,
+    path: Option<&str>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let all_symbols = if let Some(attr) = attribute {
+    let mut all_symbols = if let Some(attr) = attribute {
         let mut results = db.search_symbols_by_attribute(attr)?;
         if !query.is_empty() {
             let q = query.to_lowercase();
@@ -61,6 +63,9 @@ fn format_symbols(
     } else {
         db.search_symbols(query)?
     };
+    if let Some(p) = path {
+        all_symbols.retain(|s| s.file_path.starts_with(p));
+    }
     let symbols: Vec<_> = if let Some(k) = kind {
         let k_lower = k.to_lowercase();
         all_symbols
@@ -121,6 +126,7 @@ fn format_docs(
 fn format_files(
     db: &Database,
     query: &str,
+    path: Option<&str>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let all_paths = db.get_all_file_paths()?;
@@ -128,6 +134,7 @@ fn format_files(
     let mut files: Vec<&str> = all_paths
         .iter()
         .filter(|p| p.to_lowercase().contains(&query_lower))
+        .filter(|p| path.is_none_or(|prefix| p.starts_with(prefix)))
         .map(String::as_str)
         .collect();
     files.sort_unstable();
@@ -173,7 +180,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_query(&db, "parse", Some("symbols"), None, None, None).unwrap();
+        let result = handle_query(&db, "parse", Some("symbols"), None, None, None, None).unwrap();
         assert!(!result.is_empty());
         assert!(result.contains("parse_config"));
     }
@@ -185,7 +192,7 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "Serde serialization framework")
             .unwrap();
 
-        let result = handle_query(&db, "serialization", Some("docs"), None, None, None).unwrap();
+        let result = handle_query(&db, "serialization", Some("docs"), None, None, None, None).unwrap();
         assert!(result.contains("serialization"));
     }
 
@@ -213,7 +220,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_query(&db, "serialize", None, None, None, None).unwrap();
+        let result = handle_query(&db, "serialize", None, None, None, None, None).unwrap();
         assert!(result.contains("serialize"));
     }
 
@@ -241,7 +248,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_query(&db, "parse_config", Some("symbols"), None, None, None).unwrap();
+        let result = handle_query(&db, "parse_config", Some("symbols"), None, None, None, None).unwrap();
         assert!(result.contains("*Parse configuration from file.*"));
         assert!(!result.contains("Supports TOML"));
     }
@@ -286,21 +293,85 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_query(&db, "Config", Some("symbols"), Some("struct"), None, None).unwrap();
+        let result = handle_query(&db, "Config", Some("symbols"), Some("struct"), None, None, None).unwrap();
         assert!(result.contains("Config"), "should find Config struct");
         assert!(
             !result.contains("configure"),
             "should not include functions"
         );
 
-        let result = handle_query(&db, "Config", Some("symbols"), Some("function"), None, None).unwrap();
+        let result = handle_query(&db, "Config", Some("symbols"), Some("function"), None, None, None).unwrap();
         assert!(!result.contains("Config"), "struct should be filtered out");
     }
 
     #[test]
     fn test_query_no_results() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_query(&db, "nonexistent", None, None, None, None).unwrap();
+        let result = handle_query(&db, "nonexistent", None, None, None, None, None).unwrap();
         assert!(result.contains("No results found for 'nonexistent'"));
+    }
+
+    #[test]
+    fn test_query_path_filter() {
+        let db = Database::open_in_memory().unwrap();
+        let file_a = db.insert_file("src/server/mod.rs", "hash_a").unwrap();
+        let file_b = db.insert_file("src/db.rs", "hash_b").unwrap();
+        store_symbols(
+            &db,
+            file_a,
+            &[Symbol {
+                name: "serve".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/server/mod.rs".into(),
+                line_start: 1,
+                line_end: 10,
+                signature: "pub fn serve()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+        store_symbols(
+            &db,
+            file_b,
+            &[Symbol {
+                name: "query_db".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/db.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn query_db()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        // Without path filter: both symbols found via signature search
+        let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), None).unwrap();
+        assert!(result.contains("serve"), "should find serve without path filter");
+        assert!(result.contains("query_db"), "should find query_db without path filter");
+
+        // With path filter to src/server/: only serve
+        let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), Some("src/server/")).unwrap();
+        assert!(result.contains("serve"), "should find serve under src/server/");
+        assert!(!result.contains("query_db"), "should not find query_db under src/server/");
+
+        // With path filter to src/db.rs: only query_db
+        let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), Some("src/db.rs")).unwrap();
+        assert!(!result.contains("serve"), "should not find serve under src/db.rs");
+        assert!(result.contains("query_db"), "should find query_db under src/db.rs");
+
+        // With path filter to nonexistent path: no results
+        let result = handle_query(&db, "", Some("symbols"), None, None, Some("pub fn"), Some("src/other/")).unwrap();
+        assert!(result.contains("No results found"), "no symbols under src/other/");
     }
 }

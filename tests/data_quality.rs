@@ -230,13 +230,13 @@ pub static COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 ",
     );
-    let result = query::handle_query(&db, "MAX_RETRIES", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "MAX_RETRIES", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("MAX_RETRIES") && result.contains("const"),
         "const should be findable: {result}"
     );
 
-    let result = query::handle_query(&db, "COUNTER", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "COUNTER", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("COUNTER") && result.contains("static"),
         "static should be findable: {result}"
@@ -276,7 +276,7 @@ macro_rules! hashmap {
 }
 ",
     );
-    let result = query::handle_query(&db, "hashmap", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "hashmap", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("hashmap") && result.contains("macro"),
         "macro should be found: {result}"
@@ -505,7 +505,7 @@ pub fn configuration_manager() {}
 pub struct Config {}
 ",
     );
-    let result = query::handle_query(&db, "Config", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "Config", Some("symbols"), None, None, None, None).unwrap();
     let config_pos = result.find("**Config**");
     let configure_pos = result.find("configure");
     assert!(config_pos.is_some(), "exact match must appear: {result}");
@@ -526,7 +526,7 @@ pub struct Process {}
 pub trait Processable {}
 ",
     );
-    let result = query::handle_query(&db, "Process", Some("symbols"), Some("struct"), None, None).unwrap();
+    let result = query::handle_query(&db, "Process", Some("symbols"), Some("struct"), None, None, None).unwrap();
     assert!(result.contains("Process"), "struct should appear: {result}");
     assert!(
         !result.contains("(function)"),
@@ -545,7 +545,7 @@ fn query_files_scope_returns_unique_paths() {
         ("server.rs", "pub fn serve() {}\npub fn handle() {}\n"),
         ("db.rs", "pub fn query() {}\n"),
     ]);
-    let result = query::handle_query(&db, "serve", Some("files"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "serve", Some("files"), None, None, None, None).unwrap();
     assert!(
         result.contains("src/server.rs"),
         "should find file: {result}"
@@ -555,7 +555,7 @@ fn query_files_scope_returns_unique_paths() {
 #[test]
 fn empty_query_returns_no_results() {
     let (_dir, db) = index_source("pub fn hello() {}");
-    let result = query::handle_query(&db, "", None, None, None, None).unwrap();
+    let result = query::handle_query(&db, "", None, None, None, None, None).unwrap();
     assert!(
         result.contains("No results found"),
         "empty query should find nothing: {result}"
@@ -615,7 +615,7 @@ pub fn make_widget(name: &str) -> Widget {
 }
 ",
     );
-    let result = query::handle_query(&db, "Widget", None, None, None, None).unwrap();
+    let result = query::handle_query(&db, "Widget", None, None, None, None, None).unwrap();
 
     assert!(
         result.contains("## Symbols"),
@@ -944,7 +944,7 @@ fn workspace_context_shows_correct_file_paths() {
 #[test]
 fn workspace_query_finds_across_crates() {
     let (_dir, db) = index_workspace();
-    let result = query::handle_query(&db, "user", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "user", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("User"),
         "should find User from core: {result}"
@@ -1025,13 +1025,13 @@ pub fn error() -> String {
 }
 "#,
     );
-    let result = query::handle_query(&db, "Error", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "Error", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("struct") || result.contains("enum"),
         "should find both type definitions: {result}"
     );
 
-    let result = query::handle_query(&db, "Error", Some("symbols"), Some("function"), None, None).unwrap();
+    let result = query::handle_query(&db, "Error", Some("symbols"), Some("function"), None, None, None).unwrap();
     assert!(
         result.contains("error") && result.contains("function"),
         "function filter: {result}"
@@ -1081,7 +1081,7 @@ pub fn process<T>(item: T) -> String where T: std::fmt::Display + Clone {
 }
 ",
     );
-    let result = query::handle_query(&db, "process", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "process", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("process"),
         "should find function with where clause: {result}"
@@ -1169,7 +1169,7 @@ pub fn prod_only() {}
 pub fn always() {}
 ",
     );
-    let result = query::handle_query(&db, "always", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "always", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("always"),
         "should find non-gated function: {result}"
@@ -1185,7 +1185,7 @@ pub unsafe fn dangerous(ptr: *const u8) -> u8 {
 }
 ",
     );
-    let result = query::handle_query(&db, "dangerous", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "dangerous", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("dangerous"),
         "should find unsafe function: {result}"
@@ -1205,7 +1205,7 @@ pub fn config_parser() {}
 pub fn parse_config_file() {}
 ",
     );
-    let result = query::handle_query(&db, "config", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "config", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("config"),
         "exact match should appear in results: {result}"
@@ -1221,7 +1221,7 @@ pub struct Process {}
 ",
     );
     let result =
-        query::handle_query(&db, "process", Some("symbols"), Some("function"), None, None).unwrap();
+        query::handle_query(&db, "process", Some("symbols"), Some("function"), None, None, None).unwrap();
     assert!(
         result.contains("process"),
         "function should be found: {result}"
@@ -1242,7 +1242,7 @@ fn file_scope_handles_dots_in_filename() {
         ("lib.rs", "pub mod server;\n"),
         ("server.rs", "pub fn serve() {}\n"),
     ]);
-    let result = query::handle_query(&db, "server.rs", Some("files"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "server.rs", Some("files"), None, None, None, None).unwrap();
     assert!(
         result.contains("server.rs"),
         "file scope should handle dots: {result}"
@@ -1254,7 +1254,7 @@ fn default_query_excludes_use_and_mod() {
     let (_dir, db) = index_source(
         "use std::fmt::Write;\npub mod child;\npub fn real_fn() {}\npub struct RealStruct;\n",
     );
-    let result = query::handle_query(&db, "real", Some("symbols"), None, None, None).unwrap();
+    let result = query::handle_query(&db, "real", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("real_fn"),
         "should find function: {result}"
@@ -1272,7 +1272,7 @@ fn default_query_excludes_use_and_mod() {
 #[test]
 fn kind_use_filter_still_works() {
     let (_dir, db) = index_source("use std::fmt::Write;\npub fn real_fn() {}\n");
-    let result = query::handle_query(&db, "Write", Some("symbols"), Some("use"), None, None).unwrap();
+    let result = query::handle_query(&db, "Write", Some("symbols"), Some("use"), None, None, None).unwrap();
     assert!(
         result.contains("(use)"),
         "kind=use should still return use items: {result}"
@@ -1448,7 +1448,7 @@ fn realistic_codebase_indexes_all_symbols() {
         "Middleware",
     ] {
         let result =
-            query::handle_query(&db, name, Some("symbols"), None, None, None).unwrap();
+            query::handle_query(&db, name, Some("symbols"), None, None, None, None).unwrap();
         assert!(
             result.contains(name),
             "query for '{name}' should find it: {result}"
@@ -1538,7 +1538,7 @@ fn search_exact_name_beats_contains() {
          pub struct ConfigManager {}\n",
     );
     let result =
-        query::handle_query(&db, "Config", Some("symbols"), None, None, None).unwrap();
+        query::handle_query(&db, "Config", Some("symbols"), None, None, None, None).unwrap();
     let config_pos = result.find("**Config**");
     let config_manager_pos = result.find("ConfigManager");
     let configure_pos = result.find("configure");
@@ -1578,7 +1578,7 @@ fn search_common_name_new_returns_results() {
         ),
     ]);
     let result =
-        query::handle_query(&db, "new", Some("symbols"), None, None, None).unwrap();
+        query::handle_query(&db, "new", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("new"),
         "query for 'new' should find results: {result}"
@@ -1599,7 +1599,7 @@ fn search_by_doc_comment_content() {
          pub fn save_data() {}\n",
     );
     let result =
-        query::handle_query(&db, "TOML", Some("all"), None, None, None).unwrap();
+        query::handle_query(&db, "TOML", Some("all"), None, None, None, None).unwrap();
     // FTS indexes symbol names, not doc comments, so this may not find
     // results. The key assertion is no error or panic.
     assert!(
@@ -1614,7 +1614,7 @@ fn search_short_query_works() {
         "pub fn go() {}\npub fn do_work() {}\n",
     );
     let result =
-        query::handle_query(&db, "go", Some("symbols"), None, None, None).unwrap();
+        query::handle_query(&db, "go", Some("symbols"), None, None, None, None).unwrap();
     assert!(
         result.contains("go"),
         "short 2-char query should find 'go': {result}"

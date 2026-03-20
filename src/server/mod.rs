@@ -80,6 +80,8 @@ struct QueryParams {
     attribute: Option<String>,
     /// Filter by signature pattern (e.g. "&Database", "-> Result")
     signature: Option<String>,
+    /// Filter results to files under this path prefix (e.g. "src/db.rs", "src/server/")
+    path: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -195,6 +197,7 @@ impl IlluServer {
             params.kind.as_deref(),
             params.attribute.as_deref(),
             params.signature.as_deref(),
+            params.path.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
