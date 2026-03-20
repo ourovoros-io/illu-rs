@@ -94,7 +94,7 @@ struct ContextParams {
     /// Filter results to a specific file path (e.g. "src/db.rs")
     file: Option<String>,
     /// Select specific sections to include: `source`, `callers`, `callees`,
-    /// `tested_by`, `traits`, `docs`. Omit for all sections.
+    /// `tested_by`, `traits`, `related`, `docs`. Omit for all sections.
     sections: Option<Vec<String>>,
     /// Filter callers and callees to this path prefix (e.g. "src/" to exclude test callers)
     callers_path: Option<String>,

@@ -42,6 +42,9 @@ pub fn handle_context(
         if show("tested_by") {
             render_tested_by(db, &mut output, sym)?;
         }
+        if show("related") {
+            render_related(db, &mut output, sym)?;
+        }
     }
 
     if show("docs") {
@@ -294,6 +297,45 @@ fn render_tested_by(
     }
     let _ = writeln!(output);
 
+    Ok(())
+}
+
+fn render_related(
+    db: &Database,
+    output: &mut String,
+    sym: &StoredSymbol,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let siblings = db.get_symbols_by_path_prefix(&sym.file_path)?;
+    let related: Vec<_> = siblings
+        .iter()
+        .filter(|s| s.name != sym.name || s.line_start != sym.line_start)
+        .filter(|s| s.impl_type == sym.impl_type)
+        .filter(|s| {
+            s.kind != SymbolKind::Use
+                && s.kind != SymbolKind::Mod
+                && s.kind != SymbolKind::EnumVariant
+                && s.kind != SymbolKind::Impl
+        })
+        .collect();
+
+    if related.is_empty() {
+        return Ok(());
+    }
+
+    let label = if let Some(it) = &sym.impl_type {
+        format!("Related (impl {it})")
+    } else {
+        "Related (same file)".to_string()
+    };
+    let _ = writeln!(output, "### {label}\n");
+    for s in &related {
+        let _ = writeln!(
+            output,
+            "- **{}** ({}, line {}-{})",
+            s.name, s.kind, s.line_start, s.line_end
+        );
+    }
+    let _ = writeln!(output);
     Ok(())
 }
 
@@ -896,6 +938,157 @@ mod tests {
         assert!(
             !result.contains("test_caller"),
             "test caller should be filtered out"
+        );
+    }
+
+    #[test]
+    fn test_context_related_same_impl() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "method_a".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn method_a(&self)".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: Some("MyType".into()),
+                },
+                Symbol {
+                    name: "method_b".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn method_b(&self)".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: Some("MyType".into()),
+                },
+            ],
+        )
+        .unwrap();
+
+        let result = handle_context(&db, "MyType::method_a", false, None, None, None).unwrap();
+        assert!(
+            result.contains("### Related (impl MyType)"),
+            "should show related section with impl label"
+        );
+        assert!(
+            result.contains("method_b"),
+            "should list sibling method"
+        );
+    }
+
+    #[test]
+    fn test_context_related_top_level() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "func_one".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn func_one()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "func_two".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn func_two()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let result = handle_context(&db, "func_one", false, None, None, None).unwrap();
+        assert!(
+            result.contains("### Related (same file)"),
+            "should show related section with file label"
+        );
+        assert!(
+            result.contains("func_two"),
+            "should list sibling function"
+        );
+    }
+
+    #[test]
+    fn test_context_related_filtered_by_sections() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "alpha".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn alpha()".into(),
+                    doc_comment: None,
+                    body: Some("pub fn alpha() {}".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "beta".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn beta()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let sections: &[&str] = &["source"];
+        let result = handle_context(&db, "alpha", false, None, Some(sections), None).unwrap();
+        assert!(result.contains("### Source"), "source section present");
+        assert!(
+            !result.contains("### Related"),
+            "related section should be absent when not requested"
         );
     }
 }
