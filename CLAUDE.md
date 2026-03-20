@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-illu-rs is an MCP (Model Context Protocol) server that indexes Rust codebases and exposes code intelligence tools. It parses source files with tree-sitter, stores symbols/refs/deps in SQLite, and serves 7 MCP tools over stdio: `query`, `context`, `impact`, `diff_impact`, `docs`, `overview`, `tree`.
+illu-rs is an MCP (Model Context Protocol) server that indexes Rust codebases and exposes code intelligence tools. It parses source files with tree-sitter, stores symbols/refs/deps in SQLite, and serves 12 MCP tools over stdio: `query`, `context`, `batch_context`, `impact`, `diff_impact`, `callpath`, `unused`, `freshness`, `docs`, `overview`, `tree`, `crate_graph`.
 
 ## Commands
 
@@ -45,7 +45,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 ### `indexer` — Indexing pipeline (`src/indexer/`)
 - `mod.rs` — Orchestrator. `index_repo` detects workspace vs single-crate, dispatches to `index_workspace` or `index_single_crate`. Shared phases: symbol ref extraction, skill file generation, metadata update.
 - `workspace.rs` — `parse_workspace_toml`, `resolve_member_deps` (handles `workspace = true` inheritance), `extract_path_deps` (inter-crate deps).
-- `parser.rs` — Tree-sitter parsing. `parse_rust_source` extracts symbols (with `impl_type` for methods); `extract_refs` uses import maps and crate maps for qualified path resolution. Detects `self.method()` calls for impl-type-aware ref resolution.
+- `parser.rs` — Tree-sitter parsing. `parse_rust_source` extracts symbols (with `impl_type` for methods and enum variants); `extract_refs` uses import maps and crate maps for qualified path resolution. Detects `self.method()` calls for impl-type-aware ref resolution. Enum variants are indexed as `EnumVariant` symbols with `impl_type` set to the parent enum name.
 - `dependencies.rs` — Parses `Cargo.toml`/`Cargo.lock`, resolves direct vs transitive deps.
 - `store.rs` — Writes parsed symbols/deps to DB.
 - `docs.rs` — Fetches docs (cargo doc JSON → docs.rs → GitHub README). Two-tier storage: crate summary + per-module detail.
@@ -53,7 +53,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 
 ### `server` — MCP server (`src/server/`)
 - `mod.rs` — `IlluServer` wraps `Arc<Mutex<Database>>`. Uses rmcp's `#[tool_router]`, `#[tool_handler]`, `#[tool]` macros with `Parameters<T>` wrapper. Tool param structs derive `JsonSchema` via `rmcp::schemars` re-export.
-- `tools/` — Each tool handler is a pure function `handle_*(db, ...) -> Result<String>`: `query.rs`, `context.rs`, `impact.rs`, `diff_impact.rs`, `docs.rs`, `overview.rs`, `tree.rs`.
+- `tools/` — Each tool handler is a pure function `handle_*(db, ...) -> Result<String>`: `query.rs`, `context.rs`, `batch_context.rs`, `impact.rs`, `diff_impact.rs`, `callpath.rs`, `unused.rs`, `freshness.rs`, `docs.rs`, `overview.rs`, `tree.rs`, `crate_graph.rs`.
 
 ## Key Patterns
 
@@ -61,7 +61,16 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **`rmcp::schemars`** — Tool param structs must use the `schemars` re-exported by rmcp, not a separate schemars crate.
 - **Symbol refs use qualified resolution** — `extract_refs` builds an import map from `use` declarations and a crate map from the workspace. Refs resolve via import → same-file → same-crate → global name fallback. `self.method()` resolves via `impl_type` matching.
 - **Workspace detection** — Presence of `[workspace]` in root `Cargo.toml` triggers multi-crate indexing. Single-crate repos get one implicit row in `crates`.
-- **Impact tool** — Uses recursive CTE on `symbol_refs` (depth limit 5) for symbol-level impact. For workspaces with >1 crate, prepends an "Affected Crates" section using `crate_deps` transitive query.
+- **Impact tool** — Uses recursive CTE on `symbol_refs` (depth limit 5) for symbol-level impact. For workspaces with >1 crate, prepends an "Affected Crates" section using `crate_deps` transitive query. Appends a "Related Tests" section listing `#[test]` functions that transitively call the symbol.
+- **Context tool** — Shows callers ("Called By" section) alongside callees. Supports `Type::method` syntax (e.g. `Database::new`) via `impl_type` column lookup, and optional `file` parameter for scoped results.
+- **Diff impact tool** — After listing changed symbols and downstream impact, appends a "Related Tests" section with a suggested `cargo test` command.
+- **Callpath tool** — BFS on `symbol_refs` from source to target symbol. Returns shortest call chain with file locations.
+- **Batch context tool** — Iterates over a list of symbol names, calling `handle_context` for each. Returns concatenated results.
+- **Unused tool** — LEFT JOIN `symbol_refs` to find symbols with zero incoming refs. Excludes entry points (`main`, `#[test]`), `use`/`mod`/`impl` kinds, and `EnumVariant` symbols.
+- **Freshness tool** — Compares `get_commit_hash` against `git rev-parse HEAD`. Lists changed files via `git diff --name-only`. Does NOT call `refresh()` — reports current state only.
+- **Crate graph tool** — Formats `crate_deps` as an adjacency list. Identifies root crates (no dependents) and leaf crates (no deps).
+- **Query filters** — `attribute` parameter uses `search_symbols_by_attribute` (LIKE on attributes column). `signature` parameter uses `search_symbols_by_signature` (LIKE on signature column). Both combinable with `kind` filter.
+- **Constructor tracking** — `new`, `from`, `into`, `clone`, `default`, `build`, `init` are tracked as symbol refs (removed from `NOISY_SYMBOL_NAMES`). `impl_type` disambiguation prevents cross-type collisions.
 
 ## Lint Configuration
 
@@ -84,6 +93,9 @@ This repo is indexed by illu. **Use illu tools as your first step** — before r
 - **Debugging or tracing issues**: `illu context` to get the full definition and references
 - **Using an external crate**: `illu docs` to check how it's used in this project
 - **Before reading files**: query first — illu tells you exactly where things are
+- **Finding call paths**: `illu callpath` to trace how one symbol reaches another
+- **Dead code detection**: `illu unused` to find unreferenced symbols
+- **Index health**: `illu freshness` to check if the index is current
 
 ### Commands
 
@@ -92,11 +104,18 @@ This repo is indexed by illu. **Use illu tools as your first step** — before r
 | `illu query <term>` | `mcp__illu__query` | `query: "<term>"` |
 | `illu query <term> --scope <s>` | `mcp__illu__query` | `query: "<term>", scope: "<s>"` |
 | `illu context <symbol>` | `mcp__illu__context` | `symbol_name: "<symbol>"` |
+| `illu context Type::method` | `mcp__illu__context` | `symbol_name: "Type::method"` |
+| `illu context <symbol> --file <f>` | `mcp__illu__context` | `symbol_name: "<symbol>", file: "<f>"` |
 | `illu impact <symbol>` | `mcp__illu__impact` | `symbol_name: "<symbol>"` |
+| `illu impact <symbol> --depth 1` | `mcp__illu__impact` | `symbol_name: "<symbol>", depth: 1` |
 | `illu docs <dep>` | `mcp__illu__docs` | `dependency: "<dep>"` |
 | `illu docs <dep> --topic <t>` | `mcp__illu__docs` | `dependency: "<dep>", topic: "<t>"` |
-| `illu diff_impact` | `mcp__illu__diff_impact` | (unstaged changes) |
-| `illu diff_impact <ref>` | `mcp__illu__diff_impact` | `git_ref: "<ref>"` |
+| `illu callpath <from> <to>` | `mcp__illu__callpath` | `from: "<from>", to: "<to>"` |
+| `illu batch_context <sym1> <sym2>` | `mcp__illu__batch_context` | `symbols: ["<sym1>", "<sym2>"]` |
+| `illu unused` | `mcp__illu__unused` | |
+| `illu unused --path src/server/` | `mcp__illu__unused` | `path: "src/server/"` |
+| `illu freshness` | `mcp__illu__freshness` | |
+| `illu crate_graph` | `mcp__illu__crate_graph` | |
 
 ### Workflow rules
 
