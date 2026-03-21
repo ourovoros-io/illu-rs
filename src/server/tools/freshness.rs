@@ -21,7 +21,7 @@ pub fn handle_freshness(
         .trim()
         .to_string();
 
-    let indexed = indexed_hash.as_deref().unwrap_or("(none)");
+    let indexed = indexed_hash.as_deref().unwrap_or("not indexed yet");
     let _ = writeln!(output, "- **Indexed commit:** `{indexed}`");
     let _ = writeln!(output, "- **Current HEAD:** `{current_head}`");
 

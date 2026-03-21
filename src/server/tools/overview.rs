@@ -88,6 +88,10 @@ pub fn handle_overview(
     kinds.sort_by(|a, b| b.1.cmp(&a.1));
     let kind_summary: Vec<String> = kinds.iter().map(|(k, c)| format!("{c} {k}s")).collect();
     let _ = writeln!(output, "{}", kind_summary.join(", "));
+    let _ = writeln!(
+        output,
+        "\n*Calls shown are same-file only. Use `context` for full call graph.*"
+    );
 
     Ok(output)
 }

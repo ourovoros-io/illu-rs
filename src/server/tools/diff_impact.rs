@@ -94,9 +94,12 @@ pub fn handle_diff_impact(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let diff_output = run_git_diff(repo_path, git_ref)?;
     if diff_output.trim().is_empty() {
-        return Ok("No changes detected. Check the git ref \
-             (e.g., git_ref: \"HEAD~1..HEAD\" for last commit, \
-             or omit for unstaged changes)."
+        return Ok("No changes detected. Check the git ref format:\n\
+             - Omit `git_ref` for unstaged changes\n\
+             - `git_ref: \"HEAD~1\"` for last commit vs HEAD\n\
+             - `git_ref: \"HEAD~3..HEAD\"` for last 3 commits\n\
+             - `git_ref: \"main..feature\"` for branch diff\n\
+             - `git_ref: \"abc1234\"` for diff from a specific commit to HEAD"
             .to_string());
     }
 

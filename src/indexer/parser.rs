@@ -957,7 +957,8 @@ fn collect_use_entries(
 }
 
 /// Convenience wrapper: parse source and extract the import map.
-pub fn extract_import_map_from_source(
+#[cfg(test)]
+fn extract_import_map_from_source(
     source: &str,
 ) -> Result<std::collections::HashMap<String, ImportInfo>, String> {
     let tree = parse_source(source)?;
@@ -1052,6 +1053,8 @@ fn collect_derive_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
         };
         for derive_name in inner.split(',') {
             let derive_name = derive_name.trim();
+            // Handle path-qualified derives: serde::Serialize → Serialize
+            let derive_name = derive_name.rsplit("::").next().unwrap_or(derive_name);
             if !derive_name.is_empty() && ctx.known_symbols.contains(derive_name) {
                 refs.push(SymbolRef {
                     source_name: source_name.clone(),
@@ -1061,6 +1064,26 @@ fn collect_derive_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                     target_file: resolve_target_file(derive_name, ctx),
                     target_context: None,
                 });
+            }
+        }
+    }
+}
+
+/// Recursively collect all bound identifiers from a pattern node.
+/// Handles tuple patterns `(a, b)`, struct patterns `Foo { x, y }`, etc.
+fn collect_pattern_identifiers(
+    node: &Node,
+    source: &str,
+    locals: &mut std::collections::HashSet<String>,
+) {
+    let mut stack = vec![*node];
+    while let Some(n) = stack.pop() {
+        let mut cursor = n.walk();
+        for child in n.children(&mut cursor) {
+            if child.kind() == "identifier" {
+                locals.insert(node_text(&child, source));
+            } else {
+                stack.push(child);
             }
         }
     }
@@ -1080,12 +1103,7 @@ fn collect_locals(node: &Node, source: &str) -> std::collections::HashSet<String
                     }
                 }
                 "closure_parameters" => {
-                    let mut inner = child.walk();
-                    for param in child.children(&mut inner) {
-                        if param.kind() == "identifier" {
-                            locals.insert(node_text(&param, source));
-                        }
-                    }
+                    collect_pattern_identifiers(&child, source, &mut locals);
                 }
                 _ => {}
             }
@@ -1123,6 +1141,30 @@ fn extract_type_from_node(node: &Node, source: &str) -> Option<String> {
         }
         "generic_type" => {
             // Vec<T> → "Vec" (the outer type)
+            find_child_by_kind(node, "type_identifier").map(|n| node_text(&n, source))
+        }
+        "pointer_type" => {
+            // *mut T or *const T → recurse to inner type
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(t) = extract_type_from_node(&child, source) {
+                    return Some(t);
+                }
+            }
+            None
+        }
+        "array_type" | "slice_type" => {
+            // [T; N] or [T] → extract inner type
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(t) = extract_type_from_node(&child, source) {
+                    return Some(t);
+                }
+            }
+            None
+        }
+        "dynamic_type" => {
+            // dyn Trait → extract the trait name
             find_child_by_kind(node, "type_identifier").map(|n| node_text(&n, source))
         }
         _ => None,
@@ -1295,6 +1337,39 @@ fn resolve_target_file<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     }
 }
 
+struct BodyRefCollector<'a, S: std::hash::BuildHasher, S2: std::hash::BuildHasher> {
+    fn_name: &'a str,
+    ctx: &'a RefContext<'a, S, S2>,
+    locals: std::collections::HashSet<String>,
+    seen: std::collections::HashSet<String>,
+}
+
+impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_, S, S2> {
+    fn try_add(
+        &mut self,
+        name: &str,
+        kind: RefKind,
+        target_context: Option<String>,
+        refs: &mut Vec<SymbolRef>,
+    ) {
+        if name != self.fn_name
+            && !is_noisy_symbol(name)
+            && !self.locals.contains(name)
+            && self.ctx.known_symbols.contains(name)
+            && self.seen.insert(name.to_string())
+        {
+            refs.push(SymbolRef {
+                source_name: self.fn_name.to_string(),
+                source_file: self.ctx.file_path.to_string(),
+                target_name: name.to_string(),
+                kind,
+                target_file: resolve_target_file(name, self.ctx),
+                target_context,
+            });
+        }
+    }
+}
+
 fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     fn_node: &Node,
     fn_name: &str,
@@ -1304,7 +1379,12 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
 ) {
     let locals = collect_locals(fn_node, ctx.source);
     let local_types = collect_local_types(fn_node, ctx.source, impl_type);
-    let mut seen = std::collections::HashSet::new();
+    let mut col = BodyRefCollector {
+        fn_name,
+        ctx,
+        locals,
+        seen: std::collections::HashSet::new(),
+    };
     let mut stack = vec![*fn_node];
 
     while let Some(node) = stack.pop() {
@@ -1318,21 +1398,7 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                     } else {
                         RefKind::Call
                     };
-                    if name != fn_name
-                        && !is_noisy_symbol(&name)
-                        && !locals.contains(&name)
-                        && ctx.known_symbols.contains(&name)
-                        && seen.insert(name.clone())
-                    {
-                        refs.push(SymbolRef {
-                            source_name: fn_name.to_string(),
-                            source_file: ctx.file_path.to_string(),
-                            target_name: name.clone(),
-                            kind: ref_kind,
-                            target_file: resolve_target_file(&name, ctx),
-                            target_context: None,
-                        });
-                    }
+                    col.try_add(&name, ref_kind, None, refs);
                 }
                 "field_identifier" => {
                     let name = node_text(&child, ctx.source);
@@ -1350,20 +1416,26 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                             _ => None,
                         }
                     });
-                    if name != fn_name
-                        && !is_noisy_symbol(&name)
-                        && !locals.contains(&name)
-                        && ctx.known_symbols.contains(&name)
-                        && seen.insert(name.clone())
-                    {
-                        refs.push(SymbolRef {
-                            source_name: fn_name.to_string(),
-                            source_file: ctx.file_path.to_string(),
-                            target_name: name.clone(),
-                            kind: RefKind::Call,
-                            target_file: resolve_target_file(&name, ctx),
-                            target_context,
-                        });
+                    col.try_add(&name, RefKind::Call, target_context, refs);
+                }
+                "macro_invocation" => {
+                    let mut macro_stack = vec![child];
+                    while let Some(mn) = macro_stack.pop() {
+                        let mut mc = mn.walk();
+                        for mchild in mn.children(&mut mc) {
+                            let mk = mchild.kind();
+                            if mk == "type_identifier" || mk == "identifier" {
+                                let name = node_text(&mchild, ctx.source);
+                                let ref_kind = if mk == "type_identifier" {
+                                    RefKind::TypeRef
+                                } else {
+                                    RefKind::Call
+                                };
+                                col.try_add(&name, ref_kind, None, refs);
+                            } else {
+                                macro_stack.push(mchild);
+                            }
+                        }
                     }
                 }
                 _ => {

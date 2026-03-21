@@ -145,6 +145,25 @@ fn rebuild_refs_for_files(
         let refs = parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         db.store_symbol_refs_fast(&refs, &symbol_map)?;
+
+        // Re-extract and store trait impls for this file
+        let file_id: Option<crate::db::FileId> = db
+            .conn
+            .query_row(
+                "SELECT id FROM files WHERE path = ?1",
+                rusqlite::params![df.relative_path],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(fid) = file_id {
+            db.conn.execute(
+                "DELETE FROM trait_impls WHERE file_id = ?1",
+                rusqlite::params![fid],
+            )?;
+            let (_symbols, trait_impls) = parser::parse_rust_source(&df.source, &df.relative_path)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            store::store_trait_impls(db, fid, &trait_impls)?;
+        }
     }
     db.commit()?;
     Ok(())
@@ -199,12 +218,18 @@ fn index_workspace(
             total_members
         ));
 
-        let pkg_name = extract_package_name(&member_toml).unwrap_or_else(|| member.clone());
+        let parsed: toml::Value = toml::from_str(&member_toml)?;
+
+        let pkg_name = parsed
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(toml::Value::as_str)
+            .map_or_else(|| member.clone(), String::from);
         let crate_id = db.insert_crate(&pkg_name, member)?;
         crate_ids.insert(pkg_name.clone(), crate_id);
 
         // Resolve external deps for this member
-        let member_deps = workspace::resolve_member_deps(&member_toml, &ws_info.workspace_deps)?;
+        let member_deps = workspace::resolve_member_deps(&parsed, &ws_info.workspace_deps);
         for dep in &member_deps {
             if !all_direct
                 .iter()
@@ -215,8 +240,16 @@ fn index_workspace(
         }
 
         // Collect inter-crate path deps (recorded after all crates exist)
-        let pds = workspace::extract_path_deps(&member_toml)?;
-        let dep_names: Vec<String> = pds.into_iter().map(|pd| pd.name).collect();
+        let pds = workspace::extract_path_deps(&parsed);
+        let mut dep_names = Vec::new();
+        for pd in pds {
+            let target_toml_path = member_dir.join(&pd.path).join("Cargo.toml");
+            let resolved_name = std::fs::read_to_string(&target_toml_path)
+                .ok()
+                .and_then(|content| extract_package_name(&content))
+                .unwrap_or(pd.name);
+            dep_names.push(resolved_name);
+        }
         if !dep_names.is_empty() {
             path_deps_by_crate.push((pkg_name, dep_names));
         }

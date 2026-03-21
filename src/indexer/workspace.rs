@@ -11,6 +11,7 @@ pub struct WorkspaceInfo {
 #[derive(Debug)]
 pub struct PathDep {
     pub name: String,
+    pub path: String,
 }
 
 /// Parse a root `Cargo.toml` to detect whether it defines a workspace.
@@ -71,24 +72,31 @@ fn iter_dep_entries(parsed: &toml::Value) -> Vec<(&String, &toml::Value)> {
 
 /// Resolve a member crate's dependencies, substituting `workspace = true`
 /// entries with definitions from the workspace root.
-pub fn resolve_member_deps(
-    member_toml: &str,
-    ws_deps: &[DirectDep],
-) -> Result<Vec<DirectDep>, toml::de::Error> {
-    let parsed: toml::Value = toml::from_str(member_toml)?;
-
+#[must_use]
+pub fn resolve_member_deps(parsed: &toml::Value, ws_deps: &[DirectDep]) -> Vec<DirectDep> {
     let ws_lookup: HashMap<&str, &DirectDep> =
         ws_deps.iter().map(|d| (d.name.as_str(), d)).collect();
 
     let mut result = Vec::new();
-    for (name, value) in iter_dep_entries(&parsed) {
+    for (name, value) in iter_dep_entries(parsed) {
         if get_path_value(value).is_some() {
             continue;
         }
 
         if is_workspace_dep(value) {
             if let Some(ws_dep) = ws_lookup.get(name.as_str()) {
-                result.push((*ws_dep).clone());
+                let mut resolved = (*ws_dep).clone();
+                if let Some(member_features) = value.get("features").and_then(toml::Value::as_array)
+                {
+                    for feat in member_features {
+                        if let Some(f) = feat.as_str()
+                            && !resolved.features.contains(&f.to_string())
+                        {
+                            resolved.features.push(f.to_string());
+                        }
+                    }
+                }
+                result.push(resolved);
             }
             continue;
         }
@@ -101,22 +109,24 @@ pub fn resolve_member_deps(
         });
     }
 
-    Ok(result)
+    result
 }
 
 /// Extract path-based dependencies from a member's `Cargo.toml`.
 /// These represent inter-crate dependencies within the workspace.
-pub fn extract_path_deps(member_toml: &str) -> Result<Vec<PathDep>, toml::de::Error> {
-    let parsed: toml::Value = toml::from_str(member_toml)?;
-
+#[must_use]
+pub fn extract_path_deps(parsed: &toml::Value) -> Vec<PathDep> {
     let mut result = Vec::new();
-    for (name, value) in iter_dep_entries(&parsed) {
-        if get_path_value(value).is_some() {
-            result.push(PathDep { name: name.clone() });
+    for (name, value) in iter_dep_entries(parsed) {
+        if let Some(path) = get_path_value(value) {
+            result.push(PathDep {
+                name: name.clone(),
+                path,
+            });
         }
     }
 
-    Ok(result)
+    result
 }
 
 fn is_workspace_dep(value: &toml::Value) -> bool {
@@ -244,11 +254,63 @@ version = "0.1.0"
 serde = { workspace = true }
 custom = "0.5"
 "#;
-        let resolved = resolve_member_deps(member_toml, &ws_deps).unwrap();
+        let resolved = resolve_member_deps(
+            &toml::from_str::<toml::Value>(member_toml).unwrap(),
+            &ws_deps,
+        );
         let serde = resolved.iter().find(|d| d.name == "serde").unwrap();
         assert_eq!(serde.version_req, "1.0");
         let custom = resolved.iter().find(|d| d.name == "custom").unwrap();
         assert_eq!(custom.version_req, "0.5");
+    }
+
+    #[test]
+    fn test_resolve_workspace_dep_merges_features() {
+        let ws_deps = vec![DirectDep {
+            name: "serde".into(),
+            version_req: "1.0".into(),
+            features: vec!["derive".into()],
+        }];
+        let member_toml = r#"
+[package]
+name = "my-app"
+version = "0.1.0"
+
+[dependencies]
+serde = { workspace = true, features = ["json"] }
+"#;
+        let resolved = resolve_member_deps(
+            &toml::from_str::<toml::Value>(member_toml).unwrap(),
+            &ws_deps,
+        );
+        let serde = resolved.iter().find(|d| d.name == "serde").unwrap();
+        assert_eq!(serde.version_req, "1.0");
+        assert!(serde.features.contains(&"derive".to_string()));
+        assert!(serde.features.contains(&"json".to_string()));
+        assert_eq!(serde.features.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_workspace_dep_no_duplicate_features() {
+        let ws_deps = vec![DirectDep {
+            name: "serde".into(),
+            version_req: "1.0".into(),
+            features: vec!["derive".into()],
+        }];
+        let member_toml = r#"
+[package]
+name = "my-app"
+version = "0.1.0"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+"#;
+        let resolved = resolve_member_deps(
+            &toml::from_str::<toml::Value>(member_toml).unwrap(),
+            &ws_deps,
+        );
+        let serde = resolved.iter().find(|d| d.name == "serde").unwrap();
+        assert_eq!(serde.features, vec!["derive"]);
     }
 
     #[test]
@@ -262,9 +324,10 @@ version = "0.1.0"
 hcfs-shared = { path = "../hcfs-shared" }
 serde = { workspace = true }
 "#;
-        let path_deps = extract_path_deps(member_toml).unwrap();
+        let path_deps = extract_path_deps(&toml::from_str::<toml::Value>(member_toml).unwrap());
         assert_eq!(path_deps.len(), 1);
         assert_eq!(path_deps[0].name, "hcfs-shared");
+        assert_eq!(path_deps[0].path, "../hcfs-shared");
     }
 
     #[test]
@@ -283,7 +346,10 @@ version = "0.1.0"
 shared = { path = "../shared" }
 serde = { workspace = true }
 "#;
-        let resolved = resolve_member_deps(member_toml, &ws_deps).unwrap();
+        let resolved = resolve_member_deps(
+            &toml::from_str::<toml::Value>(member_toml).unwrap(),
+            &ws_deps,
+        );
         assert!(!resolved.iter().any(|d| d.name == "shared"));
         assert!(resolved.iter().any(|d| d.name == "serde"));
     }

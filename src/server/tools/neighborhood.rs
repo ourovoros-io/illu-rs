@@ -15,7 +15,11 @@ pub fn handle_neighborhood(
 
     let syms = super::resolve_symbol(db, symbol_name)?;
     if syms.is_empty() {
-        return Ok(format!("Symbol '{symbol_name}' not found."));
+        return Ok(format!(
+            "Symbol '{symbol_name}' not found.\n\
+            Try `Type::method` syntax for methods \
+            (e.g. `Database::new`), or use `query` to search."
+        ));
     }
 
     let base = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);

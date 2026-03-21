@@ -1,7 +1,16 @@
-use crate::db::{Database, StoredSymbol};
+use crate::db::{CalleeInfo, Database, StoredSymbol};
 use crate::indexer::parser::SymbolKind;
 use std::fmt::Write;
 use std::path::Path;
+
+/// Format a callee/caller name as `ImplType::name` when `impl_type` is present.
+fn qualified_callee_name(c: &CalleeInfo) -> String {
+    if let Some(it) = &c.impl_type {
+        format!("{}::{}", it, c.name)
+    } else {
+        c.name.clone()
+    }
+}
 
 pub fn handle_context(
     db: &Database,
@@ -15,7 +24,8 @@ pub fn handle_context(
     if symbols.is_empty() {
         return Ok(format!(
             "No symbol found matching '{symbol_name}'.\n\
-            Try a partial name or use `query` to search."
+            Try `Type::method` syntax for methods \
+            (e.g. `Database::new`), a partial name, or use `query` to search."
         ));
     }
 
@@ -212,7 +222,8 @@ fn render_callers(
 
     let _ = writeln!(output, "### Called By\n");
     for c in &callers {
-        let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
+        let display = qualified_callee_name(c);
+        let _ = writeln!(output, "- {} ({}:{})", display, c.file_path, c.line_start);
     }
     let _ = writeln!(output);
 
@@ -242,7 +253,8 @@ fn render_callees(
     if !calls.is_empty() {
         let _ = writeln!(output, "**Calls:**");
         for c in &calls {
-            let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
+            let display = qualified_callee_name(c);
+            let _ = writeln!(output, "- {} ({}:{})", display, c.file_path, c.line_start);
         }
         let _ = writeln!(output);
     }
@@ -250,7 +262,8 @@ fn render_callees(
     if !type_refs.is_empty() {
         let _ = writeln!(output, "**Uses types:**");
         for c in &type_refs {
-            let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
+            let display = qualified_callee_name(c);
+            let _ = writeln!(output, "- {} ({}:{})", display, c.file_path, c.line_start);
         }
         let _ = writeln!(output);
     }

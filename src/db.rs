@@ -161,7 +161,8 @@ impl Database {
                 body TEXT,
                 details TEXT,
                 attributes TEXT,
-                impl_type TEXT
+                impl_type TEXT,
+                is_test INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS trait_impls (
@@ -236,11 +237,12 @@ impl Database {
         self.migrate_docs_module_column()?;
         self.migrate_symbols_impl_type_column()?;
         self.migrate_symbol_refs_confidence_column()?;
+        self.migrate_symbols_is_test_column()?;
         self.check_schema_version()
     }
 
     /// Bump to force full re-index after parser/schema changes.
-    const SCHEMA_VERSION: &str = "3";
+    const SCHEMA_VERSION: &str = "4";
 
     fn check_schema_version(&self) -> SqlResult<()> {
         let current: Option<String> = self
@@ -287,7 +289,13 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_deps_name
                 ON dependencies(name);
             CREATE INDEX IF NOT EXISTS idx_docs_dep_id
-                ON docs(dependency_id);",
+                ON docs(dependency_id);
+            CREATE INDEX IF NOT EXISTS idx_symbol_refs_confidence
+                ON symbol_refs(confidence);
+            CREATE INDEX IF NOT EXISTS idx_files_crate_id
+                ON files(crate_id);
+            CREATE INDEX IF NOT EXISTS idx_symbols_name_impl
+                ON symbols(name, impl_type);",
         )
     }
 
@@ -375,6 +383,22 @@ impl Database {
         Ok(())
     }
 
+    /// Add `is_test` column to `symbols` table if missing, then backfill from attributes.
+    fn migrate_symbols_is_test_column(&self) -> SqlResult<()> {
+        let has_is_test = self
+            .conn
+            .prepare("SELECT is_test FROM symbols LIMIT 0")
+            .is_ok();
+        if !has_is_test {
+            self.conn.execute_batch(
+                "ALTER TABLE symbols ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
+            )?;
+            self.conn
+                .execute_batch("UPDATE symbols SET is_test = 1 WHERE attributes LIKE '%test%'")?;
+        }
+        Ok(())
+    }
+
     /// Clear code index data while preserving cached docs and dependencies.
     /// Used during re-indexing to avoid re-fetching documentation.
     pub fn clear_code_index(&self) -> SqlResult<()> {
@@ -452,12 +476,12 @@ impl Database {
     }
 
     pub fn get_file_symbol_counts(&self, prefix: &str) -> SqlResult<Vec<FileSymbolCount>> {
-        let pattern = format!("{prefix}%");
+        let pattern = format!("{}%", escape_like(prefix));
         let mut stmt = self.conn.prepare(
             "SELECT f.path, COUNT(s.id) \
              FROM files f \
              LEFT JOIN symbols s ON s.file_id = f.id AND s.visibility = 'public' \
-             WHERE f.path LIKE ?1 \
+             WHERE f.path LIKE ?1 ESCAPE '\\' \
              GROUP BY f.path \
              ORDER BY f.path",
         )?;
@@ -855,13 +879,13 @@ impl Database {
     /// Walks the call graph upward (who calls me?) filtering for `#[test]` attributes.
     pub fn get_related_tests(&self, symbol_name: &str) -> SqlResult<Vec<TestEntry>> {
         let mut stmt = self.conn.prepare_cached(
-            "WITH RECURSIVE callers(id, name, file_path, line_start, depth, attributes) AS (
-                SELECT s.id, s.name, f.path, s.line_start, 0, s.attributes
+            "WITH RECURSIVE callers(id, name, file_path, line_start, depth, is_test) AS (
+                SELECT s.id, s.name, f.path, s.line_start, 0, s.is_test
                 FROM symbols s
                 JOIN files f ON f.id = s.file_id
                 WHERE s.name = ?1
               UNION
-                SELECT s2.id, s2.name, f2.path, s2.line_start, callers.depth + 1, s2.attributes
+                SELECT s2.id, s2.name, f2.path, s2.line_start, callers.depth + 1, s2.is_test
                 FROM callers
                 JOIN symbol_refs sr ON sr.target_symbol_id = callers.id
                 JOIN symbols s2 ON s2.id = sr.source_symbol_id
@@ -871,7 +895,7 @@ impl Database {
             SELECT DISTINCT name, file_path, line_start
             FROM callers
             WHERE depth > 0
-              AND attributes LIKE '%test%'
+              AND is_test = 1
             ORDER BY file_path, name",
         )?;
         let mut results = Vec::new();
@@ -1234,14 +1258,14 @@ impl Database {
         path_prefix: &str,
         include_private: bool,
     ) -> SqlResult<Vec<StoredSymbol>> {
-        let pattern = format!("{path_prefix}%");
+        let pattern = format!("{}%", escape_like(path_prefix));
         let sql = if include_private {
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
                     s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
-             WHERE f.path LIKE ?1 \
+             WHERE f.path LIKE ?1 ESCAPE '\\' \
              ORDER BY f.path, s.line_start"
         } else {
             "SELECT s.name, s.kind, s.visibility, f.path, \
@@ -1249,7 +1273,7 @@ impl Database {
                     s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
-             WHERE f.path LIKE ?1 \
+             WHERE f.path LIKE ?1 ESCAPE '\\' \
                AND s.visibility IN ('public', 'pub(crate)') \
              ORDER BY f.path, s.line_start"
         };
@@ -1263,14 +1287,14 @@ impl Database {
     }
 
     pub fn search_symbols_by_attribute(&self, attr: &str) -> SqlResult<Vec<StoredSymbol>> {
-        let pattern = format!("%{attr}%");
+        let pattern = format!("%{}%", escape_like(attr));
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
                     s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
-             WHERE s.attributes LIKE ?1 \
+             WHERE s.attributes LIKE ?1 ESCAPE '\\' \
              ORDER BY s.name",
         )?;
         let mut results = Vec::new();
@@ -1343,8 +1367,8 @@ impl Database {
     }
 
     pub fn get_callees(&self, symbol_name: &str, source_file: &str) -> SqlResult<Vec<CalleeInfo>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start \
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
@@ -1361,6 +1385,7 @@ impl Database {
                 file_path: row.get(2)?,
                 ref_kind: row.get(3)?,
                 line_start: row.get(4)?,
+                impl_type: row.get(5)?,
             });
         }
         Ok(results)
@@ -1369,7 +1394,7 @@ impl Database {
     /// Find symbols that directly reference the given symbol (reverse of `get_callees`).
     pub fn get_callers(&self, symbol_name: &str, target_file: &str) -> SqlResult<Vec<CalleeInfo>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start \
+            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
@@ -1386,6 +1411,7 @@ impl Database {
                 file_path: row.get(2)?,
                 ref_kind: row.get(3)?,
                 line_start: row.get(4)?,
+                impl_type: row.get(5)?,
             });
         }
         Ok(results)
@@ -1396,33 +1422,18 @@ impl Database {
         symbol_name: &str,
         min_confidence: Option<&str>,
     ) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT ts.name, f.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             WHERE ss.name = ?1 AND (?2 IS NULL OR sr.confidence = ?2)",
+        )?;
         let mut results = Vec::new();
-        if let Some(conf) = min_confidence {
-            let mut stmt = self.conn.prepare_cached(
-                "SELECT DISTINCT ts.name, f.path \
-                 FROM symbol_refs sr \
-                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
-                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
-                 JOIN files f ON f.id = ts.file_id \
-                 WHERE ss.name = ?1 AND sr.confidence = ?2",
-            )?;
-            let mut rows = stmt.query(params![symbol_name, conf])?;
-            while let Some(row) = rows.next()? {
-                results.push((row.get(0)?, row.get(1)?));
-            }
-        } else {
-            let mut stmt = self.conn.prepare_cached(
-                "SELECT DISTINCT ts.name, f.path \
-                 FROM symbol_refs sr \
-                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
-                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
-                 JOIN files f ON f.id = ts.file_id \
-                 WHERE ss.name = ?1",
-            )?;
-            let mut rows = stmt.query(params![symbol_name])?;
-            while let Some(row) = rows.next()? {
-                results.push((row.get(0)?, row.get(1)?));
-            }
+        let mut rows = stmt.query(params![symbol_name, min_confidence])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
         }
         Ok(results)
     }
@@ -1432,33 +1443,18 @@ impl Database {
         symbol_name: &str,
         min_confidence: Option<&str>,
     ) -> SqlResult<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT ss.name, sf.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             WHERE ts.name = ?1 AND (?2 IS NULL OR sr.confidence = ?2)",
+        )?;
         let mut results = Vec::new();
-        if let Some(conf) = min_confidence {
-            let mut stmt = self.conn.prepare_cached(
-                "SELECT DISTINCT ss.name, sf.path \
-                 FROM symbol_refs sr \
-                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
-                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
-                 JOIN files sf ON sf.id = ss.file_id \
-                 WHERE ts.name = ?1 AND sr.confidence = ?2",
-            )?;
-            let mut rows = stmt.query(params![symbol_name, conf])?;
-            while let Some(row) = rows.next()? {
-                results.push((row.get(0)?, row.get(1)?));
-            }
-        } else {
-            let mut stmt = self.conn.prepare_cached(
-                "SELECT DISTINCT ss.name, sf.path \
-                 FROM symbol_refs sr \
-                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
-                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
-                 JOIN files sf ON sf.id = ss.file_id \
-                 WHERE ts.name = ?1",
-            )?;
-            let mut rows = stmt.query(params![symbol_name])?;
-            while let Some(row) = rows.next()? {
-                results.push((row.get(0)?, row.get(1)?));
-            }
+        let mut rows = stmt.query(params![symbol_name, min_confidence])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
         }
         Ok(results)
     }
@@ -1596,7 +1592,7 @@ impl Database {
         include_private: bool,
     ) -> SqlResult<Vec<StoredSymbol>> {
         let prefix = path_prefix.unwrap_or("");
-        let like_pattern = format!("{prefix}%");
+        let like_pattern = format!("{}%", escape_like(prefix));
         let sql = if include_private {
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
@@ -1606,7 +1602,7 @@ impl Database {
              JOIN files f ON f.id = s.file_id \
              LEFT JOIN symbol_refs sr ON sr.target_symbol_id = s.id \
              WHERE sr.id IS NULL \
-               AND f.path LIKE ?1 \
+               AND f.path LIKE ?1 ESCAPE '\\' \
                AND s.kind NOT IN ('use', 'mod', 'impl') \
              ORDER BY f.path, s.line_start"
         } else {
@@ -1618,7 +1614,7 @@ impl Database {
              JOIN files f ON f.id = s.file_id \
              LEFT JOIN symbol_refs sr ON sr.target_symbol_id = s.id \
              WHERE sr.id IS NULL \
-               AND f.path LIKE ?1 \
+               AND f.path LIKE ?1 ESCAPE '\\' \
                AND s.kind NOT IN ('use', 'mod', 'impl') \
                AND s.visibility IN ('public', 'pub(crate)') \
              ORDER BY f.path, s.line_start"
@@ -1637,34 +1633,20 @@ impl Database {
         path_prefix: &str,
         min_confidence: Option<&str>,
     ) -> SqlResult<Vec<(String, String)>> {
-        let pattern = format!("{path_prefix}%");
-        let sql = if min_confidence.is_some() {
+        let pattern = format!("{}%", escape_like(path_prefix));
+        let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT sf.path, tf.path \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              JOIN files tf ON tf.id = ts.file_id \
-             WHERE sf.path LIKE ?1 AND sf.path != tf.path \
-             AND sr.confidence = ?2 \
-             ORDER BY sf.path, tf.path"
-        } else {
-            "SELECT DISTINCT sf.path, tf.path \
-             FROM symbol_refs sr \
-             JOIN symbols ss ON ss.id = sr.source_symbol_id \
-             JOIN symbols ts ON ts.id = sr.target_symbol_id \
-             JOIN files sf ON sf.id = ss.file_id \
-             JOIN files tf ON tf.id = ts.file_id \
-             WHERE sf.path LIKE ?1 AND sf.path != tf.path \
-             ORDER BY sf.path, tf.path"
-        };
-        let mut stmt = self.conn.prepare_cached(sql)?;
+             WHERE sf.path LIKE ?1 ESCAPE '\\' AND sf.path != tf.path \
+               AND (?2 IS NULL OR sr.confidence = ?2) \
+             ORDER BY sf.path, tf.path",
+        )?;
         let mut results = Vec::new();
-        let mut rows = if let Some(conf) = min_confidence {
-            stmt.query(params![pattern, conf])?
-        } else {
-            stmt.query(params![pattern])?
-        };
+        let mut rows = stmt.query(params![pattern, min_confidence])?;
         while let Some(row) = rows.next()? {
             results.push((row.get(0)?, row.get(1)?));
         }
@@ -1678,40 +1660,23 @@ impl Database {
         path_prefix: &str,
         min_confidence: Option<&str>,
     ) -> SqlResult<Vec<(String, String, i64)>> {
-        let pattern = format!("{path_prefix}%");
+        let pattern = format!("{}%", escape_like(path_prefix));
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT ts.name, f.path, \
+                    COUNT(DISTINCT sr.source_symbol_id) as ref_count \
+             FROM symbol_refs sr \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             WHERE f.path LIKE ?1 ESCAPE '\\' \
+               AND (?3 IS NULL OR sr.confidence = ?3) \
+             GROUP BY ts.id \
+             ORDER BY ref_count DESC \
+             LIMIT ?2",
+        )?;
         let mut results = Vec::new();
-        if let Some(conf) = min_confidence {
-            let mut stmt = self.conn.prepare(
-                "SELECT ts.name, f.path, \
-                        COUNT(DISTINCT sr.source_symbol_id) as ref_count \
-                 FROM symbol_refs sr \
-                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
-                 JOIN files f ON f.id = ts.file_id \
-                 WHERE f.path LIKE ?1 AND sr.confidence = ?3 \
-                 GROUP BY ts.id \
-                 ORDER BY ref_count DESC \
-                 LIMIT ?2",
-            )?;
-            let mut rows = stmt.query(params![pattern, limit, conf])?;
-            while let Some(row) = rows.next()? {
-                results.push((row.get(0)?, row.get(1)?, row.get(2)?));
-            }
-        } else {
-            let mut stmt = self.conn.prepare(
-                "SELECT ts.name, f.path, \
-                        COUNT(DISTINCT sr.source_symbol_id) as ref_count \
-                 FROM symbol_refs sr \
-                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
-                 JOIN files f ON f.id = ts.file_id \
-                 WHERE f.path LIKE ?1 \
-                 GROUP BY ts.id \
-                 ORDER BY ref_count DESC \
-                 LIMIT ?2",
-            )?;
-            let mut rows = stmt.query(params![pattern, limit])?;
-            while let Some(row) = rows.next()? {
-                results.push((row.get(0)?, row.get(1)?, row.get(2)?));
-            }
+        let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
         }
         Ok(results)
     }
@@ -1723,40 +1688,23 @@ impl Database {
         path_prefix: &str,
         min_confidence: Option<&str>,
     ) -> SqlResult<Vec<(String, String, i64)>> {
-        let pattern = format!("{path_prefix}%");
+        let pattern = format!("{}%", escape_like(path_prefix));
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT ss.name, f.path, \
+                    COUNT(DISTINCT sr.target_symbol_id) as ref_count \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN files f ON f.id = ss.file_id \
+             WHERE f.path LIKE ?1 ESCAPE '\\' \
+               AND (?3 IS NULL OR sr.confidence = ?3) \
+             GROUP BY ss.id \
+             ORDER BY ref_count DESC \
+             LIMIT ?2",
+        )?;
         let mut results = Vec::new();
-        if let Some(conf) = min_confidence {
-            let mut stmt = self.conn.prepare(
-                "SELECT ss.name, f.path, \
-                        COUNT(DISTINCT sr.target_symbol_id) as ref_count \
-                 FROM symbol_refs sr \
-                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
-                 JOIN files f ON f.id = ss.file_id \
-                 WHERE f.path LIKE ?1 AND sr.confidence = ?3 \
-                 GROUP BY ss.id \
-                 ORDER BY ref_count DESC \
-                 LIMIT ?2",
-            )?;
-            let mut rows = stmt.query(params![pattern, limit, conf])?;
-            while let Some(row) = rows.next()? {
-                results.push((row.get(0)?, row.get(1)?, row.get(2)?));
-            }
-        } else {
-            let mut stmt = self.conn.prepare(
-                "SELECT ss.name, f.path, \
-                        COUNT(DISTINCT sr.target_symbol_id) as ref_count \
-                 FROM symbol_refs sr \
-                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
-                 JOIN files f ON f.id = ss.file_id \
-                 WHERE f.path LIKE ?1 \
-                 GROUP BY ss.id \
-                 ORDER BY ref_count DESC \
-                 LIMIT ?2",
-            )?;
-            let mut rows = stmt.query(params![pattern, limit])?;
-            while let Some(row) = rows.next()? {
-                results.push((row.get(0)?, row.get(1)?, row.get(2)?));
-            }
+        let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
         }
         Ok(results)
     }
@@ -1768,7 +1716,7 @@ impl Database {
         path_prefix: &str,
     ) -> SqlResult<Vec<StoredSymbol>> {
         let pattern = format!("%{}%", escape_like(query));
-        let path_pattern = format!("{path_prefix}%");
+        let path_pattern = format!("{}%", escape_like(path_prefix));
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
                     s.line_start, s.line_end, s.signature, \
@@ -1777,7 +1725,7 @@ impl Database {
              JOIN files f ON f.id = s.file_id \
              WHERE s.details LIKE ?1 ESCAPE '\\' \
                AND s.kind = 'struct' \
-               AND f.path LIKE ?2 \
+               AND f.path LIKE ?2 ESCAPE '\\' \
              ORDER BY s.name \
              LIMIT 50",
         )?;
@@ -1791,12 +1739,12 @@ impl Database {
 
     /// Count symbols grouped by kind, scoped to a path prefix.
     pub fn count_symbols_by_kind(&self, path_prefix: &str) -> SqlResult<Vec<(String, i64)>> {
-        let pattern = format!("{path_prefix}%");
+        let pattern = format!("{}%", escape_like(path_prefix));
         let mut stmt = self.conn.prepare(
             "SELECT s.kind, COUNT(*) \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
-             WHERE f.path LIKE ?1 \
+             WHERE f.path LIKE ?1 ESCAPE '\\' \
              GROUP BY s.kind \
              ORDER BY s.kind",
         )?;
@@ -1814,13 +1762,13 @@ impl Database {
         limit: i64,
         path_prefix: &str,
     ) -> SqlResult<Vec<LargestFunction>> {
-        let pattern = format!("{path_prefix}%");
+        let pattern = format!("{}%", escape_like(path_prefix));
         let mut stmt = self.conn.prepare(
             "SELECT s.name, f.path, s.impl_type, \
                     (s.line_end - s.line_start + 1) as lines \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
-             WHERE s.kind = 'function' AND f.path LIKE ?1 \
+             WHERE s.kind = 'function' AND f.path LIKE ?1 ESCAPE '\\' \
              ORDER BY lines DESC \
              LIMIT ?2",
         )?;
@@ -1911,7 +1859,7 @@ pub struct ImpactEntry {
     pub via: String,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestEntry {
     pub name: String,
     pub file_path: String,
@@ -1983,6 +1931,7 @@ pub struct CalleeInfo {
     pub file_path: String,
     pub ref_kind: String,
     pub line_start: i64,
+    pub impl_type: Option<String>,
 }
 
 #[cfg(test)]

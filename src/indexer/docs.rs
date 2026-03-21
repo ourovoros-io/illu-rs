@@ -84,7 +84,8 @@ fn parse_github_owner_repo(url: &str) -> Option<(&str, &str)> {
 }
 
 /// Fetch the raw README from a GitHub repository.
-/// Tries `main` branch first, then `master`.
+/// Tries `main` branch first, then `master`, then queries the GitHub API
+/// for the default branch name as a final fallback.
 async fn fetch_github_readme(client: &reqwest::Client, repo_url: &str) -> Option<String> {
     let (owner, repo) = parse_github_owner_repo(repo_url)?;
     for branch in &["main", "master"] {
@@ -98,7 +99,34 @@ async fn fetch_github_readme(client: &reqwest::Client, repo_url: &str) -> Option
             return Some(text);
         }
     }
-    None
+
+    // Fallback: query GitHub API for the default branch name
+    let api_url = format!("https://api.github.com/repos/{owner}/{repo}");
+    let api_resp = client
+        .get(&api_url)
+        .header("User-Agent", "illu-rs")
+        .send()
+        .await
+        .ok()?;
+    if !api_resp.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = api_resp.json().await.ok()?;
+    let default_branch = json.get("default_branch")?.as_str()?;
+    if default_branch == "main" || default_branch == "master" {
+        return None;
+    }
+    let url =
+        format!("https://raw.githubusercontent.com/{owner}/{repo}/{default_branch}/README.md");
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let text = resp.text().await.ok()?;
+    if text.is_empty() {
+        return None;
+    }
+    Some(text)
 }
 
 /// Query the crates.io API for a crate's repository URL.

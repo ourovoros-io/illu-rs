@@ -30,9 +30,9 @@ pub fn store_symbols(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusq
             "INSERT INTO symbols \
              (file_id, name, kind, visibility, \
               line_start, line_end, signature, \
-              doc_comment, body, details, attributes, impl_type) \
+              doc_comment, body, details, attributes, impl_type, is_test) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
-                     ?8, ?9, ?10, ?11, ?12)",
+                     ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;
         let mut fts_stmt = db.conn.prepare(
             "INSERT INTO symbols_fts \
@@ -46,6 +46,10 @@ pub fn store_symbols(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusq
         for sym in symbols {
             let line_start = i64::try_from(sym.line_start).unwrap_or(i64::MAX);
             let line_end = i64::try_from(sym.line_end).unwrap_or(i64::MAX);
+            let is_test = sym
+                .attributes
+                .as_deref()
+                .is_some_and(|a| a.contains("test"));
             sym_stmt.execute(params![
                 file_id,
                 sym.name,
@@ -59,6 +63,7 @@ pub fn store_symbols(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusq
                 sym.details,
                 sym.attributes,
                 sym.impl_type,
+                is_test,
             ])?;
             let rowid = db.conn.last_insert_rowid();
             let doc_for_fts = sym.doc_comment.as_deref().unwrap_or("");

@@ -7,11 +7,12 @@ pub fn handle_impact(
     max_depth: Option<i64>,
     summary: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let symbols = db.search_symbols(symbol_name)?;
+    let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
         return Ok(format!(
             "No symbol found matching '{symbol_name}'.\n\
-            Verify the symbol exists with `query`."
+            Try `Type::method` syntax for methods \
+            (e.g. `Database::new`), or verify the symbol exists with `query`."
         ));
     }
 
