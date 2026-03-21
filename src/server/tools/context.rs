@@ -224,9 +224,16 @@ fn render_callers(
         return Ok(());
     }
 
+    callers.sort_by_key(|c| c.is_test);
+
     let total = callers.len();
     let _ = writeln!(output, "### Called By\n");
+    let mut shown_test_separator = false;
     for c in callers.iter().take(MAX_CALLERS) {
+        if c.is_test && !shown_test_separator {
+            let _ = writeln!(output);
+            shown_test_separator = true;
+        }
         let display = qualified_callee_name(c);
         let line = c.ref_line.unwrap_or(c.line_start);
         let _ = writeln!(output, "- {} ({}:{})", display, c.file_path, line);
@@ -1382,6 +1389,97 @@ mod tests {
         assert!(
             !result.contains("Unrelated"),
             "should NOT show impl_type of low-confidence callee, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_callers_production_before_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let fid_lib = db.insert_file("src/lib.rs", "hash").unwrap();
+        let fid_test = db.insert_file("src/tests.rs", "hash").unwrap();
+
+        store_symbols(
+            &db,
+            fid_lib,
+            &[
+                Symbol {
+                    name: "target_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "fn target_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "prod_caller".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 10,
+                    signature: "fn prod_caller()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        store_symbols(
+            &db,
+            fid_test,
+            &[Symbol {
+                name: "test_caller".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/tests.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "fn test_caller()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: Some("#[test]".into()),
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        let target_id = db
+            .get_symbol_id("target_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let prod_id = db
+            .get_symbol_id("prod_caller", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_id = db
+            .get_symbol_id("test_caller", "src/tests.rs")
+            .unwrap()
+            .unwrap();
+
+        db.insert_symbol_ref(prod_id, target_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
+            .unwrap();
+
+        let result =
+            handle_context(&db, "target_fn", false, None, Some(&["callers"]), None, false)
+                .unwrap();
+        let prod_pos = result.find("prod_caller").unwrap();
+        let test_pos = result.find("test_caller").unwrap();
+        assert!(
+            prod_pos < test_pos,
+            "production callers should appear before test callers\nOutput:\n{result}"
         );
     }
 }
