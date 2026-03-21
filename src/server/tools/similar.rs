@@ -4,6 +4,30 @@ use std::fmt::Write;
 
 type ScoredSymbol<'a> = (usize, &'a StoredSymbol, Vec<String>);
 
+const NOISY_SIMILAR_CALLEES: &[&str] = &[
+    "new",
+    "from",
+    "into",
+    "default",
+    "clone",
+    "build",
+    "init",
+    "fmt",
+    "write",
+    "writeln",
+    "push",
+    "len",
+    "is_empty",
+    "to_string",
+    "to_owned",
+    "as_str",
+    "as_ref",
+    "iter",
+    "collect",
+    "map",
+    "filter",
+];
+
 pub fn handle_similar(
     db: &Database,
     symbol_name: &str,
@@ -151,7 +175,10 @@ fn score_one(
             .into_iter()
             .map(|(name, _)| name)
             .collect();
-        let shared: Vec<_> = target_callees.intersection(&cand_callees).collect();
+        let shared: Vec<_> = target_callees
+            .intersection(&cand_callees)
+            .filter(|name| !NOISY_SIMILAR_CALLEES.contains(&name.as_str()))
+            .collect();
         if !shared.is_empty() {
             score += shared.len();
             let names: Vec<&str> = shared.iter().take(3).map(|s| s.as_str()).collect();
@@ -257,5 +284,104 @@ mod tests {
 
         assert!(result.contains("## Similar to `unrelated`"));
         assert!(result.contains("No similar symbols found."));
+    }
+
+    #[test]
+    fn test_similar_excludes_noisy_callees() {
+        use crate::indexer::parser::{RefKind, SymbolRef};
+
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/lib.rs", "hash1").unwrap();
+        let f2 = db.insert_file("src/util.rs", "hash2").unwrap();
+
+        store_symbols(
+            &db,
+            f1,
+            &[Symbol {
+                name: "build_report".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 10,
+                signature: "pub fn build_report() -> String".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        store_symbols(
+            &db,
+            f2,
+            &[
+                Symbol {
+                    name: "build_summary".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/util.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn build_summary() -> String".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "new".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/util.rs".into(),
+                    line_start: 12,
+                    line_end: 15,
+                    signature: "pub fn new() -> Self".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let map = db.build_symbol_id_map().unwrap();
+        db.store_symbol_refs_fast(
+            &[
+                SymbolRef {
+                    source_name: "build_report".into(),
+                    target_name: "new".into(),
+                    source_file: "src/lib.rs".into(),
+                    target_file: Some("src/util.rs".into()),
+                    kind: RefKind::Call,
+                    target_context: None,
+                    ref_line: Some(3),
+                },
+                SymbolRef {
+                    source_name: "build_summary".into(),
+                    target_name: "new".into(),
+                    source_file: "src/util.rs".into(),
+                    target_file: Some("src/util.rs".into()),
+                    kind: RefKind::Call,
+                    target_context: None,
+                    ref_line: Some(3),
+                },
+            ],
+            &map,
+        )
+        .unwrap();
+
+        let result = handle_similar(&db, "build_report", None).unwrap();
+        // Should find build_summary via return type, not via "new"
+        assert!(result.contains("build_summary"));
+        assert!(
+            !result.contains("shared callees: new"),
+            "Should not count 'new' as meaningful shared callee\n{result}"
+        );
     }
 }
