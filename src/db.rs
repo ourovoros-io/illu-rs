@@ -1908,17 +1908,28 @@ impl Database {
         &self,
         limit: i64,
         path_prefix: &str,
+        exclude_tests: bool,
     ) -> SqlResult<Vec<LargestFunction>> {
         let pattern = format!("{}%", escape_like(path_prefix));
-        let mut stmt = self.conn.prepare(
+        let sql = if exclude_tests {
+            "SELECT s.name, f.path, s.impl_type, \
+                    (s.line_end - s.line_start + 1) as lines \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.kind = 'function' AND f.path LIKE ?1 ESCAPE '\\' \
+               AND s.is_test = 0 \
+             ORDER BY lines DESC \
+             LIMIT ?2"
+        } else {
             "SELECT s.name, f.path, s.impl_type, \
                     (s.line_end - s.line_start + 1) as lines \
              FROM symbols s \
              JOIN files f ON f.id = s.file_id \
              WHERE s.kind = 'function' AND f.path LIKE ?1 ESCAPE '\\' \
              ORDER BY lines DESC \
-             LIMIT ?2",
-        )?;
+             LIMIT ?2"
+        };
+        let mut stmt = self.conn.prepare_cached(sql)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern, limit])?;
         while let Some(row) = rows.next()? {
@@ -3564,7 +3575,7 @@ mod tests {
         ];
         store_symbols(&db, file_id, &symbols).unwrap();
 
-        let largest = db.get_largest_functions(2, "").unwrap();
+        let largest = db.get_largest_functions(2, "", false).unwrap();
         assert_eq!(largest.len(), 2);
         assert_eq!(largest[0].name, "large");
         assert_eq!(largest[0].lines, 101); // 110 - 10 + 1

@@ -93,6 +93,7 @@ pub fn handle_diff_impact(
     repo_path: &Path,
     git_ref: Option<&str>,
     changes_only: bool,
+    compact: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let diff_output = run_git_diff(repo_path, git_ref)?;
     if diff_output.trim().is_empty() {
@@ -130,6 +131,15 @@ pub fn handle_diff_impact(
         }
     }
 
+    render_diff_output(db, &changed_symbols, changes_only, compact)
+}
+
+fn render_diff_output(
+    db: &Database,
+    changed_symbols: &[(String, crate::db::StoredSymbol)],
+    changes_only: bool,
+    compact: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
     let mut output = String::new();
 
     if changed_symbols.is_empty() {
@@ -142,10 +152,9 @@ pub fn handle_diff_impact(
         return Ok(output);
     }
 
-    // Group symbols by file for display
     let _ = writeln!(output, "## Changed Symbols\n");
     let mut current_file = String::new();
-    for (file, sym) in &changed_symbols {
+    for (file, sym) in changed_symbols {
         if *file != current_file {
             current_file.clone_from(file);
             let _ = writeln!(output, "### {file}");
@@ -161,8 +170,10 @@ pub fn handle_diff_impact(
         return Ok(output);
     }
 
-    render_downstream_impact(db, &mut output, &changed_symbols)?;
-    render_test_coverage(db, &mut output, &changed_symbols);
+    if !compact {
+        render_downstream_impact(db, &mut output, changed_symbols)?;
+    }
+    render_test_coverage(db, &mut output, changed_symbols);
 
     Ok(output)
 }
@@ -526,6 +537,112 @@ diff --git a/src/lib.rs b/src/lib.rs
         assert_eq!(
             count, 1,
             "shared_caller should appear exactly once across seeds, got {count}: {output}"
+        );
+    }
+
+    #[test]
+    fn test_diff_impact_compact_skips_downstream_keeps_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "target_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 10,
+                    line_end: 20,
+                    signature: "pub fn target_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "caller_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 25,
+                    line_end: 35,
+                    signature: "pub fn caller_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "test_target".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 40,
+                    line_end: 50,
+                    signature: "fn test_target()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let target_id = db
+            .get_symbol_id("target_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let caller_id = db
+            .get_symbol_id("caller_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_id = db
+            .get_symbol_id("test_target", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
+            .unwrap();
+
+        // Build changed_symbols as if git diff found target_fn changed
+        let changed = vec![(
+            "src/lib.rs".to_string(),
+            db.get_symbols_at_lines("src/lib.rs", &[(10, 20)])
+                .unwrap()
+                .remove(0),
+        )];
+
+        // Full mode: downstream impact present
+        let full = render_diff_output(&db, &changed, false, false).unwrap();
+        assert!(
+            full.contains("Downstream Impact"),
+            "full mode should include downstream: {full}"
+        );
+        assert!(
+            full.contains("caller_fn"),
+            "full mode should show caller: {full}"
+        );
+
+        // Compact mode: no downstream, but tests still shown
+        let compact = render_diff_output(&db, &changed, false, true).unwrap();
+        assert!(
+            !compact.contains("Downstream Impact"),
+            "compact should skip downstream: {compact}"
+        );
+        assert!(
+            compact.contains("Related Tests"),
+            "compact should keep test coverage: {compact}"
+        );
+        assert!(
+            compact.contains("test_target"),
+            "compact should show related test: {compact}"
         );
     }
 
