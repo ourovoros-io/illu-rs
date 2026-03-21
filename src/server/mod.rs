@@ -264,6 +264,8 @@ struct HistoryParams {
     symbol_name: String,
     /// Max commits to show (default: 10)
     max_commits: Option<i64>,
+    /// Show code diffs for each commit (default: false)
+    show_diff: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -793,9 +795,14 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
-        let result =
-            tools::history::handle_history(&db, repo_path, &params.symbol_name, params.max_commits)
-                .map_err(to_mcp_err)?;
+        let result = tools::history::handle_history(
+            &db,
+            repo_path,
+            &params.symbol_name,
+            params.max_commits,
+            params.show_diff.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
