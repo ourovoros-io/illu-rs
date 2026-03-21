@@ -194,6 +194,10 @@ struct NeighborhoodParams {
     symbol_name: String,
     /// Max hops in each direction (default: 2)
     depth: Option<i64>,
+    /// Direction: "both" (default), "down" (callees only), "up" (callers only)
+    direction: Option<String>,
+    /// Format: "list" (default flat), "tree" (hierarchical indented)
+    format: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -530,9 +534,14 @@ impl IlluServer {
             crate::status::StatusGuard::new(&format!("neighborhood ▸ {}", params.symbol_name));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::neighborhood::handle_neighborhood(&db, &params.symbol_name, params.depth)
-                .map_err(to_mcp_err)?;
+        let result = tools::neighborhood::handle_neighborhood(
+            &db,
+            &params.symbol_name,
+            params.depth,
+            params.direction.as_deref(),
+            params.format.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
