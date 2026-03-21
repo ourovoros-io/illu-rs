@@ -45,14 +45,14 @@ pub fn handle_impact(
     }
 
     let all_dependents = db.impact_dependents_with_depth(base_name, base_impl, depth)?;
-    let dependents: Vec<_> = if exclude_tests {
+    let dependents: Vec<&crate::db::ImpactEntry> = if exclude_tests {
         all_dependents.iter().filter(|d| !d.is_test).collect()
     } else {
         all_dependents.iter().collect()
     };
 
     let mut current_depth: i64 = -1;
-    let mut depth_buf: Vec<&&crate::db::ImpactEntry> = Vec::new();
+    let mut depth_buf: Vec<&crate::db::ImpactEntry> = Vec::new();
     let mut seen_in_impact: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
     for dep in &dependents {
@@ -109,7 +109,7 @@ pub fn handle_impact(
 fn render_depth_entries(
     output: &mut String,
     depth: i64,
-    entries: &[&&crate::db::ImpactEntry],
+    entries: &[&crate::db::ImpactEntry],
     summary: bool,
 ) {
     const SUMMARY_DEPTH: i64 = 2;

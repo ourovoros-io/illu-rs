@@ -1777,12 +1777,7 @@ impl Database {
         exclude_test_sources: bool,
     ) -> SqlResult<Vec<SymbolRefCount>> {
         let pattern = format!("{}%", escape_like(path_prefix));
-        let test_filter = if exclude_test_sources {
-            " AND ss.is_test = 0"
-        } else {
-            ""
-        };
-        let sql = format!(
+        let sql = if exclude_test_sources {
             "SELECT ts.name, f.path, \
                     COUNT(DISTINCT sr.source_symbol_id) as ref_count, \
                     ts.impl_type \
@@ -1791,12 +1786,26 @@ impl Database {
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE f.path LIKE ?1 ESCAPE '\\' \
-               AND (?3 IS NULL OR sr.confidence = ?3){test_filter} \
+               AND (?3 IS NULL OR sr.confidence = ?3) \
+               AND ss.is_test = 0 \
              GROUP BY ts.id \
              ORDER BY ref_count DESC \
-             LIMIT ?2",
-        );
-        let mut stmt = self.conn.prepare(&sql)?;
+             LIMIT ?2"
+        } else {
+            "SELECT ts.name, f.path, \
+                    COUNT(DISTINCT sr.source_symbol_id) as ref_count, \
+                    ts.impl_type \
+             FROM symbol_refs sr \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             WHERE f.path LIKE ?1 ESCAPE '\\' \
+               AND (?3 IS NULL OR sr.confidence = ?3) \
+             GROUP BY ts.id \
+             ORDER BY ref_count DESC \
+             LIMIT ?2"
+        };
+        let mut stmt = self.conn.prepare_cached(sql)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
         while let Some(row) = rows.next()? {
