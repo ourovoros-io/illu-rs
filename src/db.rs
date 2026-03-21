@@ -719,6 +719,59 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
     }
 
+    /// Count symbol refs grouped by confidence level.
+    pub fn count_refs_by_confidence(&self) -> SqlResult<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT confidence, COUNT(*) FROM symbol_refs \
+             GROUP BY confidence ORDER BY confidence",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
+
+    /// Count function symbols whose signature appears truncated
+    /// (ends with just an open paren).
+    pub fn count_truncated_signatures(&self) -> SqlResult<i64> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM symbols \
+             WHERE signature LIKE '%(' AND kind = 'function'",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    /// Count all function symbols.
+    pub fn count_functions(&self) -> SqlResult<i64> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM symbols WHERE kind = 'function'",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    /// Get low-confidence refs with highest fan-in (most likely noise sources).
+    pub fn get_noisy_symbols(&self, limit: i64) -> SqlResult<Vec<(String, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ts.name, COUNT(*) as cnt \
+             FROM symbol_refs sr \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             WHERE sr.confidence = 'low' \
+             GROUP BY ts.name \
+             ORDER BY cnt DESC \
+             LIMIT ?1",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![limit])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
+
     pub fn impact_dependents(&self, symbol_name: &str) -> SqlResult<Vec<ImpactEntry>> {
         self.impact_dependents_with_depth(symbol_name, 5)
     }

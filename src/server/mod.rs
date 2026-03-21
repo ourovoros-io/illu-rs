@@ -249,6 +249,9 @@ struct BoundaryParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct HealthParams {}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -696,6 +699,22 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "health",
+        description = "Report index quality: ref confidence distribution, signature completeness, noise sources, and coverage metrics."
+    )]
+    async fn health(
+        &self,
+        Parameters(_params): Parameters<HealthParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Tool call: health");
+        let _guard = crate::status::StatusGuard::new("health");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::health::handle_health(&db).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -740,6 +759,7 @@ impl ServerHandler for IlluServer {
                  'rename_plan' for rename impact preview, \
                  'similar' for finding structurally similar symbols, \
                  'boundary' for module API boundary analysis, \
+                 'health' for index quality diagnosis, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
