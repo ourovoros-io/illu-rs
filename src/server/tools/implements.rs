@@ -58,7 +58,11 @@ pub fn handle_implements(
         (None, None) => {
             let _ = writeln!(
                 output,
-                "Provide at least one of `trait_name` or `type_name`."
+                "Provide at least one of `trait_name` or `type_name`.\n\n\
+                Examples:\n\
+                - `trait_name: \"Display\"` → find all types implementing Display\n\
+                - `type_name: \"MyStruct\"` → find all traits MyStruct implements\n\
+                - Both → check if MyStruct implements Display"
             );
         }
     }

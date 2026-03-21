@@ -10,7 +10,9 @@ use std::time::Instant;
 use illu_rs::db::Database;
 use illu_rs::indexer::parser::{SymbolKind, Visibility};
 use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{context, impact, overview, query};
+use illu_rs::server::tools::{
+    context, doc_coverage, graph_export, impact, orphaned, overview, query, references, test_impact,
+};
 
 // ---------------------------------------------------------------------------
 // Shared setup — index illu-rs once, reuse across all tests
@@ -454,5 +456,70 @@ fn self_overview_covers_all_public_functions() {
         public_fns.len() > 10,
         "expected >10 public functions to check, got {}",
         public_fns.len()
+    );
+}
+
+// =========================================================================
+// 8. NEW TOOL INTEGRATION TESTS
+// =========================================================================
+
+#[test]
+fn self_references_database_shows_refs() {
+    let db = self_db()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = references::handle_references(&db, "Database", None).unwrap();
+    assert!(
+        result.contains("## References: Database"),
+        "header: {result}"
+    );
+    assert!(
+        result.contains("### Definition"),
+        "definition section: {result}"
+    );
+    assert!(
+        result.contains("### Call Sites"),
+        "call sites section: {result}"
+    );
+}
+
+#[test]
+fn self_doc_coverage_finds_undocumented() {
+    let db = self_db()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = doc_coverage::handle_doc_coverage(&db, Some("src/"), None, false).unwrap();
+    assert!(result.contains("## Doc Coverage"), "header: {result}");
+    assert!(result.contains("Coverage:"), "coverage stats: {result}");
+}
+
+#[test]
+fn self_test_impact_database_shows_tests() {
+    let db = self_db()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = test_impact::handle_test_impact(&db, "Database").unwrap();
+    // Database is widely tested
+    assert!(result.contains("## Test Impact:"), "header: {result}");
+}
+
+#[test]
+fn self_orphaned_returns_results() {
+    let db = self_db()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = orphaned::handle_orphaned(&db, Some("src/"), None).unwrap();
+    assert!(result.contains("## Orphaned Symbols"), "header: {result}");
+}
+
+#[test]
+fn self_graph_export_produces_dot() {
+    let db = self_db()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let result = graph_export::handle_graph_export(&db, Some("Database"), None, Some(1)).unwrap();
+    assert!(
+        result.contains("digraph"),
+        "should produce DOT format: {result}"
     );
 }

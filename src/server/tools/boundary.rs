@@ -3,10 +3,7 @@ use crate::indexer::parser::SymbolKind;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub fn handle_boundary(
-    db: &Database,
-    path: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = db.get_symbols_by_path_prefix_filtered(path, false)?;
     if symbols.is_empty() {
         return Ok(format!("No public symbols found under '{path}'."));
@@ -51,11 +48,7 @@ pub fn handle_boundary(
         for (file, syms) in &external_api {
             let _ = writeln!(output, "#### {file}\n");
             for (name, callers) in syms {
-                let _ = writeln!(
-                    output,
-                    "- **{name}** — used by: {}",
-                    callers.join(", ")
-                );
+                let _ = writeln!(output, "- **{name}** — used by: {}", callers.join(", "));
             }
             let _ = writeln!(output);
         }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-illu-rs is an MCP (Model Context Protocol) server that indexes Rust codebases and exposes code intelligence tools. It parses source files with tree-sitter, stores symbols/refs/deps in SQLite, and serves 25 MCP tools over stdio: `query`, `context`, `batch_context`, `impact`, `diff_impact`, `callpath`, `unused`, `freshness`, `docs`, `overview`, `tree`, `crate_graph`, `implements`, `neighborhood`, `type_usage`, `file_graph`, `symbols_at`, `stats`, `hotspots`, `rename_plan`, `similar`, `boundary`, `health`, `blame`.
+illu-rs is an MCP (Model Context Protocol) server that indexes Rust codebases and exposes code intelligence tools. It parses source files with tree-sitter, stores symbols/refs/deps in SQLite, and serves 31 MCP tools over stdio: `query`, `context`, `batch_context`, `impact`, `diff_impact`, `callpath`, `unused`, `freshness`, `docs`, `overview`, `tree`, `crate_graph`, `implements`, `neighborhood`, `type_usage`, `file_graph`, `symbols_at`, `stats`, `hotspots`, `rename_plan`, `similar`, `boundary`, `health`, `blame`, `history`, `references`, `doc_coverage`, `test_impact`, `orphaned`, `graph_export`, `crate_impact`.
 
 ## Commands
 
@@ -95,6 +95,16 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Health tool** — Reports ref confidence distribution, signature quality, noise sources, and coverage metrics.
 - **Blame tool** — Runs `git blame` on a symbol's line range, summarizes author, date, and commit message.
 - **Constructor tracking** — `new`, `from`, `into`, `clone`, `default`, `build`, `init` are tracked as symbol refs (removed from `NOISY_SYMBOL_NAMES`). `impl_type` disambiguation prevents cross-type collisions.
+- **References tool** — Unified view of all references to a symbol: definition, call sites, type usage in signatures, trait implementations. Consolidates data from callers, type_usage, and implements.
+- **Doc coverage tool** — Finds symbols missing doc comments. Shows coverage percentage and lists undocumented symbols grouped by file.
+- **Test impact tool** — Shows which tests break when changing a symbol. Combines impact analysis with test discovery, returns suggested `cargo test` command.
+- **Orphaned tool** — Finds symbols with no callers AND no test coverage (intersection of unused + untested). These are safe to remove.
+- **Graph export tool** — Exports call graphs or file dependency graphs in DOT/Graphviz format. Provide `symbol_name` for call graph or `path` for file graph.
+- **Crate impact tool** — Shows which workspace crates are affected by changing a symbol. Bridges symbol-level impact with crate-level dependencies.
+- **is_test column** — Symbols table has `is_test` column (boolean), set at index time from attributes. Used by `get_related_tests()` for efficient test lookups.
+- **LIKE escape** — All path-based LIKE queries use `escape_like()` + `ESCAPE '\\'` clause to handle paths with `%` or `_`.
+- **Qualified caller/callee names** — Context callers/callees show `ImplType::method` format when impl_type is available, preventing ambiguity.
+- **Macro body ref extraction** — `collect_body_refs()` descends into `macro_invocation` token trees to extract potential symbol references.
 
 ## Lint Configuration
 
@@ -139,10 +149,6 @@ This repo is indexed by illu. **Use illu tools as your first step** — before r
 | `illu unused` | `mcp__illu__unused` | |
 | `illu unused --path src/server/` | `mcp__illu__unused` | `path: "src/server/"` |
 | `illu freshness` | `mcp__illu__freshness` | |
-| `illu neighborhood <sym> --direction down --format tree` | `mcp__illu__neighborhood` | `symbol_name: "<sym>", direction: "down", format: "tree"` |
-| `illu boundary src/server/` | `mcp__illu__boundary` | `path: "src/server/"` |
-| `illu health` | `mcp__illu__health` | |
-| `illu blame <symbol>` | `mcp__illu__blame` | `symbol_name: "<symbol>"` |
 | `illu crate_graph` | `mcp__illu__crate_graph` | |
 
 ### Workflow rules

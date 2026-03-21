@@ -249,6 +249,46 @@ struct BlameParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct HistoryParams {
+    /// Symbol name (supports `Type::method` syntax)
+    symbol_name: String,
+    /// Max commits to show (default: 10)
+    max_commits: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ReferencesParams {
+    /// Symbol name to find all references for (supports `Type::method` syntax)
+    symbol_name: String,
+    /// Filter results to files under this path prefix
+    path: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct DocCoverageParams {
+    /// Filter to files under this path prefix (default: all)
+    path: Option<String>,
+    /// Filter by symbol kind: function, struct, enum, trait, etc.
+    kind: Option<String>,
+    /// Include private symbols (default: false, shows only pub/pub(crate))
+    include_private: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct TestImpactParams {
+    /// Symbol name to find test coverage for (supports `Type::method` syntax)
+    symbol_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct OrphanedParams {
+    /// Filter to files under this path prefix (e.g. "src/server/")
+    path: Option<String>,
+    /// Filter by symbol kind: function, struct, enum, trait, etc.
+    kind: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct BoundaryParams {
     /// Path prefix defining the module boundary (e.g. "src/server/tools/")
     path: String,
@@ -259,6 +299,22 @@ struct HealthParams {}
 
 #[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
+
+#[derive(Deserialize, JsonSchema)]
+struct CrateImpactParams {
+    /// Symbol name to analyze crate-level impact for (supports `Type::method` syntax)
+    symbol_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct GraphExportParams {
+    /// Symbol name for call graph export (provide this or `path`, not both)
+    symbol_name: Option<String>,
+    /// Path prefix for file dependency graph export (provide this or `symbol_name`, not both)
+    path: Option<String>,
+    /// Max traversal depth for symbol graphs (default: 2)
+    depth: Option<i64>,
+}
 
 #[derive(Deserialize, JsonSchema)]
 struct FreshnessParams {}
@@ -701,8 +757,69 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
-        let result = tools::blame::handle_blame(&db, repo_path, &params.symbol_name)
-            .map_err(to_mcp_err)?;
+        let result =
+            tools::blame::handle_blame(&db, repo_path, &params.symbol_name).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "history",
+        description = "Show git commit history for a symbol's line range. Shows who changed it, when, and why — useful for understanding evolution and recent modifications."
+    )]
+    async fn history(
+        &self,
+        Parameters(params): Parameters<HistoryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: history");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("history \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let repo_path = &self.config.repo_path;
+        let result =
+            tools::history::handle_history(&db, repo_path, &params.symbol_name, params.max_commits)
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "references",
+        description = "Unified view of all references to a symbol: call sites, type usage in signatures, and trait implementations. Use for comprehensive impact understanding before renaming or modifying a symbol."
+    )]
+    async fn references(
+        &self,
+        Parameters(params): Parameters<ReferencesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: references");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("references \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::references::handle_references(&db, &params.symbol_name, params.path.as_deref())
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "doc_coverage",
+        description = "Find symbols missing doc comments. Shows coverage percentage and lists undocumented symbols grouped by file. Filter by path, kind, or visibility."
+    )]
+    async fn doc_coverage(
+        &self,
+        Parameters(params): Parameters<DocCoverageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = ?params.path, kind = ?params.kind, "Tool call: doc_coverage");
+        let _guard = crate::status::StatusGuard::new("doc_coverage");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::doc_coverage::handle_doc_coverage(
+            &db,
+            params.path.as_deref(),
+            params.kind.as_deref(),
+            params.include_private.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -718,8 +835,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("boundary \u{25b8} {}", params.path));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::boundary::handle_boundary(&db, &params.path).map_err(to_mcp_err)?;
+        let result = tools::boundary::handle_boundary(&db, &params.path).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -754,6 +870,86 @@ impl IlluServer {
         let result = tools::crate_graph::handle_crate_graph(&db).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
+
+    #[tool(
+        name = "crate_impact",
+        description = "Show which workspace crates are affected by changing a symbol. Requires a multi-crate workspace. Shows the defining crate, transitive crate dependents, and symbol-level impact grouped by module."
+    )]
+    async fn crate_impact(
+        &self,
+        Parameters(params): Parameters<CrateImpactParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: crate_impact");
+        let _guard = crate::status::StatusGuard::new(&format!(
+            "crate_impact \u{25b8} {}",
+            params.symbol_name
+        ));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::crate_impact::handle_crate_impact(&db, &params.symbol_name)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "graph_export",
+        description = "Export a call graph or file dependency graph in DOT/Graphviz format. Provide `symbol_name` for a symbol call graph, or `path` for a file dependency graph."
+    )]
+    async fn graph_export(
+        &self,
+        Parameters(params): Parameters<GraphExportParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = ?params.symbol_name, path = ?params.path, "Tool call: graph_export");
+        let _guard = crate::status::StatusGuard::new("graph_export");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::graph_export::handle_graph_export(
+            &db,
+            params.symbol_name.as_deref(),
+            params.path.as_deref(),
+            params.depth,
+        )
+        .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "test_impact",
+        description = "Show which tests break when changing a symbol. Combines impact analysis with test discovery. Returns test names, locations, and a suggested cargo test command."
+    )]
+    async fn test_impact(
+        &self,
+        Parameters(params): Parameters<TestImpactParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: test_impact");
+        let _guard = crate::status::StatusGuard::new(&format!(
+            "test_impact \u{25b8} {}",
+            params.symbol_name
+        ));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::test_impact::handle_test_impact(&db, &params.symbol_name).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "orphaned",
+        description = "Find symbols with no callers AND no test coverage — truly dead, untested code. These are safe to remove or should have tests added."
+    )]
+    async fn orphaned(
+        &self,
+        Parameters(params): Parameters<OrphanedParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = ?params.path, kind = ?params.kind, "Tool call: orphaned");
+        let _guard = crate::status::StatusGuard::new("orphaned");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::orphaned::handle_orphaned(&db, params.path.as_deref(), params.kind.as_deref())
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
 }
 
 #[tool_handler]
@@ -784,9 +980,16 @@ impl ServerHandler for IlluServer {
                  'rename_plan' for rename impact preview, \
                  'similar' for finding structurally similar symbols, \
                  'blame' for git blame on symbols, \
+                 'history' for git commit history on symbols, \
+                 'references' for unified view of all symbol references, \
+                 'doc_coverage' for finding undocumented symbols, \
                  'boundary' for module API boundary analysis, \
                  'health' for index quality diagnosis, \
-                 'crate_graph' for workspace dependency visualization."
+                 'crate_graph' for workspace dependency visualization, \
+                 'crate_impact' for cross-crate symbol impact in workspaces, \
+                 'graph_export' for DOT/Graphviz export of call or file graphs, \
+                 'test_impact' for finding which tests break when changing a symbol, \
+                 'orphaned' for finding symbols with no callers and no test coverage."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),

@@ -67,11 +67,7 @@ pub fn handle_overview(
                 .map(|c| c.name.as_str())
                 .collect();
             if !same_file_calls.is_empty() {
-                let _ = writeln!(
-                    output,
-                    "    calls: {}",
-                    same_file_calls.join(", ")
-                );
+                let _ = writeln!(output, "    calls: {}", same_file_calls.join(", "));
             }
         }
     }
@@ -92,6 +88,10 @@ pub fn handle_overview(
     kinds.sort_by(|a, b| b.1.cmp(&a.1));
     let kind_summary: Vec<String> = kinds.iter().map(|(k, c)| format!("{c} {k}s")).collect();
     let _ = writeln!(output, "{}", kind_summary.join(", "));
+    let _ = writeln!(
+        output,
+        "\n*Calls shown are same-file only. Use `context` for full call graph.*"
+    );
 
     Ok(output)
 }
@@ -341,7 +341,10 @@ mod tests {
         .unwrap();
 
         // Create call refs: orchestrate -> helper_a, orchestrate -> helper_b
-        let src_id = db.get_symbol_id("orchestrate", "src/lib.rs").unwrap().unwrap();
+        let src_id = db
+            .get_symbol_id("orchestrate", "src/lib.rs")
+            .unwrap()
+            .unwrap();
         let a_id = db.get_symbol_id("helper_a", "src/lib.rs").unwrap().unwrap();
         let b_id = db.get_symbol_id("helper_b", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(src_id, a_id, "call", "high").unwrap();
@@ -355,7 +358,10 @@ mod tests {
         );
         // helper_a has no callees, so no "calls:" line for it
         let lines: Vec<&str> = result.lines().collect();
-        let helper_a_idx = lines.iter().position(|l| l.contains("**helper_a**")).unwrap();
+        let helper_a_idx = lines
+            .iter()
+            .position(|l| l.contains("**helper_a**"))
+            .unwrap();
         let next_line = lines.get(helper_a_idx + 1).unwrap_or(&"");
         assert!(
             !next_line.starts_with("    calls:"),

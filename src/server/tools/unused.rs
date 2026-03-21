@@ -21,7 +21,7 @@ pub fn handle_unused(
     }
 
     symbols.retain(|s| !super::is_entry_point(s));
-    symbols.retain(|s| s.kind != SymbolKind::EnumVariant);
+    symbols.retain(|s| s.kind != SymbolKind::EnumVariant && s.kind != SymbolKind::Impl);
 
     let mut output = String::new();
     let _ = writeln!(output, "## Potentially Unused Symbols\n");

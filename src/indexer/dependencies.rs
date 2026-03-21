@@ -61,7 +61,7 @@ pub fn parse_cargo_toml(content: &str) -> Result<Vec<DirectDep>, toml::de::Error
     Ok(result)
 }
 
-pub fn parse_cargo_lock(content: &str) -> Result<Vec<LockedDep>, toml::de::Error> {
+pub(crate) fn parse_cargo_lock(content: &str) -> Result<Vec<LockedDep>, toml::de::Error> {
     let parsed: CargoLock = toml::from_str(content)?;
     let Some(packages) = parsed.package else {
         return Ok(vec![]);

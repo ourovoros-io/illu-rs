@@ -23,8 +23,7 @@ pub fn handle_blame(
         sym.file_path, sym.line_start, sym.line_end
     );
 
-    let blame_output =
-        run_git_blame(repo_path, &sym.file_path, sym.line_start, sym.line_end)?;
+    let blame_output = run_git_blame(repo_path, &sym.file_path, sym.line_start, sym.line_end)?;
 
     let entries = parse_blame_output(&blame_output);
     if entries.is_empty() {
@@ -219,7 +218,10 @@ filename src/lib.rs
         let entries = parse_blame_output(sample);
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].author, "John Doe");
-        assert_eq!(entries[0].commit_hash, "abc123def456abc123def456abc123def456abc1");
+        assert_eq!(
+            entries[0].commit_hash,
+            "abc123def456abc123def456abc123def456abc1"
+        );
         assert!(entries[0].summary.contains("feat: add something"));
         assert_eq!(entries[2].author, "Jane Smith");
         assert!(entries[2].summary.contains("fix: something else"));
