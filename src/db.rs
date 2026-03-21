@@ -420,7 +420,9 @@ impl Database {
                     OR attributes LIKE '%::test, %' \
                     OR attributes LIKE 'rstest%' \
                     OR attributes LIKE '%, rstest%' \
-                    OR attributes LIKE 'test(%'",
+                    OR attributes LIKE 'test(%' \
+                    OR attributes LIKE 'test\\_case(%' ESCAPE '\\' \
+                    OR attributes LIKE '%, test\\_case(%' ESCAPE '\\'",
             )?;
         }
         Ok(())
