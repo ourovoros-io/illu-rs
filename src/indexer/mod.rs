@@ -135,7 +135,7 @@ fn rebuild_refs_for_files(
     let all_crates = db.get_all_crates()?;
     let crate_map: std::collections::HashMap<String, String> = all_crates
         .iter()
-        .map(|c| (c.name.clone(), c.path.clone()))
+        .map(|c| (c.name.replace('-', "_"), c.path.clone()))
         .collect();
 
     let symbol_map = db.build_symbol_id_map()?;
@@ -338,7 +338,7 @@ fn extract_all_symbol_refs(
     let all_crates = db.get_all_crates()?;
     let crate_map: std::collections::HashMap<String, String> = all_crates
         .iter()
-        .map(|c| (c.name.clone(), c.path.clone()))
+        .map(|c| (c.name.replace('-', "_"), c.path.clone()))
         .collect();
 
     let symbol_map = db.build_symbol_id_map()?;
@@ -917,6 +917,41 @@ pub fn use_shared() -> SharedType {
     }
 
     #[test]
+    fn test_crate_map_normalizes_hyphens() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname = \"my-crate\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(repo.join("src/lib.rs"), "pub mod status;\n").unwrap();
+        std::fs::write(repo.join("src/status.rs"), "pub fn reset_state() {}\n").unwrap();
+        std::fs::write(
+            repo.join("src/main.rs"),
+            "use my_crate::status::reset_state;\nfn main() { reset_state(); }\n",
+        )
+        .unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: repo.to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        // The ref from main→reset_state should exist with high confidence
+        let callees = db.get_callees("main", "src/main.rs", false).unwrap();
+        let has_ref = callees.iter().any(|c| c.name == "reset_state");
+        assert!(
+            has_ref,
+            "main should have 'reset_state' as a callee (via my_crate:: import), got: {:?}",
+            callees.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_refresh_index_on_empty_db() {
         let dir = tempfile::TempDir::new().unwrap();
         let src_dir = dir.path().join("src");
@@ -939,5 +974,164 @@ pub fn use_shared() -> SharedType {
 
         let syms = db.search_symbols("fresh").unwrap();
         assert_eq!(syms.len(), 1);
+    }
+
+    #[test]
+    fn test_qualified_noisy_bypass_and_seen_dedup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+
+        // Two structs each with a `new` (noisy) and `clear` (noisy)
+        std::fs::write(
+            repo.join("src/lib.rs"),
+            r"pub struct Foo;
+impl Foo {
+    pub fn new() -> Self { Self }
+    pub fn clear(&self) {}
+}
+pub struct Bar;
+impl Bar {
+    pub fn new() -> Self { Self }
+    pub fn clear(&self) {}
+}
+pub fn run() {
+    let f = Foo::new();
+    f.clear();
+    let b = Bar::new();
+    b.clear();
+}
+",
+        )
+        .unwrap();
+
+        std::fs::write(repo.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: repo.to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        let callees = db.get_callees("run", "src/lib.rs", false).unwrap();
+        let callee_qualified: Vec<String> = callees
+            .iter()
+            .map(|c| match &c.impl_type {
+                Some(it) => format!("{it}::{}", c.name),
+                None => c.name.clone(),
+            })
+            .collect();
+
+        // Bug 3 fix: `new` and `clear` are noisy names, but
+        // Foo::new() and Bar::new() are qualified calls that should
+        // bypass the noisy filter.
+        assert!(
+            callee_qualified.contains(&"Foo::new".to_string()),
+            "run callees should include Foo::new, got: {callee_qualified:?}"
+        );
+        assert!(
+            callee_qualified.contains(&"Bar::new".to_string()),
+            "run callees should include Bar::new, got: {callee_qualified:?}"
+        );
+
+        // Bug 3 fix (also noisy): clear is noisy but qualified
+        assert!(
+            callee_qualified.contains(&"Foo::clear".to_string()),
+            "run callees should include Foo::clear, \
+             got: {callee_qualified:?}"
+        );
+        assert!(
+            callee_qualified.contains(&"Bar::clear".to_string()),
+            "run callees should include Bar::clear, \
+             got: {callee_qualified:?}"
+        );
+
+        // Bug 4 fix: seen dedup includes target_context, so both
+        // Foo::new AND Bar::new are captured (not just the first one)
+        let new_count = callee_qualified
+            .iter()
+            .filter(|q| q.ends_with("::new"))
+            .count();
+        assert_eq!(
+            new_count, 2,
+            "Both Foo::new and Bar::new should be captured, \
+             got: {callee_qualified:?}"
+        );
+
+        // Verify Foo::new and Bar::new are NOT reported as unused
+        let unused = db.get_unreferenced_symbols(None, true).unwrap();
+        let unused_names: Vec<String> = unused
+            .iter()
+            .map(|s| match &s.impl_type {
+                Some(it) => format!("{it}::{}", s.name),
+                None => s.name.clone(),
+            })
+            .collect();
+        assert!(
+            !unused_names.contains(&"Foo::new".to_string()),
+            "Foo::new should NOT be unused, unused: {unused_names:?}"
+        );
+        assert!(
+            !unused_names.contains(&"Bar::new".to_string()),
+            "Bar::new should NOT be unused, unused: {unused_names:?}"
+        );
+    }
+
+    #[test]
+    fn test_is_test_precise_matching() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname = \"test-app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            repo.join("src/lib.rs"),
+            r"
+pub fn test_impact() {}
+
+#[test]
+fn test_real() {}
+
+pub fn not_a_test() {}
+",
+        )
+        .unwrap();
+        std::fs::write(repo.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: repo.to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        let tests: Vec<String> = db
+            .conn
+            .prepare("SELECT name FROM symbols WHERE is_test = 1")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert!(
+            tests.contains(&"test_real".to_string()),
+            "test_real should be is_test=1"
+        );
+        assert!(
+            !tests.contains(&"test_impact".to_string()),
+            "test_impact (no #[test] attr) should NOT be is_test=1, \
+             got: {tests:?}"
+        );
     }
 }

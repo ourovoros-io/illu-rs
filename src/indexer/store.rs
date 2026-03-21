@@ -3,6 +3,22 @@ use crate::indexer::dependencies::ResolvedDep;
 use crate::indexer::parser::Symbol;
 use rusqlite::params;
 
+/// Check if an attributes string indicates a test function.
+/// Matches: `test`, `tokio::test`, `rstest`, `test_case(...)`, etc.
+/// Rejects: `tool(name = "test_impact", ...)` where "test" is only a substring.
+#[must_use]
+pub fn is_test_attribute(attrs: &str) -> bool {
+    attrs.split(", ").any(|attr| {
+        let attr = attr.trim();
+        attr == "test"
+            || attr.ends_with("::test")
+            || attr.starts_with("test(")
+            || attr == "rstest"
+            || attr.starts_with("rstest(")
+            || attr.starts_with("test_case(")
+    })
+}
+
 pub fn store_dependencies(db: &Database, deps: &[ResolvedDep]) -> rusqlite::Result<()> {
     db.with_transaction(|db| {
         let mut stmt = db.conn.prepare(
@@ -46,10 +62,7 @@ pub fn store_symbols(db: &Database, file_id: FileId, symbols: &[Symbol]) -> rusq
         for sym in symbols {
             let line_start = i64::try_from(sym.line_start).unwrap_or(i64::MAX);
             let line_end = i64::try_from(sym.line_end).unwrap_or(i64::MAX);
-            let is_test = sym
-                .attributes
-                .as_deref()
-                .is_some_and(|a| a.contains("test"));
+            let is_test = sym.attributes.as_deref().is_some_and(is_test_attribute);
             sym_stmt.execute(params![
                 file_id,
                 sym.name,
@@ -267,5 +280,82 @@ mod tests {
         let by_trait = db.get_trait_impls_for_trait("Display").unwrap();
         assert_eq!(by_trait.len(), 1);
         assert_eq!(by_trait[0].type_name, "Config");
+    }
+
+    #[test]
+    fn test_is_test_excludes_tool_with_test_in_name() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/server.rs", "abc123").unwrap();
+
+        let test_fn = Symbol {
+            name: "test_something".into(),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Private,
+            file_path: "src/server.rs".into(),
+            line_start: 1,
+            line_end: 5,
+            signature: "fn test_something()".into(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: Some("test".into()),
+            impl_type: None,
+        };
+
+        let tokio_test_fn = Symbol {
+            name: "test_async".into(),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Private,
+            file_path: "src/server.rs".into(),
+            line_start: 6,
+            line_end: 10,
+            signature: "async fn test_async()".into(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: Some("tokio::test".into()),
+            impl_type: None,
+        };
+
+        let tool_fn = Symbol {
+            name: "test_impact".into(),
+            kind: SymbolKind::Function,
+            visibility: Visibility::Private,
+            file_path: "src/server.rs".into(),
+            line_start: 11,
+            line_end: 20,
+            signature: "async fn test_impact()".into(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: Some(
+                "tool(name = \"test_impact\", description = \"Show which tests break\")".into(),
+            ),
+            impl_type: Some("IlluServer".into()),
+        };
+
+        store_symbols(&db, file_id, &[test_fn, tokio_test_fn, tool_fn]).unwrap();
+
+        let tests: Vec<String> = db
+            .conn
+            .prepare("SELECT name FROM symbols WHERE is_test = 1 ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        assert!(
+            tests.contains(&"test_something".to_string()),
+            "#[test] should be is_test=1"
+        );
+        assert!(
+            tests.contains(&"test_async".to_string()),
+            "#[tokio::test] should be is_test=1"
+        );
+        assert!(
+            !tests.contains(&"test_impact".to_string()),
+            "tool handler should NOT be is_test=1, got: {tests:?}"
+        );
     }
 }

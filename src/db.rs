@@ -410,8 +410,20 @@ impl Database {
             self.conn.execute_batch(
                 "ALTER TABLE symbols ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
             )?;
-            self.conn
-                .execute_batch("UPDATE symbols SET is_test = 1 WHERE attributes LIKE '%test%'")?;
+            self.conn.execute_batch(
+                "UPDATE symbols SET is_test = 1 \
+                 WHERE attributes = 'test' \
+                    OR attributes LIKE 'test, %' \
+                    OR attributes LIKE '%, test' \
+                    OR attributes LIKE '%, test, %' \
+                    OR attributes LIKE '%::test' \
+                    OR attributes LIKE '%::test, %' \
+                    OR attributes LIKE 'rstest%' \
+                    OR attributes LIKE '%, rstest%' \
+                    OR attributes LIKE 'test(%' \
+                    OR attributes LIKE 'test\\_case(%' ESCAPE '\\' \
+                    OR attributes LIKE '%, test\\_case(%' ESCAPE '\\'",
+            )?;
         }
         Ok(())
     }

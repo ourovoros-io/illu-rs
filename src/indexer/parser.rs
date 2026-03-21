@@ -830,14 +830,22 @@ fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
         return Vec::new();
     };
 
+    // Normalize "." to "" so paths don't start with "./"
+    let prefix = if crate_path == "." {
+        ""
+    } else {
+        crate_path.as_str()
+    };
+    let sep = if prefix.is_empty() { "" } else { "/" };
+
     if segments.len() == 2 {
-        return vec![format!("{crate_path}/src/lib.rs")];
+        return vec![format!("{prefix}{sep}src/lib.rs")];
     }
     let module_segments = &segments[1..segments.len() - 1];
     let joined = module_segments.join("/");
     vec![
-        format!("{crate_path}/src/{joined}.rs"),
-        format!("{crate_path}/src/{joined}/mod.rs"),
+        format!("{prefix}{sep}src/{joined}.rs"),
+        format!("{prefix}{sep}src/{joined}/mod.rs"),
     ]
 }
 
@@ -1380,11 +1388,17 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
         line: Option<i64>,
         refs: &mut Vec<SymbolRef>,
     ) {
+        // Qualified calls (with target_context) bypass the noisy filter —
+        // `Status::clear()` is unambiguous unlike a bare `clear()`.
+        let noisy = target_context.is_none() && is_noisy_symbol(name);
         if name != self.fn_name
-            && !is_noisy_symbol(name)
+            && !noisy
             && !self.locals.contains(name)
             && self.ctx.known_symbols.contains(name)
-            && self.seen.insert(name.to_string())
+            && self.seen.insert(match &target_context {
+                Some(ctx) => format!("{ctx}::{name}"),
+                None => name.to_string(),
+            })
         {
             refs.push(SymbolRef {
                 source_name: self.fn_name.to_string(),
@@ -1412,7 +1426,10 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
     ) {
         if name != self.fn_name
             && self.ctx.known_symbols.contains(name)
-            && self.seen.insert(name.to_string())
+            && self.seen.insert(match &target_context {
+                Some(ctx) => format!("{ctx}::{name}"),
+                None => name.to_string(),
+            })
         {
             refs.push(SymbolRef {
                 source_name: self.fn_name.to_string(),
@@ -3593,6 +3610,65 @@ fn caller() {
         assert!(
             new_refs.is_empty(),
             "Vec::new() should not create ref to 'new', found: {new_refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_qualified_call_bypasses_noisy_filter() {
+        // `clear` is in NOISY_SYMBOL_NAMES, but `Status::clear()` should still
+        // be captured because the type qualification makes it unambiguous.
+        let source = r"
+pub struct Status;
+impl Status {
+    pub fn clear(&self) {}
+}
+fn caller() {
+    let s = Status;
+    Status::clear(&s);
+}
+";
+        let known = ["Status", "clear", "caller"]
+            .into_iter()
+            .map(String::from)
+            .collect::<std::collections::HashSet<_>>();
+        let crate_map = std::collections::HashMap::<String, String>::new();
+        let refs = extract_refs(source, "src/status.rs", &known, &crate_map).unwrap();
+        let has_clear_ref = refs
+            .iter()
+            .any(|r| r.source_name == "caller" && r.target_name == "clear");
+        assert!(
+            has_clear_ref,
+            "qualified call Status::clear() should bypass noisy filter, got refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_seen_dedup_includes_context() {
+        // Two different Type::new() calls in the same function should both be captured
+        let source = r"
+pub struct Foo;
+impl Foo { pub fn new() -> Self { Self } }
+pub struct Bar;
+impl Bar { pub fn new() -> Self { Self } }
+fn caller() {
+    let _ = Foo::new();
+    let _ = Bar::new();
+}
+";
+        let known = ["Foo", "Bar", "new", "caller"]
+            .into_iter()
+            .map(String::from)
+            .collect::<std::collections::HashSet<_>>();
+        let crate_map = std::collections::HashMap::<String, String>::new();
+        let refs = extract_refs(source, "src/lib.rs", &known, &crate_map).unwrap();
+        let new_refs: Vec<_> = refs
+            .iter()
+            .filter(|r| r.source_name == "caller" && r.target_name == "new")
+            .collect();
+        assert_eq!(
+            new_refs.len(),
+            2,
+            "Both Foo::new() and Bar::new() should be captured, got: {new_refs:?}"
         );
     }
 }
