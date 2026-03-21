@@ -240,7 +240,7 @@ impl Database {
     }
 
     /// Bump to force full re-index after parser/schema changes.
-    const SCHEMA_VERSION: &str = "2";
+    const SCHEMA_VERSION: &str = "3";
 
     fn check_schema_version(&self) -> SqlResult<()> {
         let current: Option<String> = self

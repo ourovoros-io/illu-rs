@@ -165,6 +165,11 @@ fn write_md_section(
 
     let content = std::fs::read_to_string(&md_path).unwrap_or_default();
 
+    // Skip write if section already exists and is identical
+    if content.contains(ILLU_SECTION_START) && content.contains(section) {
+        return Ok(());
+    }
+
     let new_content = if let Some(start) = content.find(ILLU_SECTION_START) {
         if let Some(end) = content.find(ILLU_SECTION_END) {
             let end = end + ILLU_SECTION_END.len();

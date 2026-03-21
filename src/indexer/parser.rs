@@ -1015,7 +1015,47 @@ fn collect_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
             "declaration_list" => {
                 collect_refs(&child, ctx, impl_type, refs);
             }
+            "struct_item" | "enum_item" => {
+                collect_derive_refs(&child, ctx, refs);
+            }
             _ => {}
+        }
+    }
+}
+
+/// Extract refs from `#[derive(Trait1, Trait2)]` attributes on a symbol.
+fn collect_derive_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
+    node: &Node,
+    ctx: &RefContext<'_, S, S2>,
+    refs: &mut Vec<SymbolRef>,
+) {
+    let name_node = find_child_by_kind(node, "type_identifier")
+        .or_else(|| find_child_by_kind(node, "identifier"));
+    let Some(name_node) = name_node else { return };
+    let source_name = node_text(&name_node, ctx.source);
+
+    let Some(attrs) = extract_attributes(node, ctx.source) else {
+        return;
+    };
+    for attr in attrs.split(", ") {
+        let Some(inner) = attr
+            .strip_prefix("derive(")
+            .and_then(|s| s.strip_suffix(')'))
+        else {
+            continue;
+        };
+        for derive_name in inner.split(',') {
+            let derive_name = derive_name.trim();
+            if !derive_name.is_empty() && ctx.known_symbols.contains(derive_name) {
+                refs.push(SymbolRef {
+                    source_name: source_name.clone(),
+                    source_file: ctx.file_path.to_string(),
+                    target_name: derive_name.to_string(),
+                    kind: RefKind::TypeRef,
+                    target_file: resolve_target_file(derive_name, ctx),
+                    target_context: None,
+                });
+            }
         }
     }
 }
