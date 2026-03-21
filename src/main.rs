@@ -62,6 +62,8 @@ enum Command {
     },
     /// Set up illu in a Rust repo (configures Claude Code + Gemini CLI, builds index)
     Init,
+    /// Install illu globally (configures Claude Code + Gemini CLI for all repos)
+    Install,
 }
 
 fn write_mcp_server_config(
@@ -112,7 +114,7 @@ fn illu_agent_section(cmd_prefix: &str, tool_prefix: &str) -> String {
         "{ILLU_SECTION_START}
 ## Code Intelligence (illu)
 
-This repo is indexed by illu (31 tools). **Use illu tools as your first step** — before reading files, \
+This repo is indexed by illu (36 tools). **Use illu tools as your first step** — before reading files, \
 before grep, before guessing at code structure.
 
 ### When to use illu
@@ -127,6 +129,8 @@ before grep, before guessing at code structure.
 - **Finding which tests to run**: `{cmd_prefix} test_impact` after changing a symbol
 - **Dead code detection**: `{cmd_prefix} unused` or `{cmd_prefix} orphaned` to find unreferenced symbols
 - **Index health**: `{cmd_prefix} freshness` to check if the index is current
+- **Cross-repo analysis**: `{cmd_prefix} cross_query` to find symbols in other repos, `{cmd_prefix} cross_impact` to check cross-repo effects
+- **Repo overview**: `{cmd_prefix} repos` to see all registered repos
 
 ### Commands
 
@@ -164,6 +168,11 @@ before grep, before guessing at code structure.
 | `{cmd_prefix} crate_graph` | `{tool_prefix}crate_graph` | |
 | `{cmd_prefix} blame <symbol>` | `{tool_prefix}blame` | `symbol_name: \"<symbol>\"` |
 | `{cmd_prefix} history <symbol>` | `{tool_prefix}history` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} repos` | `{tool_prefix}repos` | |
+| `{cmd_prefix} cross_query <term>` | `{tool_prefix}cross_query` | `query: \"<term>\"` |
+| `{cmd_prefix} cross_impact <symbol>` | `{tool_prefix}cross_impact` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} cross_deps` | `{tool_prefix}cross_deps` | |
+| `{cmd_prefix} cross_callpath <from> <to>` | `{tool_prefix}cross_callpath` | `from: \"<from>\", to: \"<to>\"` |
 
 ### Workflow rules
 
@@ -316,6 +325,121 @@ fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>
     Ok(true)
 }
 
+fn register_repo(repo_path: &Path) {
+    let Ok(registry_path) = illu_rs::registry::Registry::default_path() else {
+        return;
+    };
+    let Ok(mut registry) = illu_rs::registry::Registry::load(&registry_path) else {
+        return;
+    };
+
+    let name = repo_path
+        .file_name()
+        .map_or_else(|| "unknown".into(), |n| n.to_string_lossy().into_owned());
+
+    let git_remote = illu_rs::git::git_remote_url(repo_path);
+    let git_common_dir =
+        illu_rs::git::git_common_dir(repo_path).unwrap_or_else(|_| repo_path.join(".git"));
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map_or_else(|_| "0".into(), |d| d.as_secs().to_string());
+
+    registry.register(illu_rs::registry::RepoEntry {
+        name,
+        path: repo_path.to_path_buf(),
+        git_remote,
+        git_common_dir,
+        last_indexed: now,
+    });
+    registry.prune();
+    let _ = registry.save();
+}
+
+fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let binary = std::env::current_exe()?
+        .canonicalize()?
+        .to_string_lossy()
+        .into_owned();
+
+    let illu_entry = serde_json::json!({
+        "command": binary,
+        "args": ["serve"],
+        "env": { "RUST_LOG": "warn" }
+    });
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut config: serde_json::Value = std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
+
+    config["mcpServers"]["illu"] = illu_entry;
+    std::fs::write(config_path, serde_json::to_string_pretty(&config)?)?;
+    Ok(())
+}
+
+fn ensure_global_gitignore(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let gitignore_path = home.join(".config/git/ignore");
+    if let Some(parent) = gitignore_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
+    if content
+        .lines()
+        .any(|l| l.trim() == ".illu/" || l.trim() == ".illu")
+    {
+        return Ok(());
+    }
+    let mut new_content = content;
+    if !new_content.is_empty() && !new_content.ends_with('\n') {
+        new_content.push('\n');
+    }
+    new_content.push_str(".illu/\n");
+    std::fs::write(&gitignore_path, new_content)?;
+    Ok(())
+}
+
+#[expect(clippy::print_stdout, reason = "CLI output")]
+fn install_global() -> Result<(), Box<dyn std::error::Error>> {
+    let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set")?;
+    let home = PathBuf::from(home);
+
+    println!("Installing illu globally...");
+
+    let claude_settings = home.join(".claude/settings.json");
+    write_global_mcp_config(&claude_settings)?;
+    println!("  wrote {}", claude_settings.display());
+
+    let gemini_settings = home.join(".gemini/settings.json");
+    write_global_mcp_config(&gemini_settings)?;
+    println!("  wrote {}", gemini_settings.display());
+
+    write_md_section(
+        &home,
+        ".claude/CLAUDE.md",
+        "# CLAUDE.md",
+        &illu_agent_section("illu", "mcp__illu__"),
+    )?;
+    println!("  updated {}", home.join(".claude/CLAUDE.md").display());
+
+    write_md_section(
+        &home,
+        ".gemini/GEMINI.md",
+        "# GEMINI.md",
+        &illu_agent_section("@illu", "mcp_illu_"),
+    )?;
+    println!("  updated {}", home.join(".gemini/GEMINI.md").display());
+
+    ensure_global_gitignore(&home)?;
+
+    println!("\nDone. illu will auto-start in any Rust repo.");
+    Ok(())
+}
+
 #[tokio::main]
 #[expect(clippy::too_many_lines, reason = "CLI dispatch with many subcommands")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -325,43 +449,78 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let cli = Cli::parse();
-    let repo_path = &cli.repo;
+    let repo_path = if cli.repo == Path::new(".") {
+        match illu_rs::git::detect_repo_root(&std::env::current_dir()?) {
+            Ok(root) => root,
+            Err(_) => std::env::current_dir()?,
+        }
+    } else {
+        cli.repo.clone()
+    };
+    let repo_path = &repo_path;
 
     match cli.command {
         None | Some(Command::Serve) => {
             tracing::info!(repo = %repo_path.display(), "Starting illu server");
-            let db_dir = repo_path.join(".illu");
-            std::fs::create_dir_all(&db_dir)?;
-            illu_rs::status::init(repo_path);
-            illu_rs::status::set("starting");
-            write_mcp_config(repo_path)?;
-            write_claude_md_section(repo_path)?;
-            write_gemini_config(repo_path)?;
-            write_gemini_md_section(repo_path)?;
+            let has_cargo = repo_path.join("Cargo.toml").exists();
 
-            let config = IndexConfig {
-                repo_path: repo_path.clone(),
+            let (db, config) = if has_cargo {
+                let db_dir = repo_path.join(".illu");
+                std::fs::create_dir_all(&db_dir)?;
+                illu_rs::status::init(repo_path);
+                illu_rs::status::set("starting");
+                write_mcp_config(repo_path)?;
+                write_claude_md_section(repo_path)?;
+                write_gemini_config(repo_path)?;
+                write_gemini_md_section(repo_path)?;
+
+                let config = IndexConfig {
+                    repo_path: repo_path.clone(),
+                };
+
+                let db_path = db_dir.join("index.db");
+                tracing::debug!(path = %db_path.display(), "Opening database");
+                let db = Database::open(&db_path)?;
+
+                illu_rs::status::set("indexing");
+                let refreshed = illu_rs::indexer::refresh_index(&db, &config)?;
+                if refreshed > 0 {
+                    tracing::info!(count = refreshed, "Refreshed changed files");
+                }
+
+                (db, config)
+            } else {
+                tracing::warn!("No Cargo.toml — starting with empty index (cross-repo tools only)");
+                let db = Database::open_in_memory()?;
+                let config = IndexConfig {
+                    repo_path: repo_path.clone(),
+                };
+                (db, config)
             };
 
-            let db_path = db_dir.join("index.db");
-            tracing::debug!(path = %db_path.display(), "Opening database");
-            let db = Database::open(&db_path)?;
+            register_repo(repo_path);
 
-            // Index eagerly at startup so tools are ready immediately
-            illu_rs::status::set("indexing");
-            let refreshed = illu_rs::indexer::refresh_index(&db, &config)?;
-            if refreshed > 0 {
-                tracing::info!(count = refreshed, "Refreshed changed files");
-            }
+            let registry = {
+                let path = illu_rs::registry::Registry::default_path()
+                    .unwrap_or_else(|_| repo_path.join(".illu/registry.toml"));
+                illu_rs::registry::Registry::load(&path)
+                    .unwrap_or_else(|_| illu_rs::registry::Registry::empty())
+            };
 
             // Check for pending docs before handing DB to the server
-            let pending_docs = illu_rs::indexer::docs::pending_docs(&db)?;
+            let pending_docs = if has_cargo {
+                illu_rs::indexer::docs::pending_docs(&db)?
+            } else {
+                Vec::new()
+            };
 
-            let server = IlluServer::new(db, config.clone());
+            let server = IlluServer::new(db, config.clone(), registry);
             let db_arc = server.db();
             let transport = stdio();
             tracing::info!("MCP transport ready, starting handshake");
-            illu_rs::status::set(illu_rs::status::READY);
+            if has_cargo {
+                illu_rs::status::set(illu_rs::status::READY);
+            }
             let service = server.serve(transport).await?;
             tracing::info!("MCP server initialized, waiting for requests");
 
@@ -387,7 +546,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             service.waiting().await?;
             tracing::info!("MCP server shut down");
-            illu_rs::status::clear();
+            if has_cargo {
+                illu_rs::status::clear();
+            }
         }
         Some(Command::Query {
             search,
@@ -429,6 +590,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Init) => {
             init_repo(repo_path)?;
+        }
+        Some(Command::Install) => {
+            install_global()?;
         }
     }
 

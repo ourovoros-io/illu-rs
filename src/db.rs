@@ -132,6 +132,19 @@ impl Database {
         Ok(db)
     }
 
+    pub fn open_readonly(path: &std::path::Path) -> SqlResult<Self> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let repo_root = path
+            .parent()
+            .filter(|p| p.file_name().is_some_and(|n| n == ".illu"))
+            .and_then(|p| p.parent())
+            .map(std::path::Path::to_path_buf);
+        Ok(Self { conn, repo_root })
+    }
+
     pub fn repo_root(&self) -> Option<&std::path::Path> {
         self.repo_root.as_deref()
     }
@@ -3581,5 +3594,39 @@ mod tests {
         assert_eq!(largest[0].lines, 101); // 110 - 10 + 1
         assert_eq!(largest[1].name, "medium");
         assert_eq!(largest[1].lines, 31); // 150 - 120 + 1
+    }
+
+    #[test]
+    fn test_open_readonly() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let illu_dir = dir.path().join(".illu");
+        std::fs::create_dir_all(&illu_dir).unwrap();
+        let db_path = illu_dir.join("index.db");
+
+        // Create a DB with data first
+        {
+            let db = Database::open(&db_path).unwrap();
+            db.conn
+                .execute(
+                    "INSERT INTO files (path, content_hash) VALUES (?1, ?2)",
+                    ["src/lib.rs", "abc123"],
+                )
+                .unwrap();
+        }
+
+        // Open readonly — reads work
+        let db = Database::open_readonly(&db_path).unwrap();
+        let count: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Writes should fail
+        let result = db.conn.execute(
+            "INSERT INTO files (path, content_hash) VALUES (?1, ?2)",
+            ["src/main.rs", "def456"],
+        );
+        assert!(result.is_err());
     }
 }
