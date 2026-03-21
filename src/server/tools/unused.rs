@@ -74,7 +74,7 @@ fn handle_untested(
     // Filter to symbols with no related tests
     let mut untested = Vec::new();
     for sym in symbols {
-        let tests = db.get_related_tests(&sym.name)?;
+        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
         if tests.is_empty() {
             untested.push(sym);
         }

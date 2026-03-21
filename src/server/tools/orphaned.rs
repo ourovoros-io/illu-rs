@@ -27,7 +27,7 @@ pub fn handle_orphaned(
     // Further filter to symbols with no test coverage
     let mut orphaned = Vec::new();
     for sym in unused {
-        let tests = db.get_related_tests(&sym.name)?;
+        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
         if tests.is_empty() {
             orphaned.push(sym);
         }
@@ -130,5 +130,66 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let result = handle_orphaned(&db, None, None).unwrap();
         assert!(result.contains("No orphaned symbols"));
+    }
+
+    #[test]
+    fn test_orphaned_excludes_test_called_methods() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "open_in_memory".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn open_in_memory() -> Self".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: Some("Database".into()),
+                },
+                Symbol {
+                    name: "test_db".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "fn test_db()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // test_db calls open_in_memory — so open_in_memory has a caller
+        let open_id = db
+            .get_symbol_id("open_in_memory", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_id = db
+            .get_symbol_id("test_db", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(test_id, open_id, "call", "high")
+            .unwrap();
+
+        let result = handle_orphaned(&db, None, None).unwrap();
+        // open_in_memory is called by test_db, so it has a caller
+        // and should NOT appear as orphaned
+        assert!(
+            !result.contains("open_in_memory"),
+            "method called by tests should NOT be orphaned, got: {result}"
+        );
     }
 }

@@ -61,7 +61,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **`rmcp::schemars`** — Tool param structs must use the `schemars` re-exported by rmcp, not a separate schemars crate.
 - **Symbol refs use qualified resolution** — `extract_refs` builds an import map from `use` declarations and a crate map from the workspace. Refs resolve via import → same-file → same-crate → global name fallback. `self.method()` resolves via `impl_type` matching.
 - **Workspace detection** — Presence of `[workspace]` in root `Cargo.toml` triggers multi-crate indexing. Single-crate repos get one implicit row in `crates`.
-- **Impact tool** — Uses recursive CTE on `symbol_refs` (depth limit 5) for symbol-level impact. For workspaces with >1 crate, prepends an "Affected Crates" section using `crate_deps` transitive query. Appends a "Related Tests" section listing `#[test]` functions that transitively call the symbol.
+- **Impact tool** — Uses recursive CTE on `symbol_refs` (depth limit 5) for symbol-level impact. Supports `Type::method` syntax (e.g. `Database::open`) — splits into name + impl_type for CTE seed. For workspaces with >1 crate, prepends an "Affected Crates" section using `crate_deps` transitive query. Appends a "Related Tests" section listing `#[test]` functions that transitively call the symbol.
 - **Context tool** — Shows callers ("Called By" section) alongside callees. Supports `Type::method` syntax (e.g. `Database::new`) via `impl_type` column lookup, and optional `file` parameter for scoped results.
 - **Diff impact tool** — After listing changed symbols and downstream impact, appends a "Related Tests" section with a suggested `cargo test` command.
 - **Callpath tool** — BFS on `symbol_refs` from source to target symbol. Returns shortest call chain with file locations.
@@ -69,7 +69,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Unused tool** — LEFT JOIN `symbol_refs` to find symbols with zero incoming refs. Excludes entry points (`main`, `#[test]`), `use`/`mod`/`impl` kinds, and `EnumVariant` symbols.
 - **Freshness tool** — Compares `get_commit_hash` against `git rev-parse HEAD`. Lists changed files via `git diff --name-only`. Does NOT call `refresh()` — reports current state only.
 - **Crate graph tool** — Formats `crate_deps` as an adjacency list. Identifies root crates (no dependents) and leaf crates (no deps).
-- **Query filters** — `attribute`, `signature`, `kind`, and `path` filters are all combinable. The broadest filter is used for the initial DB query, then remaining filters are applied as `.retain()` post-filters. `doc_comments` scope searches doc comment content.
+- **Query filters** — `attribute`, `signature`, `kind`, and `path` filters are all combinable. The broadest filter is used for the initial DB query, then remaining filters are applied as `.retain()` post-filters. `doc_comments` scope searches doc comment content. Default scope is `symbols` (not `all`) — use `scope: "all"` or `scope: "docs"` to include dependency docs.
 - **Context sections** — Optional `sections` parameter controls which sections render: `source`, `callers`, `callees`, `tested_by`, `traits`, `docs`. Omit for all sections. Header always renders.
 - **Implements tool** — Uses `trait_impls` table to query trait/type relationships bidirectionally.
 - **Neighborhood tool** — Bidirectional BFS using `get_callees_by_name` (downstream) and `get_callers_by_name` (upstream) within N hops.
@@ -79,7 +79,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **File graph tool** — Derives file-level dependencies from `symbol_refs` table (no new tables needed). If symbol A in file X references symbol B in file Y, X depends on Y.
 - **Symbols_at tool** — Wraps existing `get_symbols_at_lines` DB method for file:line lookup. Returns all symbols whose line range contains the given line.
 - **Query bodies scope** — `scope: "bodies"` searches within function body text via LIKE on the `body` column. Also supports `limit` parameter to cap result count.
-- **Query/overview limit** — Optional `limit` parameter truncates results. Overview shows "(limited to N, M total)" when truncated.
+- **Query/overview limit** — Optional `limit` parameter truncates results. Overview distributes limit across files breadth-first (each file gets at least 1 symbol), shows "(limited to N, M total)" when truncated.
 - **Context callers_path** — Optional `callers_path` parameter filters callers and callees to a path prefix (e.g. `"src/"` to exclude test callers).
 - **Context related section** — Shows sibling symbols in the same file with matching `impl_type`. Labels as "Related (impl X)" for methods or "Related (same file)" for top-level.
 - **Stats tool** — Aggregates file/symbol counts, kind breakdown, test coverage ratio, most-referenced symbols, and largest files into a compact dashboard.
@@ -101,7 +101,9 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Orphaned tool** — Finds symbols with no callers AND no test coverage (intersection of unused + untested). These are safe to remove.
 - **Graph export tool** — Exports call graphs or file dependency graphs in DOT/Graphviz format. Provide `symbol_name` for call graph or `path` for file graph.
 - **Crate impact tool** — Shows which workspace crates are affected by changing a symbol. Bridges symbol-level impact with crate-level dependencies.
-- **is_test column** — Symbols table has `is_test` column (boolean), set at index time from attributes. Used by `get_related_tests()` for efficient test lookups.
+- **is_test column** — Symbols table has `is_test` column (boolean), set at index time from attributes. Used by `get_related_tests()` for efficient test lookups. `get_related_tests` accepts optional `impl_type` for `Type::method` resolution.
+- **Symbol resolution priority** — `resolve_symbol` tries: (1) `Type::method` qualified lookup, (2) exact name match, (3) FTS/fuzzy search. Exact match prevents noise from partial matches.
+- **Stats confidence filter** — `handle_stats` most-referenced uses `confidence = "high"` to avoid inflated counts from name-only fallback refs. Shows qualified `ImplType::name` format.
 - **LIKE escape** — All path-based LIKE queries use `escape_like()` + `ESCAPE '\\'` clause to handle paths with `%` or `_`.
 - **Qualified caller/callee names** — Context callers/callees show `ImplType::method` format when impl_type is available, preventing ambiguity.
 - **Macro body ref extraction** — `collect_body_refs()` descends into `macro_invocation` token trees to extract potential symbol references.

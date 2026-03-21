@@ -40,12 +40,21 @@ pub(crate) fn resolve_symbol(
     db: &Database,
     name: &str,
 ) -> Result<Vec<StoredSymbol>, Box<dyn std::error::Error>> {
+    // 1. Try Type::method qualified lookup
     if let Some((impl_type, method)) = name.split_once("::") {
         let results = db.search_symbols_by_impl(impl_type, method)?;
         if !results.is_empty() {
             return Ok(results);
         }
     }
+
+    // 2. Try exact name match
+    let exact = db.search_symbols_exact(name)?;
+    if !exact.is_empty() {
+        return Ok(exact);
+    }
+
+    // 3. Fall back to FTS/fuzzy
     Ok(db.search_symbols(name)?)
 }
 

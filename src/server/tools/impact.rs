@@ -16,6 +16,12 @@ pub fn handle_impact(
         ));
     }
 
+    let (base_name, base_impl) = if let Some((it, method)) = symbol_name.split_once("::") {
+        (method, Some(it))
+    } else {
+        (symbol_name, None)
+    };
+
     let depth = max_depth.unwrap_or(5);
     let mut output = String::new();
     let _ = writeln!(output, "## Impact Analysis: {symbol_name}\n");
@@ -37,7 +43,7 @@ pub fn handle_impact(
         }
     }
 
-    let dependents = db.impact_dependents_with_depth(symbol_name, depth)?;
+    let dependents = db.impact_dependents_with_depth(base_name, base_impl, depth)?;
 
     let mut current_depth: i64 = -1;
     let mut depth_buf: Vec<&crate::db::ImpactEntry> = Vec::new();
@@ -68,7 +74,7 @@ pub fn handle_impact(
     }
 
     // Related tests section
-    let tests = db.get_related_tests(symbol_name)?;
+    let tests = db.get_related_tests(base_name, base_impl)?;
     if !tests.is_empty() {
         let _ = writeln!(output, "\n### Related Tests\n");
         for t in &tests {
@@ -583,6 +589,109 @@ mod tests {
         );
         assert!(result.contains("shared"), "should mention shared crate");
         assert!(result.contains("app"), "should mention app crate");
+    }
+
+    #[test]
+    fn test_impact_with_impl_type() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "open".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn open() -> Self".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: Some("Database".into()),
+                },
+                Symbol {
+                    name: "caller_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn caller_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let open_id = db.get_symbol_id("open", "src/lib.rs").unwrap().unwrap();
+        let caller_id = db.get_symbol_id("caller_fn", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(caller_id, open_id, "call", "high").unwrap();
+
+        let result = handle_impact(&db, "Database::open", None, false).unwrap();
+        assert!(
+            result.contains("caller_fn"),
+            "impact should find callers for Type::method syntax, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_impact_related_tests_with_impl_type() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "open".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn open() -> Self".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: Some("Database".into()),
+                },
+                Symbol {
+                    name: "test_open".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "fn test_open()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let open_id = db.get_symbol_id("open", "src/lib.rs").unwrap().unwrap();
+        let test_id = db.get_symbol_id("test_open", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(test_id, open_id, "call", "high").unwrap();
+
+        let result = handle_impact(&db, "Database::open", None, false).unwrap();
+        assert!(
+            result.contains("Related Tests"),
+            "should find related tests for Type::method, got: {result}"
+        );
+        assert!(result.contains("test_open"));
     }
 
     #[test]

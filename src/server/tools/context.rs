@@ -278,7 +278,7 @@ fn render_tested_by(
 ) -> Result<(), Box<dyn std::error::Error>> {
     const MAX_INLINE: usize = 10;
 
-    let tests = db.get_related_tests(&sym.name)?;
+    let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
     if tests.is_empty() {
         return Ok(());
     }
@@ -1103,6 +1103,61 @@ mod tests {
         assert!(
             !result.contains("### Related"),
             "related section should be absent when not requested"
+        );
+    }
+
+    #[test]
+    fn test_context_exact_match_preferred() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "index_repo".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn index_repo()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "open_or_index".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "pub fn open_or_index()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // Only request source section to avoid "Related" siblings
+        let sections: &[&str] = &["source", "callers", "callees"];
+        let result =
+            handle_context(&db, "index_repo", false, None, Some(sections), None)
+                .unwrap();
+        assert!(
+            result.contains("index_repo"),
+            "should find exact match"
+        );
+        assert!(
+            !result.contains("open_or_index"),
+            "should NOT return fuzzy matches when exact match exists"
         );
     }
 }

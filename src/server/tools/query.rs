@@ -15,7 +15,7 @@ pub fn handle_query(
     path: Option<&str>,
     limit: Option<i64>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let scope = scope.unwrap_or("all");
+    let scope = scope.unwrap_or("symbols");
     let mut output = String::new();
 
     match scope {
@@ -854,5 +854,52 @@ mod tests {
             handle_query(&db, "fn_", Some("symbols"), None, None, None, None, Some(3)).unwrap();
         let count = result.matches("**fn_").count();
         assert_eq!(count, 3, "limit=3 should return 3 results, got {count}");
+    }
+
+    #[test]
+    fn test_query_default_scope_is_symbols() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "parse".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn parse()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        let dep_id = db.insert_dependency("serde", "1.0", true, None).unwrap();
+        db.store_doc(dep_id, "docs.rs", "parse and serialize data")
+            .unwrap();
+
+        // Default scope should NOT include docs
+        let result =
+            handle_query(&db, "parse", None, None, None, None, None, None).unwrap();
+        assert!(result.contains("parse"), "should have symbol results");
+        assert!(
+            !result.contains("## Documentation"),
+            "default scope should not include docs, got: {result}"
+        );
+
+        // Explicit "all" scope should include both
+        let result =
+            handle_query(&db, "parse", Some("all"), None, None, None, None, None).unwrap();
+        assert!(result.contains("parse"));
+        assert!(
+            result.contains("## Documentation"),
+            "explicit 'all' scope should include docs"
+        );
     }
 }

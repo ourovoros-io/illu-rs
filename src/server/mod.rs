@@ -74,6 +74,7 @@ impl IlluServer {
 #[derive(Deserialize, JsonSchema)]
 struct QueryParams {
     query: String,
+    /// Search scope: symbols (default), docs, files, all, `doc_comments`, bodies
     scope: Option<String>,
     kind: Option<String>,
     /// Filter by attribute/derive (e.g. "test", "derive(Serialize)")
@@ -331,7 +332,7 @@ fn text_result(text: String) -> CallToolResult {
 impl IlluServer {
     #[tool(
         name = "query",
-        description = "Search the codebase for symbols, documentation, or files. Scope: symbols, docs, files, or all (default). Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results)."
+        description = "Search the codebase for symbols, documentation, or files. Scope: symbols (default), docs, files, all, doc_comments, bodies. Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results)."
     )]
     async fn query(
         &self,

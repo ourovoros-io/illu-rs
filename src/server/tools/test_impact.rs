@@ -19,7 +19,7 @@ pub fn handle_test_impact(
     let mut all_tests = Vec::new();
     for sym in &symbols {
         let qname = super::qualified_name(sym);
-        let tests = db.get_related_tests(&sym.name)?;
+        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
         if !tests.is_empty() {
             let _ = writeln!(output, "### Tests for `{qname}`\n");
             for t in &tests {
