@@ -135,7 +135,7 @@ fn rebuild_refs_for_files(
     let all_crates = db.get_all_crates()?;
     let crate_map: std::collections::HashMap<String, String> = all_crates
         .iter()
-        .map(|c| (c.name.clone(), c.path.clone()))
+        .map(|c| (c.name.replace('-', "_"), c.path.clone()))
         .collect();
 
     let symbol_map = db.build_symbol_id_map()?;
@@ -338,7 +338,7 @@ fn extract_all_symbol_refs(
     let all_crates = db.get_all_crates()?;
     let crate_map: std::collections::HashMap<String, String> = all_crates
         .iter()
-        .map(|c| (c.name.clone(), c.path.clone()))
+        .map(|c| (c.name.replace('-', "_"), c.path.clone()))
         .collect();
 
     let symbol_map = db.build_symbol_id_map()?;
@@ -914,6 +914,41 @@ pub fn use_shared() -> SharedType {
         // Kept symbol still present
         let syms = db.search_symbols("keep").unwrap();
         assert_eq!(syms.len(), 1);
+    }
+
+    #[test]
+    fn test_crate_map_normalizes_hyphens() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname = \"my-crate\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(repo.join("src/lib.rs"), "pub mod status;\n").unwrap();
+        std::fs::write(repo.join("src/status.rs"), "pub fn reset_state() {}\n").unwrap();
+        std::fs::write(
+            repo.join("src/main.rs"),
+            "use my_crate::status::reset_state;\nfn main() { reset_state(); }\n",
+        )
+        .unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: repo.to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        // The ref from main→reset_state should exist with high confidence
+        let callees = db.get_callees("main", "src/main.rs", false).unwrap();
+        let has_ref = callees.iter().any(|c| c.name == "reset_state");
+        assert!(
+            has_ref,
+            "main should have 'reset_state' as a callee (via my_crate:: import), got: {:?}",
+            callees.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
     }
 
     #[test]

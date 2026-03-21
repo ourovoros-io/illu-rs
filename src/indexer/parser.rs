@@ -830,14 +830,22 @@ fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
         return Vec::new();
     };
 
+    // Normalize "." to "" so paths don't start with "./"
+    let prefix = if crate_path == "." {
+        ""
+    } else {
+        crate_path.as_str()
+    };
+    let sep = if prefix.is_empty() { "" } else { "/" };
+
     if segments.len() == 2 {
-        return vec![format!("{crate_path}/src/lib.rs")];
+        return vec![format!("{prefix}{sep}src/lib.rs")];
     }
     let module_segments = &segments[1..segments.len() - 1];
     let joined = module_segments.join("/");
     vec![
-        format!("{crate_path}/src/{joined}.rs"),
-        format!("{crate_path}/src/{joined}/mod.rs"),
+        format!("{prefix}{sep}src/{joined}.rs"),
+        format!("{prefix}{sep}src/{joined}/mod.rs"),
     ]
 }
 
