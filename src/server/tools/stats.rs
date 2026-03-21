@@ -56,7 +56,7 @@ pub fn handle_stats(
         if sym.name == "main" {
             continue;
         }
-        let tests = db.get_related_tests(&sym.name)?;
+        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
         if tests.is_empty() {
             untested += 1;
         }

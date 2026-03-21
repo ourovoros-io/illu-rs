@@ -27,7 +27,7 @@ pub fn handle_orphaned(
     // Further filter to symbols with no test coverage
     let mut orphaned = Vec::new();
     for sym in unused {
-        let tests = db.get_related_tests(&sym.name)?;
+        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
         if tests.is_empty() {
             orphaned.push(sym);
         }

@@ -42,7 +42,7 @@ pub fn handle_crate_impact(
         let _ = writeln!(output, "Could not determine the crate for this symbol.");
     }
 
-    let dependents = db.impact_dependents(&sym.name)?;
+    let dependents = db.impact_dependents(&sym.name, sym.impl_type.as_deref())?;
     if !dependents.is_empty() {
         let mut crate_counts: BTreeMap<String, usize> = BTreeMap::new();
         for dep in &dependents {

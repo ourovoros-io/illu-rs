@@ -1341,7 +1341,7 @@ version = "0.1.0"
         ],
     );
 
-    let deps = db.impact_dependents("SharedType").unwrap();
+    let deps = db.impact_dependents("SharedType", None).unwrap();
     assert!(
         deps.iter().any(|d| d.name == "use_it"),
         "use_it must depend on SharedType via cross-crate ref: {deps:?}"
@@ -1387,7 +1387,7 @@ version = "0.1.0"
         ],
     );
 
-    let deps = db.impact_dependents("Error").unwrap();
+    let deps = db.impact_dependents("Error", None).unwrap();
     let handle_dep = deps.iter().find(|d| d.name == "handle");
     assert!(
         handle_dep.is_some(),
@@ -1473,7 +1473,7 @@ fn refresh_cleans_refs_from_unchanged_caller_to_deleted_target() {
     };
     index_repo(&db, &config).unwrap();
 
-    let deps = db.impact_dependents("helper_target").unwrap();
+    let deps = db.impact_dependents("helper_target", None).unwrap();
     assert!(
         deps.iter().any(|d| d.name == "caller"),
         "caller should depend on helper_target initially"
@@ -1485,7 +1485,7 @@ fn refresh_cleans_refs_from_unchanged_caller_to_deleted_target() {
 
     let syms = db.search_symbols("helper_target").unwrap();
     assert!(syms.is_empty(), "helper_target should be gone: {syms:?}");
-    let deps = db.impact_dependents("helper_target").unwrap();
+    let deps = db.impact_dependents("helper_target", None).unwrap();
     assert!(deps.is_empty(), "stale refs should be cleaned: {deps:?}");
 }
 

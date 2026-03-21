@@ -831,13 +831,18 @@ impl Database {
         Ok(results)
     }
 
-    pub fn impact_dependents(&self, symbol_name: &str) -> SqlResult<Vec<ImpactEntry>> {
-        self.impact_dependents_with_depth(symbol_name, 5)
+    pub fn impact_dependents(
+        &self,
+        symbol_name: &str,
+        impl_type: Option<&str>,
+    ) -> SqlResult<Vec<ImpactEntry>> {
+        self.impact_dependents_with_depth(symbol_name, impl_type, 5)
     }
 
     pub fn impact_dependents_with_depth(
         &self,
         symbol_name: &str,
+        impl_type: Option<&str>,
         max_depth: i64,
     ) -> SqlResult<Vec<ImpactEntry>> {
         let mut stmt = self.conn.prepare(
@@ -845,7 +850,7 @@ impl Database {
                 SELECT s.id, s.name, f.path, 0, ''
                 FROM symbols s
                 JOIN files f ON f.id = s.file_id
-                WHERE s.name = ?1
+                WHERE s.name = ?1 AND (?3 IS NULL OR s.impl_type = ?3)
               UNION
                 SELECT s2.id, s2.name, f2.path, deps.depth + 1,
                        CASE WHEN deps.via = '' THEN deps.name
@@ -863,7 +868,7 @@ impl Database {
             LIMIT 100",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name, max_depth])?;
+        let mut rows = stmt.query(params![symbol_name, max_depth, impl_type])?;
         while let Some(row) = rows.next()? {
             results.push(ImpactEntry {
                 name: row.get(0)?,
@@ -877,13 +882,17 @@ impl Database {
 
     /// Find test functions that directly or transitively call the given symbol.
     /// Walks the call graph upward (who calls me?) filtering for `#[test]` attributes.
-    pub fn get_related_tests(&self, symbol_name: &str) -> SqlResult<Vec<TestEntry>> {
+    pub fn get_related_tests(
+        &self,
+        symbol_name: &str,
+        impl_type: Option<&str>,
+    ) -> SqlResult<Vec<TestEntry>> {
         let mut stmt = self.conn.prepare_cached(
             "WITH RECURSIVE callers(id, name, file_path, line_start, depth, is_test) AS (
                 SELECT s.id, s.name, f.path, s.line_start, 0, s.is_test
                 FROM symbols s
                 JOIN files f ON f.id = s.file_id
-                WHERE s.name = ?1
+                WHERE s.name = ?1 AND (?2 IS NULL OR s.impl_type = ?2)
               UNION
                 SELECT s2.id, s2.name, f2.path, s2.line_start, callers.depth + 1, s2.is_test
                 FROM callers
@@ -899,7 +908,7 @@ impl Database {
             ORDER BY file_path, name",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name])?;
+        let mut rows = stmt.query(params![symbol_name, impl_type])?;
         while let Some(row) = rows.next()? {
             results.push(TestEntry {
                 name: row.get(0)?,

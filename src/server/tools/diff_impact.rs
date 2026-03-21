@@ -162,7 +162,7 @@ pub fn handle_diff_impact(
     // Run impact analysis for each changed symbol
     let mut impact_sections = Vec::new();
     for (_file, sym) in &changed_symbols {
-        let dependents = db.impact_dependents(&sym.name)?;
+        let dependents = db.impact_dependents(&sym.name, sym.impl_type.as_deref())?;
         if !dependents.is_empty() {
             impact_sections.push((sym.name.clone(), dependents));
         }
@@ -196,7 +196,7 @@ fn render_test_coverage(
     let mut seen_tests = std::collections::HashSet::new();
     let mut untested_symbols = Vec::new();
     for (_file, sym) in changed_symbols {
-        if let Ok(tests) = db.get_related_tests(&sym.name) {
+        if let Ok(tests) = db.get_related_tests(&sym.name, sym.impl_type.as_deref()) {
             if tests.is_empty() {
                 let is_test = sym
                     .attributes
@@ -378,7 +378,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         assert_eq!(symbols[0].name, "target_fn");
 
         // Verify impact shows caller_fn as dependent
-        let dependents = db.impact_dependents("target_fn").unwrap();
+        let dependents = db.impact_dependents("target_fn", None).unwrap();
         assert_eq!(dependents.len(), 1);
         assert_eq!(dependents[0].name, "caller_fn");
     }
@@ -435,7 +435,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             .unwrap();
 
         // Verify get_related_tests finds the test
-        let tests = db.get_related_tests("target_fn").unwrap();
+        let tests = db.get_related_tests("target_fn", None).unwrap();
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_target");
     }

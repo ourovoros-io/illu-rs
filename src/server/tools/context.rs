@@ -278,7 +278,7 @@ fn render_tested_by(
 ) -> Result<(), Box<dyn std::error::Error>> {
     const MAX_INLINE: usize = 10;
 
-    let tests = db.get_related_tests(&sym.name)?;
+    let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
     if tests.is_empty() {
         return Ok(());
     }
