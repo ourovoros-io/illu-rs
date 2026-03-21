@@ -425,10 +425,7 @@ fn install_statusline(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
         "command": script_path.to_string_lossy()
     });
     std::fs::write(&claude_settings, serde_json::to_string_pretty(&config)?)?;
-    println!(
-        "  statusline installed at {}",
-        script_path.display()
-    );
+    println!("  statusline installed at {}", script_path.display());
 
     Ok(())
 }
