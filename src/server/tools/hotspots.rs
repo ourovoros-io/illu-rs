@@ -44,7 +44,7 @@ pub fn handle_hotspots(
     }
 
     // Largest functions (by line span) — targeted SQL query
-    let largest = db.get_largest_functions(max, prefix)?;
+    let largest = db.get_largest_functions(max, prefix, exclude_tests)?;
     if !largest.is_empty() {
         let _ = writeln!(output, "### Largest Functions (by line count)\n");
         for (i, func) in largest.iter().enumerate() {
@@ -188,6 +188,55 @@ mod tests {
         let result = handle_hotspots(&db, Some("src/server/"), None, false).unwrap();
         assert!(result.contains("server_fn"));
         assert!(!result.contains("lib_fn"));
+    }
+
+    #[test]
+    fn test_hotspots_exclude_tests_largest_functions() {
+        let db = Database::open_in_memory().unwrap();
+        let f = db.insert_file("src/lib.rs", "h1").unwrap();
+
+        store_symbols(
+            &db,
+            f,
+            &[
+                make_fn("prod_fn", "src/lib.rs", 1, 100),
+                Symbol {
+                    name: "test_big".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 110,
+                    line_end: 300,
+                    signature: "fn test_big()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // Without exclude: test_big (191 lines) appears first
+        let result = handle_hotspots(&db, None, None, false).unwrap();
+        let largest = result.find("### Largest Functions").unwrap();
+        assert!(
+            result[largest..].contains("test_big"),
+            "test function should appear without exclude: {result}"
+        );
+
+        // With exclude: only prod_fn appears
+        let result = handle_hotspots(&db, None, None, true).unwrap();
+        let largest = result.find("### Largest Functions").unwrap();
+        assert!(
+            !result[largest..].contains("test_big"),
+            "test function should be excluded: {result}"
+        );
+        assert!(
+            result[largest..].contains("prod_fn"),
+            "production function should still appear: {result}"
+        );
     }
 
     #[test]

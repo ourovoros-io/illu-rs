@@ -139,6 +139,9 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Hotspots/stats exclude_tests** — Both accept `exclude_tests: bool`. When true, `get_most_referenced_symbols_filtered` excludes refs where the source symbol is a test function (`ss.is_test = 0`), showing only production-code reference counts.
 - **Impact summary thresholds** — `SUMMARY_DEPTH=2`, `SUMMARY_THRESHOLD=5` (was 3/10). Depths >= 2 with > 5 entries are summarized by file instead of listed individually.
 - **Docs case-insensitive LIKE** — `search_docs_content` uses `lower(d.content) LIKE lower(query)` for case-insensitive topic matching in the LIKE fallback path.
+- **Diff impact compact** — `handle_diff_impact` accepts `compact: bool`. When true, skips downstream impact analysis but still shows untested changes and related tests. Sweet spot between `changes_only` (too minimal) and full mode (too verbose for large diffs).
+- **Hotspots exclude_tests on largest** — `get_largest_functions` accepts `exclude_tests: bool`. When true, filters `is_test = 0` so test functions don't dominate the "Largest Functions" section.
+- **References exclude_tests** — `handle_references` accepts `exclude_tests: bool`. When true, test callers are excluded from the call sites section entirely (not just separated). Summary count reflects production callers only.
 
 ## Lint Configuration
 
