@@ -89,13 +89,7 @@ pub fn handle_impact(
         .collect();
     if !tests.is_empty() {
         let _ = writeln!(output, "\n### Related Tests\n");
-        for t in &tests {
-            let _ = writeln!(
-                output,
-                "- **{}** ({}:{})",
-                t.name, t.file_path, t.line_start
-            );
-        }
+        super::render_test_list(&mut output, &tests);
     }
     if !all_tests.is_empty() {
         let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
