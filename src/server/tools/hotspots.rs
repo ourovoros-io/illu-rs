@@ -13,7 +13,7 @@ pub fn handle_hotspots(
     let _ = writeln!(output, "## Hotspots\n");
 
     // Most referenced (fragile to change)
-    let most_referenced = db.get_most_referenced_symbols(max, prefix)?;
+    let most_referenced = db.get_most_referenced_symbols(max, prefix, Some("high"))?;
     if !most_referenced.is_empty() {
         let _ = writeln!(output, "### Most Referenced (fragile to change)\n");
         for (i, (name, file, count)) in most_referenced.iter().enumerate() {
@@ -27,7 +27,7 @@ pub fn handle_hotspots(
     }
 
     // Most referencing (high complexity)
-    let most_referencing = db.get_most_referencing_symbols(max, prefix)?;
+    let most_referencing = db.get_most_referencing_symbols(max, prefix, Some("high"))?;
     if !most_referencing.is_empty() {
         let _ = writeln!(output, "### Most Referencing (high complexity)\n");
         for (i, (name, file, count)) in most_referencing.iter().enumerate() {

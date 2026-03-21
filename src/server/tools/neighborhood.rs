@@ -64,8 +64,8 @@ fn bfs_collect(
             continue;
         }
         let neighbors = match direction {
-            Direction::Down => db.get_callees_by_name(&current)?,
-            Direction::Up => db.get_callers_by_name(&current)?,
+            Direction::Down => db.get_callees_by_name(&current, Some("high"))?,
+            Direction::Up => db.get_callers_by_name(&current, Some("high"))?,
         };
         for (neighbor, _) in neighbors {
             if !visited.contains_key(&neighbor) {
@@ -165,9 +165,9 @@ impl<'a> TreeRenderer<'a> {
         }
 
         let children = if self.use_callers {
-            self.db.get_callers_by_name(name)?
+            self.db.get_callers_by_name(name, Some("high"))?
         } else {
-            self.db.get_callees_by_name(name)?
+            self.db.get_callees_by_name(name, Some("high"))?
         };
 
         let child_prefix = if is_root {

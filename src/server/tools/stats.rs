@@ -87,7 +87,7 @@ pub fn handle_stats(
     let _ = writeln!(output);
 
     // Most referenced
-    let most_ref = db.get_most_referenced_symbols(5, prefix)?;
+    let most_ref = db.get_most_referenced_symbols(5, prefix, None)?;
     if !most_ref.is_empty() {
         let _ = writeln!(output, "### Most Referenced\n");
         for (name, file, count) in &most_ref {
