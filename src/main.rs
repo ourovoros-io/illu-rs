@@ -382,6 +382,57 @@ fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
+const STATUSLINE_SH: &str = include_str!("../assets/statusline.sh");
+
+#[expect(clippy::print_stdout, reason = "CLI output")]
+fn install_statusline(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Write the script to ~/.illu/statusline.sh
+    let illu_dir = home.join(".illu");
+    std::fs::create_dir_all(&illu_dir)?;
+    let script_path = illu_dir.join("statusline.sh");
+    std::fs::write(&script_path, STATUSLINE_SH)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    // Check if Claude settings already has a statusLine entry
+    let claude_settings = home.join(".claude/settings.json");
+    let config: serde_json::Value = std::fs::read_to_string(&claude_settings)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    if config.get("statusLine").is_some() {
+        println!(
+            "  statusLine already configured in {} — skipping",
+            claude_settings.display()
+        );
+        println!("  To use illu's statusline, set in ~/.claude/settings.json:");
+        println!(
+            "    \"statusLine\": {{ \"type\": \"command\", \"command\": \"{}\" }}",
+            script_path.display()
+        );
+        return Ok(());
+    }
+
+    // Write the statusLine entry
+    let mut config = config;
+    config["statusLine"] = serde_json::json!({
+        "type": "command",
+        "command": script_path.to_string_lossy()
+    });
+    std::fs::write(&claude_settings, serde_json::to_string_pretty(&config)?)?;
+    println!(
+        "  statusline installed at {}",
+        script_path.display()
+    );
+
+    Ok(())
+}
+
 fn ensure_global_gitignore(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let gitignore_path = home.join(".config/git/ignore");
     if let Some(parent) = gitignore_path.parent() {
@@ -433,6 +484,8 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
         &illu_agent_section("@illu", "mcp_illu_"),
     )?;
     println!("  updated {}", home.join(".gemini/GEMINI.md").display());
+
+    install_statusline(&home)?;
 
     ensure_global_gitignore(&home)?;
 
