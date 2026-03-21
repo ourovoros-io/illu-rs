@@ -43,43 +43,53 @@ pub fn handle_callpath(
     }
 }
 
+/// BFS node: `(symbol_name, file_path)` to disambiguate symbols with the same name.
+type BfsNode = (String, String);
+
 fn handle_shortest_path(
     db: &Database,
     from: &str,
     to: &str,
-    from_name: &str,
+    _from_name: &str,
     to_name: &str,
     max_depth: usize,
     exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut parent: HashMap<String, String> = HashMap::new();
-    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
+    let mut visited: HashSet<BfsNode> = HashSet::new();
+    let mut parent: HashMap<BfsNode, BfsNode> = HashMap::new();
+    let mut queue: VecDeque<(BfsNode, usize)> = VecDeque::new();
 
-    visited.insert(from_name.to_string());
-    queue.push_back((from_name.to_string(), 0));
+    // Seed BFS with all definitions of the source symbol
+    let from_syms = super::resolve_symbol(db, from)?;
+    for sym in &from_syms {
+        let node = (sym.name.clone(), sym.file_path.clone());
+        visited.insert(node.clone());
+        queue.push_back((node, 0));
+    }
 
-    let mut found = false;
+    let mut found_node: Option<BfsNode> = None;
     while let Some((current, depth)) = queue.pop_front() {
         if depth >= max_depth {
             continue;
         }
 
-        let callees = db.get_callees_by_name(&current, None, exclude_tests)?;
-        for (callee_name, _file) in callees {
-            if visited.contains(&callee_name) {
+        // Use file-specific callee lookup to avoid ambiguity
+        let callees = db.get_callees(&current.0, &current.1, exclude_tests)?;
+        for callee in callees {
+            let node = (callee.name.clone(), callee.file_path.clone());
+            if visited.contains(&node) {
                 continue;
             }
-            visited.insert(callee_name.clone());
-            parent.insert(callee_name.clone(), current.clone());
+            visited.insert(node.clone());
+            parent.insert(node.clone(), current.clone());
 
-            if callee_name == to_name {
-                found = true;
+            if callee.name == to_name {
+                found_node = Some(node);
                 break;
             }
-            queue.push_back((callee_name, depth + 1));
+            queue.push_back((node, depth + 1));
         }
-        if found {
+        if found_node.is_some() {
             break;
         }
     }
@@ -87,17 +97,17 @@ fn handle_shortest_path(
     let mut output = String::new();
     let _ = writeln!(output, "## Call Path: {from} → {to}\n");
 
-    if !found {
+    let Some(target_node) = found_node else {
         let _ = writeln!(
             output,
             "No call path found from `{from}` to `{to}` \
              within depth {max_depth}."
         );
         return Ok(output);
-    }
+    };
 
-    let mut path = vec![to_name.to_string()];
-    let mut current = to_name.to_string();
+    let mut path = vec![target_node.clone()];
+    let mut current = target_node;
     while let Some(prev) = parent.get(&current) {
         path.push(prev.clone());
         current = prev.clone();
@@ -105,16 +115,21 @@ fn handle_shortest_path(
     path.reverse();
 
     let _ = writeln!(output, "**Path ({} hops):**\n", path.len() - 1);
-    let _ = writeln!(output, "`{}`", path.join(" → "));
+    let names: Vec<&str> = path.iter().map(|(name, _)| name.as_str()).collect();
+    let _ = writeln!(output, "`{}`", names.join(" → "));
 
     let _ = writeln!(output, "\n**Locations:**\n");
-    for name in &path {
+    for (name, file) in &path {
         let syms = super::resolve_symbol(db, name)?;
-        if let Some(sym) = syms.first() {
+        let sym = syms
+            .iter()
+            .find(|s| s.file_path == *file)
+            .or_else(|| syms.first());
+        if let Some(s) = sym {
             let _ = writeln!(
                 output,
                 "- **{name}** ({}:{}-{})",
-                sym.file_path, sym.line_start, sym.line_end
+                s.file_path, s.line_start, s.line_end
             );
         }
     }
@@ -132,8 +147,8 @@ fn find_all_paths(
     db: &Database,
     target: &str,
     cfg: &DfsConfig,
-    current_path: &mut Vec<String>,
-    visited: &mut HashSet<String>,
+    current_path: &mut Vec<BfsNode>,
+    visited: &mut HashSet<BfsNode>,
     results: &mut Vec<Vec<String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if results.len() >= cfg.max_paths || current_path.len() > cfg.max_depth {
@@ -145,25 +160,26 @@ fn find_all_paths(
         .ok_or("current_path must not be empty")?
         .clone();
 
-    let callees = db.get_callees_by_name(&current, None, cfg.exclude_tests)?;
-    for (callee_name, _file) in callees {
+    let callees = db.get_callees(&current.0, &current.1, cfg.exclude_tests)?;
+    for callee in callees {
         if results.len() >= cfg.max_paths {
             break;
         }
-        if callee_name == target {
-            let mut path = current_path.clone();
-            path.push(callee_name);
+        let node = (callee.name.clone(), callee.file_path.clone());
+        if callee.name == target {
+            let mut path: Vec<String> = current_path.iter().map(|(name, _)| name.clone()).collect();
+            path.push(callee.name);
             results.push(path);
             continue;
         }
-        if visited.contains(&callee_name) {
+        if visited.contains(&node) {
             continue;
         }
-        visited.insert(callee_name.clone());
-        current_path.push(callee_name.clone());
+        visited.insert(node.clone());
+        current_path.push(node.clone());
         find_all_paths(db, target, cfg, current_path, visited, results)?;
         current_path.pop();
-        visited.remove(&callee_name);
+        visited.remove(&node);
     }
 
     Ok(())
@@ -173,23 +189,27 @@ fn handle_all_paths(
     db: &Database,
     from: &str,
     to: &str,
-    from_name: &str,
+    _from_name: &str,
     to_name: &str,
     cfg: &DfsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let mut current_path = vec![from_name.to_string()];
-    let mut visited: HashSet<String> = HashSet::new();
-    visited.insert(from_name.to_string());
+    let from_syms = super::resolve_symbol(db, from)?;
     let mut results: Vec<Vec<String>> = Vec::new();
 
-    find_all_paths(
-        db,
-        to_name,
-        cfg,
-        &mut current_path,
-        &mut visited,
-        &mut results,
-    )?;
+    for sym in &from_syms {
+        let start_node = (sym.name.clone(), sym.file_path.clone());
+        let mut current_path = vec![start_node.clone()];
+        let mut visited: HashSet<BfsNode> = HashSet::new();
+        visited.insert(start_node);
+        find_all_paths(
+            db,
+            to_name,
+            cfg,
+            &mut current_path,
+            &mut visited,
+            &mut results,
+        )?;
+    }
 
     let mut output = String::new();
     let _ = writeln!(output, "## All Call Paths: {from} → {to}\n");

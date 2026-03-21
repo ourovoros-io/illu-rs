@@ -25,8 +25,23 @@ pub fn handle_neighborhood(
 
     let base = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);
 
-    // Tree format only works for single-direction; fall back to list for "both"
-    if fmt == "tree" && dir != "both" {
+    if fmt == "tree" {
+        if dir == "both" {
+            let mut output = String::new();
+            let _ = writeln!(output, "## Neighborhood: {symbol_name}\n");
+            let _ = writeln!(output, "### Callers (upstream)\n");
+            let up = render_tree_output(db, symbol_name, base, "up", max_depth, exclude_tests)?;
+            // Skip the header from render_tree_output
+            if let Some(body) = up.split_once("\n\n") {
+                output.push_str(body.1);
+            }
+            let _ = writeln!(output, "### Callees (downstream)\n");
+            let down = render_tree_output(db, symbol_name, base, "down", max_depth, exclude_tests)?;
+            if let Some(body) = down.split_once("\n\n") {
+                output.push_str(body.1);
+            }
+            return Ok(output);
+        }
         return render_tree_output(db, symbol_name, base, dir, max_depth, exclude_tests);
     }
 
@@ -71,24 +86,45 @@ fn bfs_collect(
     exclude_tests: bool,
 ) -> Result<BTreeMap<String, BfsEntry>, Box<dyn std::error::Error>> {
     let mut visited: BTreeMap<String, BfsEntry> = BTreeMap::new();
-    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
+    // Track (name, file) for file-qualified BFS to avoid name collisions
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut queue: VecDeque<(String, String, usize)> = VecDeque::new();
+
+    // Seed with all definitions of the base symbol
+    let syms = super::resolve_symbol(db, base)?;
     visited.insert(base.to_string(), (0, String::new()));
-    queue.push_back((base.to_string(), 0));
-    while let Some((current, d)) = queue.pop_front() {
+    for sym in &syms {
+        seen.insert((sym.name.clone(), sym.file_path.clone()));
+        queue.push_back((sym.name.clone(), sym.file_path.clone(), 0));
+    }
+
+    while let Some((current_name, current_file, d)) = queue.pop_front() {
         if d >= max_depth {
             continue;
         }
-        let neighbors = match direction {
-            Direction::Down => db.get_callees_by_name(&current, None, exclude_tests)?,
-            Direction::Up => db.get_callers_by_name(&current, None, exclude_tests)?,
+        let neighbors: Vec<(String, String)> = match direction {
+            Direction::Down => {
+                let callees = db.get_callees(&current_name, &current_file, exclude_tests)?;
+                callees
+                    .into_iter()
+                    .filter(|c| c.kind != "const" && c.kind != "static")
+                    .map(|c| (c.name, c.file_path))
+                    .collect()
+            }
+            Direction::Up => db.get_callers_by_name(&current_name, Some("high"), exclude_tests)?,
         };
         for (neighbor, file_path) in neighbors {
-            if !visited.contains_key(&neighbor)
-                && !super::NOISY_CALLEES.contains(&neighbor.as_str())
-            {
-                visited.insert(neighbor.clone(), (d + 1, file_path));
-                queue.push_back((neighbor, d + 1));
+            if super::NOISY_CALLEES.contains(&neighbor.as_str()) {
+                continue;
             }
+            let key = (neighbor.clone(), file_path.clone());
+            if !seen.insert(key) {
+                continue;
+            }
+            if !visited.contains_key(&neighbor) {
+                visited.insert(neighbor.clone(), (d + 1, file_path.clone()));
+            }
+            queue.push_back((neighbor, file_path, d + 1));
         }
     }
     Ok(visited)
@@ -185,7 +221,7 @@ impl<'a> TreeRenderer<'a> {
 
         let children = if self.use_callers {
             self.db
-                .get_callers_by_name(name, None, self.exclude_tests)?
+                .get_callers_by_name(name, Some("high"), self.exclude_tests)?
         } else {
             self.db
                 .get_callees_by_name(name, None, self.exclude_tests)?

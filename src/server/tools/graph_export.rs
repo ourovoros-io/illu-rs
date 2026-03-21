@@ -6,9 +6,10 @@ pub fn handle_graph_export(
     symbol_name: Option<&str>,
     path: Option<&str>,
     depth: Option<i64>,
+    direction: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     if let Some(sym) = symbol_name {
-        return export_symbol_graph(db, sym, depth.unwrap_or(2));
+        return export_symbol_graph(db, sym, depth.unwrap_or(2), direction.unwrap_or("both"));
     }
     if let Some(p) = path {
         return export_file_graph(db, p);
@@ -23,6 +24,7 @@ fn export_symbol_graph(
     db: &Database,
     symbol_name: &str,
     max_depth: i64,
+    direction: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
@@ -30,24 +32,48 @@ fn export_symbol_graph(
     }
 
     let base_name = &symbols[0].name;
+    let base_file = &symbols[0].file_path;
     let mut output = String::new();
     let _ = writeln!(output, "digraph call_graph {{");
     let _ = writeln!(output, "  rankdir=LR;");
     let _ = writeln!(output, "  node [shape=box, fontname=\"monospace\"];");
 
-    let mut seen = std::collections::HashSet::new();
-    let mut queue = vec![(base_name.clone(), 0i64)];
-    seen.insert(base_name.clone());
+    let include_down = direction == "both" || direction == "down";
+    let include_up = direction == "both" || direction == "up";
 
-    while let Some((name, depth)) = queue.pop() {
-        if depth >= max_depth {
-            continue;
+    let mut seen = std::collections::HashSet::new();
+    seen.insert((base_name.clone(), base_file.clone()));
+
+    if include_down {
+        let mut queue = vec![(base_name.clone(), base_file.clone(), 0i64)];
+        while let Some((name, file, depth)) = queue.pop() {
+            if depth >= max_depth {
+                continue;
+            }
+            let callees = db.get_callees(&name, &file, false)?;
+            for c in &callees {
+                let _ = writeln!(output, "  \"{name}\" -> \"{}\";", c.name);
+                if seen.insert((c.name.clone(), c.file_path.clone())) {
+                    queue.push((c.name.clone(), c.file_path.clone(), depth + 1));
+                }
+            }
         }
-        let callees = db.get_callees_by_name(&name, Some("high"), false)?;
-        for (callee, _path) in &callees {
-            let _ = writeln!(output, "  \"{name}\" -> \"{callee}\";");
-            if seen.insert(callee.clone()) {
-                queue.push((callee.clone(), depth + 1));
+    }
+
+    if include_up {
+        let mut queue = vec![(base_name.clone(), 0i64)];
+        let mut seen_up = std::collections::HashSet::new();
+        seen_up.insert(base_name.clone());
+        while let Some((name, depth)) = queue.pop() {
+            if depth >= max_depth {
+                continue;
+            }
+            let callers = db.get_callers_by_name(&name, Some("high"), false)?;
+            for (caller, _path) in &callers {
+                let _ = writeln!(output, "  \"{caller}\" -> \"{name}\";");
+                if seen_up.insert(caller.clone()) {
+                    queue.push((caller.clone(), depth + 1));
+                }
             }
         }
     }
@@ -97,21 +123,21 @@ mod tests {
     #[test]
     fn test_graph_export_needs_params() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_graph_export(&db, None, None, None).unwrap();
+        let result = handle_graph_export(&db, None, None, None, None).unwrap();
         assert!(result.contains("Provide either"));
     }
 
     #[test]
     fn test_graph_export_symbol_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_graph_export(&db, Some("nonexistent"), None, None).unwrap();
+        let result = handle_graph_export(&db, Some("nonexistent"), None, None, None).unwrap();
         assert!(result.contains("not found"));
     }
 
     #[test]
     fn test_graph_export_file_empty() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_graph_export(&db, None, Some("src/"), None).unwrap();
+        let result = handle_graph_export(&db, None, Some("src/"), None, None).unwrap();
         assert!(result.contains("digraph"));
         assert!(result.contains("0 files"));
     }

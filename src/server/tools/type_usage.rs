@@ -1,4 +1,5 @@
 use crate::db::{Database, StoredSymbol};
+use crate::indexer::parser::SymbolKind;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
@@ -10,8 +11,12 @@ pub fn handle_type_usage(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut sig_matches = db.search_symbols_by_signature(type_name)?;
 
-    // Remove the type's own definition
-    sig_matches.retain(|s| s.name != type_name);
+    // Remove the type's own definition, use imports, and substring false positives
+    sig_matches.retain(|s| {
+        s.name != type_name
+            && s.kind != SymbolKind::Use
+            && contains_whole_word(&s.signature, type_name)
+    });
 
     // Apply optional path filter
     if let Some(p) = path {
@@ -37,7 +42,12 @@ pub fn handle_type_usage(
     // Find structs whose field list (details) mentions the type
     let prefix = path.unwrap_or("");
     let mut field_matches = db.search_symbols_by_details(type_name, prefix)?;
-    field_matches.retain(|s| s.name != type_name);
+    field_matches.retain(|s| {
+        s.name != type_name
+            && s.details
+                .as_deref()
+                .is_some_and(|d| contains_whole_word(d, type_name))
+    });
 
     let mut output = String::new();
     let _ = writeln!(output, "## Type Usage: `{type_name}`\n");
@@ -57,6 +67,27 @@ pub fn handle_type_usage(
     }
 
     Ok(output)
+}
+
+/// Check if `text` contains `word` as a whole word (not a substring of a longer identifier).
+#[must_use]
+pub fn contains_whole_word(text: &str, word: &str) -> bool {
+    let mut start = 0;
+    while let Some(pos) = text[start..].find(word) {
+        let abs_pos = start + pos;
+        let before_ok = abs_pos == 0
+            || !text.as_bytes()[abs_pos - 1].is_ascii_alphanumeric()
+                && text.as_bytes()[abs_pos - 1] != b'_';
+        let after_pos = abs_pos + word.len();
+        let after_ok = after_pos >= text.len()
+            || !text.as_bytes()[after_pos].is_ascii_alphanumeric()
+                && text.as_bytes()[after_pos] != b'_';
+        if before_ok && after_ok {
+            return true;
+        }
+        start = abs_pos + 1;
+    }
+    false
 }
 
 fn render_compact(

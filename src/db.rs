@@ -294,9 +294,9 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_symbols_file_id
                 ON symbols(file_id);
             CREATE INDEX IF NOT EXISTS idx_symbol_refs_target
-                ON symbol_refs(target_symbol_id);
+                ON symbol_refs(target_symbol_id, confidence);
             CREATE INDEX IF NOT EXISTS idx_symbol_refs_source
-                ON symbol_refs(source_symbol_id);
+                ON symbol_refs(source_symbol_id, confidence);
             CREATE INDEX IF NOT EXISTS idx_trait_impls_type
                 ON trait_impls(type_name);
             CREATE INDEX IF NOT EXISTS idx_trait_impls_trait
@@ -894,7 +894,7 @@ impl Database {
                 JOIN symbol_refs sr ON sr.target_symbol_id = deps.id
                 JOIN symbols s2 ON s2.id = sr.source_symbol_id
                 JOIN files f2 ON f2.id = s2.file_id
-                WHERE deps.depth < ?2
+                WHERE deps.depth < ?2 AND sr.confidence = 'high'
             )
             SELECT DISTINCT name, file_path, depth, via, is_test FROM deps
             WHERE depth > 0
@@ -934,7 +934,7 @@ impl Database {
                 JOIN symbol_refs sr ON sr.target_symbol_id = callers.id
                 JOIN symbols s2 ON s2.id = sr.source_symbol_id
                 JOIN files f2 ON f2.id = s2.file_id
-                WHERE callers.depth < 5
+                WHERE callers.depth < 5 AND sr.confidence = 'high'
             )
             SELECT DISTINCT name, file_path, line_start
             FROM callers
@@ -1516,7 +1516,7 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              JOIN files tf ON tf.id = ts.file_id \
-             WHERE ts.name = ?1 AND tf.path = ?2 AND ss.is_test = 0"
+             WHERE ts.name = ?1 AND tf.path = ?2 AND sr.confidence = 'high' AND ss.is_test = 0"
         } else {
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
              sr.ref_line, ss.is_test \
@@ -1525,7 +1525,7 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              JOIN files tf ON tf.id = ts.file_id \
-             WHERE ts.name = ?1 AND tf.path = ?2"
+             WHERE ts.name = ?1 AND tf.path = ?2 AND sr.confidence = 'high'"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
@@ -1723,6 +1723,12 @@ impl Database {
              WHERE sr.id IS NULL \
                AND f.path LIKE ?1 ESCAPE '\\' \
                AND s.kind NOT IN ('use', 'mod', 'impl') \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM symbol_refs sr2 \
+                   JOIN symbols s2 ON s2.id = sr2.target_symbol_id \
+                   WHERE s2.name = s.name \
+                     AND (s.impl_type IS NULL OR s2.impl_type = s.impl_type) \
+               ) \
              ORDER BY f.path, s.line_start"
         } else {
             "SELECT s.name, s.kind, s.visibility, f.path, \
@@ -1736,6 +1742,12 @@ impl Database {
                AND f.path LIKE ?1 ESCAPE '\\' \
                AND s.kind NOT IN ('use', 'mod', 'impl') \
                AND s.visibility IN ('public', 'pub(crate)') \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM symbol_refs sr2 \
+                   JOIN symbols s2 ON s2.id = sr2.target_symbol_id \
+                   WHERE s2.name = s.name \
+                     AND (s.impl_type IS NULL OR s2.impl_type = s.impl_type) \
+               ) \
              ORDER BY f.path, s.line_start"
         };
         let mut stmt = self.conn.prepare(sql)?;
@@ -1970,7 +1982,7 @@ impl Database {
                      JOIN symbols s ON sr.source_symbol_id = s.id
                      JOIN symbols t ON sr.target_symbol_id = t.id
                      JOIN files f ON s.file_id = f.id
-                     WHERE t.name = ?1 AND t.impl_type = ?2
+                     WHERE t.name = ?1 AND t.impl_type = ?2 AND sr.confidence = 'high'
                      ORDER BY f.path, s.line_start LIMIT 50",
                     vec![Box::new(target_name.to_string()), Box::new(it.to_string())],
                 )
@@ -1981,7 +1993,7 @@ impl Database {
                      JOIN symbols s ON sr.source_symbol_id = s.id
                      JOIN symbols t ON sr.target_symbol_id = t.id
                      JOIN files f ON s.file_id = f.id
-                     WHERE t.name = ?1
+                     WHERE t.name = ?1 AND sr.confidence = 'high'
                      ORDER BY f.path, s.line_start LIMIT 50",
                     vec![Box::new(target_name.to_string())],
                 )
@@ -1999,27 +2011,51 @@ impl Database {
     }
 
     /// Check if a symbol with the given name exists.
+    /// Supports `Type::method` syntax (e.g., `HcfsClient::upload`).
     pub fn symbol_exists(&self, name: &str) -> SqlResult<bool> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM symbols WHERE name = ?1",
-            [name],
-            |r| r.get(0),
-        )?;
+        let count: i64 = if let Some((impl_type, method)) = name.split_once("::") {
+            self.conn.query_row(
+                "SELECT COUNT(*) FROM symbols WHERE name = ?1 AND impl_type = ?2",
+                rusqlite::params![method, impl_type],
+                |r| r.get(0),
+            )?
+        } else {
+            self.conn.query_row(
+                "SELECT COUNT(*) FROM symbols WHERE name = ?1",
+                [name],
+                |r| r.get(0),
+            )?
+        };
         Ok(count > 0)
     }
 
     /// Get direct call-type callees of a symbol by name.
+    /// Supports `Type::method` syntax (e.g., `HcfsClient::upload`).
     pub fn get_direct_callees(&self, symbol_name: &str) -> SqlResult<Vec<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT t.name
-             FROM symbol_refs sr
-             JOIN symbols s ON sr.source_symbol_id = s.id
-             JOIN symbols t ON sr.target_symbol_id = t.id
-             WHERE s.name = ?1 AND sr.kind = 'call'
-             LIMIT 100",
-        )?;
-        let rows = stmt.query_map([symbol_name], |row| row.get(0))?;
-        Ok(rows.filter_map(std::result::Result::ok).collect())
+        if let Some((impl_type, method)) = symbol_name.split_once("::") {
+            let mut stmt = self.conn.prepare(
+                "SELECT DISTINCT t.name
+                 FROM symbol_refs sr
+                 JOIN symbols s ON sr.source_symbol_id = s.id
+                 JOIN symbols t ON sr.target_symbol_id = t.id
+                 WHERE s.name = ?1 AND s.impl_type = ?2 \
+                 AND sr.kind = 'call' AND sr.confidence = 'high'
+                 LIMIT 100",
+            )?;
+            let rows = stmt.query_map(params![method, impl_type], |row| row.get(0))?;
+            Ok(rows.filter_map(std::result::Result::ok).collect())
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT DISTINCT t.name
+                 FROM symbol_refs sr
+                 JOIN symbols s ON sr.source_symbol_id = s.id
+                 JOIN symbols t ON sr.target_symbol_id = t.id
+                 WHERE s.name = ?1 AND sr.kind = 'call' AND sr.confidence = 'high'
+                 LIMIT 100",
+            )?;
+            let rows = stmt.query_map([symbol_name], |row| row.get(0))?;
+            Ok(rows.filter_map(std::result::Result::ok).collect())
+        }
     }
 }
 

@@ -20,6 +20,11 @@ pub fn handle_cross_deps(registry: &Registry) -> Result<String, Box<dyn std::err
     render_path_deps(&mut out, registry, &path_deps);
     render_shared_deps(&mut out, &repo_deps);
 
+    // If nothing was rendered after the header, add a message
+    if out.trim() == "## Cross-Repo Dependencies" {
+        out.push_str("No cross-repo dependencies found (no shared crates or path deps).\n");
+    }
+
     Ok(out)
 }
 
@@ -29,32 +34,49 @@ fn collect_repo_deps(
     let mut deps = HashSet::new();
     let mut path_deps = Vec::new();
 
-    let cargo_toml = repo.path.join("Cargo.toml");
-    let Ok(content) = std::fs::read_to_string(&cargo_toml) else {
-        return (deps, path_deps);
-    };
-    let Ok(parsed) = content.parse::<toml::Table>() else {
-        return (deps, path_deps);
-    };
+    // Collect Cargo.toml files to scan: root + workspace members
+    let mut toml_dirs = vec![repo.path.clone()];
+    let root_toml = repo.path.join("Cargo.toml");
+    if let Ok(content) = std::fs::read_to_string(&root_toml)
+        && let Ok(parsed) = content.parse::<toml::Table>()
+        && let Some(ws) = parsed.get("workspace").and_then(|v| v.as_table())
+        && let Some(members) = ws.get("members").and_then(|v| v.as_array())
+    {
+        for m in members {
+            if let Some(s) = m.as_str() {
+                toml_dirs.push(repo.path.join(s));
+            }
+        }
+    }
 
-    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-        let Some(table) = parsed.get(section).and_then(|v| v.as_table()) else {
+    for dir in &toml_dirs {
+        let cargo_toml = dir.join("Cargo.toml");
+        let Ok(content) = std::fs::read_to_string(&cargo_toml) else {
             continue;
         };
-        for (name, value) in table {
-            deps.insert(name.clone());
-            let path_val = match value {
-                toml::Value::Table(t) => t.get("path").and_then(|v| v.as_str()),
-                _ => None,
+        let Ok(parsed) = content.parse::<toml::Table>() else {
+            continue;
+        };
+
+        for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+            let Some(table) = parsed.get(section).and_then(|v| v.as_table()) else {
+                continue;
             };
-            if let Some(p) = path_val {
-                let abs = repo.path.join(p);
-                if let Ok(canonical) = abs.canonicalize() {
-                    path_deps.push((
-                        repo.name.clone(),
-                        name.clone(),
-                        canonical.to_string_lossy().into_owned(),
-                    ));
+            for (name, value) in table {
+                deps.insert(name.clone());
+                let path_val = match value {
+                    toml::Value::Table(t) => t.get("path").and_then(|v| v.as_str()),
+                    _ => None,
+                };
+                if let Some(p) = path_val {
+                    let abs = dir.join(p);
+                    if let Ok(canonical) = abs.canonicalize() {
+                        path_deps.push((
+                            repo.name.clone(),
+                            name.clone(),
+                            canonical.to_string_lossy().into_owned(),
+                        ));
+                    }
                 }
             }
         }

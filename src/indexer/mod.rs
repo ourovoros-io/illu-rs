@@ -183,6 +183,15 @@ fn index_single_crate(
     let crate_id = db.insert_crate(&pkg_name, ".")?;
 
     index_crate_sources(db, config, &config.repo_path.join("src"), crate_id)?;
+
+    // Index integration tests, benchmarks, and examples
+    for extra in &["tests", "benches", "examples"] {
+        let dir = config.repo_path.join(extra);
+        if dir.is_dir() {
+            index_crate_sources(db, config, &dir, crate_id)?;
+        }
+    }
+
     Ok(())
 }
 
@@ -257,6 +266,14 @@ fn index_workspace(
         // Index source files
         let src_dir = member_dir.join("src");
         index_crate_sources(db, config, &src_dir, crate_id)?;
+
+        // Index integration tests, benchmarks, and examples
+        for extra in &["tests", "benches", "examples"] {
+            let dir = member_dir.join(extra);
+            if dir.is_dir() {
+                index_crate_sources(db, config, &dir, crate_id)?;
+            }
+        }
     }
 
     // Store resolved external deps
@@ -1174,6 +1191,46 @@ pub fn run() {
             !unused_names.contains(&"Bar::new".to_string()),
             "Bar::new should NOT be unused, unused: {unused_names:?}"
         );
+    }
+
+    #[test]
+    fn test_index_tests_directory() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src_dir = dir.path().join("src");
+        let tests_dir = dir.path().join("tests");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::create_dir_all(&tests_dir).unwrap();
+
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::write(src_dir.join("lib.rs"), "pub fn compute() -> i32 { 42 }\n").unwrap();
+        std::fs::write(
+            tests_dir.join("integration.rs"),
+            "#[test]\nfn test_compute() { assert_eq!(42, 42); }\n",
+        )
+        .unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: dir.path().to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        // Integration test should be indexed
+        let syms = db.search_symbols("test_compute").unwrap();
+        assert_eq!(syms.len(), 1, "test_compute from tests/ should be indexed");
+        assert!(
+            syms[0].file_path.starts_with("tests/"),
+            "should be in tests/ dir: {}",
+            syms[0].file_path
+        );
+
+        // Source symbols still indexed
+        let src_syms = db.search_symbols("compute").unwrap();
+        assert!(!src_syms.is_empty(), "src/ symbols should still be indexed");
     }
 
     #[test]
