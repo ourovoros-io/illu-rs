@@ -105,6 +105,98 @@ mod tests {
     }
 
     #[test]
+    fn test_implements_derive_traits() {
+        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+        use crate::indexer::store::{store_symbols, store_trait_impls};
+
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        // Simulate a struct with derive attributes
+        let sym = Symbol {
+            name: "Config".into(),
+            kind: SymbolKind::Struct,
+            visibility: Visibility::Public,
+            file_path: "src/lib.rs".into(),
+            line_start: 1,
+            line_end: 5,
+            signature: "pub struct Config".into(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: Some("derive(Debug, Clone, Serialize)".into()),
+            impl_type: None,
+        };
+
+        let mut trait_impls = Vec::new();
+        crate::indexer::parser::extract_derive_trait_impls(&sym, &mut trait_impls);
+        store_symbols(&db, file_id, &[sym]).unwrap();
+        store_trait_impls(&db, file_id, &trait_impls).unwrap();
+
+        // Should find Config for Debug
+        let result = handle_implements(&db, Some("Debug"), None).unwrap();
+        assert!(
+            result.contains("Config"),
+            "Debug should list Config: {result}"
+        );
+
+        // Should find Clone for Config
+        let result = handle_implements(&db, None, Some("Config")).unwrap();
+        assert!(
+            result.contains("Debug"),
+            "Config should show Debug: {result}"
+        );
+        assert!(
+            result.contains("Clone"),
+            "Config should show Clone: {result}"
+        );
+        assert!(
+            result.contains("Serialize"),
+            "Config should show Serialize: {result}"
+        );
+    }
+
+    #[test]
+    fn test_implements_thiserror_generates_display() {
+        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+        use crate::indexer::store::{store_symbols, store_trait_impls};
+
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        let sym = Symbol {
+            name: "MyError".into(),
+            kind: SymbolKind::Enum,
+            visibility: Visibility::Public,
+            file_path: "src/lib.rs".into(),
+            line_start: 1,
+            line_end: 5,
+            signature: "pub enum MyError".into(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: Some("derive(thiserror::Error)".into()),
+            impl_type: None,
+        };
+
+        let mut trait_impls = Vec::new();
+        crate::indexer::parser::extract_derive_trait_impls(&sym, &mut trait_impls);
+        store_symbols(&db, file_id, &[sym]).unwrap();
+        store_trait_impls(&db, file_id, &trait_impls).unwrap();
+
+        let result = handle_implements(&db, Some("Display"), None).unwrap();
+        assert!(
+            result.contains("MyError"),
+            "thiserror::Error should generate Display impl: {result}"
+        );
+        let result = handle_implements(&db, Some("Error"), None).unwrap();
+        assert!(
+            result.contains("MyError"),
+            "thiserror::Error should generate Error impl: {result}"
+        );
+    }
+
+    #[test]
     fn test_implements_requires_one_param() {
         let db = Database::open_in_memory().unwrap();
 

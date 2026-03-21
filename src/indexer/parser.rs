@@ -300,6 +300,10 @@ fn extract_symbols(
                             symbols,
                         );
                     }
+                    // Extract derive-generated trait impls
+                    if matches!(child.kind(), "struct_item" | "enum_item" | "union_item") {
+                        extract_derive_trait_impls(&sym, trait_impls);
+                    }
                     // Recurse into inline module bodies
                     if child.kind() == "mod_item"
                         && let Some(body) = find_child_by_kind(&child, "declaration_list")
@@ -624,6 +628,70 @@ fn extract_trait_impl_info(node: &Node, source: &str, file_path: &str) -> Option
         line_start,
         line_end,
     })
+}
+
+/// Known derive macros that map to specific trait names.
+/// `thiserror::Error` implies both `Error` and `Display`.
+const DERIVE_TRAIT_MAP: &[(&str, &[&str])] = &[
+    ("Error", &["Error", "Display"]),
+    ("thiserror::Error", &["Error", "Display"]),
+    ("thiserror::error::Error", &["Error", "Display"]),
+];
+
+/// Extract synthetic `TraitImpl` entries from `#[derive(...)]` attributes.
+pub fn extract_derive_trait_impls(sym: &Symbol, trait_impls: &mut Vec<TraitImpl>) {
+    let Some(attrs) = &sym.attributes else {
+        return;
+    };
+
+    // Find derive(...) blocks in the attributes string.
+    // Attributes are joined with ", " but derive contents also have commas,
+    // so we search for "derive(" and find the matching ")".
+    let mut search_from = 0;
+    while let Some(start) = attrs[search_from..].find("derive(") {
+        let abs_start = search_from + start + 7; // skip "derive("
+        let Some(end) = attrs[abs_start..].find(')') else {
+            break;
+        };
+        let inner = &attrs[abs_start..abs_start + end];
+        search_from = abs_start + end + 1;
+
+        // inner is now e.g. "Debug, Clone, Serialize"
+        for raw_trait in inner.split(',') {
+            let trait_name = raw_trait.trim();
+            if trait_name.is_empty() {
+                continue;
+            }
+            // Check if this derive maps to additional traits
+            let mut found_mapping = false;
+            for (key, implied_traits) in DERIVE_TRAIT_MAP {
+                if trait_name == *key {
+                    for t in *implied_traits {
+                        trait_impls.push(TraitImpl {
+                            trait_name: (*t).to_string(),
+                            type_name: sym.name.clone(),
+                            file_path: sym.file_path.clone(),
+                            line_start: sym.line_start,
+                            line_end: sym.line_end,
+                        });
+                    }
+                    found_mapping = true;
+                    break;
+                }
+            }
+            if !found_mapping {
+                // Strip module path: serde::Serialize → Serialize
+                let short = trait_name.rsplit("::").next().unwrap_or(trait_name);
+                trait_impls.push(TraitImpl {
+                    trait_name: short.to_string(),
+                    type_name: sym.name.clone(),
+                    file_path: sym.file_path.clone(),
+                    line_start: sym.line_start,
+                    line_end: sym.line_end,
+                });
+            }
+        }
+    }
 }
 
 fn get_visibility(node: &Node, source: &str) -> Visibility {
