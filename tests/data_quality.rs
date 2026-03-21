@@ -103,7 +103,7 @@ where
 }
 ",
     );
-    let result = context::handle_context(&db, "collect_items", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "collect_items", false, None, None, None, false).unwrap();
     assert!(result.contains("collect_items"), "should find the function");
     assert!(
         result.contains("<T, I>") || result.contains("<T,I>"),
@@ -124,7 +124,7 @@ pub async fn fetch_data(url: &str) -> Result<String, Box<dyn std::error::Error>>
 }
 ",
     );
-    let result = context::handle_context(&db, "fetch_data", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "fetch_data", false, None, None, None, false).unwrap();
     assert!(
         result.contains("async"),
         "signature must include async keyword: {result}"
@@ -146,7 +146,7 @@ pub struct BorrowedSlice<'a, T: Clone> {
 }
 ",
     );
-    let result = context::handle_context(&db, "BorrowedSlice", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "BorrowedSlice", false, None, None, None, false).unwrap();
     assert!(
         result.contains("'a") && result.contains('T'),
         "signature must include lifetime and generic: {result}"
@@ -180,7 +180,7 @@ pub enum Value {
 }
 ",
     );
-    let result = context::handle_context(&db, "Value", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Value", false, None, None, None, false).unwrap();
     for variant in &["Null", "Bool(bool)", "Int(i64)", "Text(String)", "Map("] {
         assert!(
             result.contains(variant),
@@ -207,7 +207,7 @@ pub trait Store {
 }
 ",
     );
-    let result = context::handle_context(&db, "Store", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Store", false, None, None, None, false).unwrap();
     assert!(
         result.contains("data store abstraction"),
         "trait doc comment: {result}"
@@ -271,7 +271,7 @@ fn type_alias_preserved() {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 ",
     );
-    let result = context::handle_context(&db, "BoxError", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "BoxError", false, None, None, None, false).unwrap();
     assert!(
         result.contains("type_alias"),
         "should be identified as type_alias: {result}"
@@ -335,7 +335,7 @@ impl Default for Point {
 }
 "#,
     );
-    let result = context::handle_context(&db, "Point", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Point", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Display"),
         "Display impl must be shown: {result}"
@@ -360,19 +360,19 @@ pub fn beta() {}
 pub fn gamma() {}
 ";
     let (_dir, db) = index_source(source);
-    let result = context::handle_context(&db, "alpha", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "alpha", false, None, None, None, false).unwrap();
     assert!(
         result.contains("1-1") || result.contains(":1-"),
         "alpha should start at line 1: {result}"
     );
 
-    let result = context::handle_context(&db, "beta", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "beta", false, None, None, None, false).unwrap();
     assert!(
         result.contains(":3-"),
         "beta should start at line 3: {result}"
     );
 
-    let result = context::handle_context(&db, "gamma", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "gamma", false, None, None, None, false).unwrap();
     assert!(
         result.contains(":5-"),
         "gamma should start at line 5: {result}"
@@ -395,7 +395,7 @@ fn multiline_doc_comment_fully_captured() {
 pub fn documented() {}
 ",
     );
-    let result = context::handle_context(&db, "documented", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "documented", false, None, None, None, false).unwrap();
     assert!(
         result.contains("First line of docs"),
         "first line: {result}"
@@ -419,7 +419,7 @@ pub struct Packet {
 }
 ",
     );
-    let result = context::handle_context(&db, "Packet", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Packet", false, None, None, None, false).unwrap();
     assert!(
         result.contains("derive(Debug, Clone)"),
         "derive attribute: {result}"
@@ -442,7 +442,7 @@ pub fn caller() -> u32 {
 }
 ",
     );
-    let result = context::handle_context(&db, "caller", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "caller", false, None, None, None, false).unwrap();
     assert!(
         result.contains("helper"),
         "caller should reference helper in callees: {result}"
@@ -468,7 +468,7 @@ pub fn make_config() -> Config {
 }
 ",
     );
-    let result = context::handle_context(&db, "make_config", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "make_config", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Config"),
         "make_config should reference Config: {result}"
@@ -619,7 +619,7 @@ pub fn tokenize(input: &str) -> Vec<String> {
 }
 ",
     );
-    let result = context::handle_context(&db, "tokenize", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "tokenize", false, None, None, None, false).unwrap();
 
     assert!(
         result.contains("## tokenize (function)"),
@@ -975,13 +975,13 @@ fn workspace_crate_impact_propagation() {
 #[test]
 fn workspace_context_shows_correct_file_paths() {
     let (_dir, db) = index_workspace();
-    let result = context::handle_context(&db, "User", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "User", false, None, None, None, false).unwrap();
     assert!(
         result.contains("core/src/lib.rs"),
         "file path should be crate-relative: {result}"
     );
 
-    let result = context::handle_context(&db, "create_user", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "create_user", false, None, None, None, false).unwrap();
     assert!(
         result.contains("api/src/lib.rs"),
         "api function path: {result}"
@@ -1100,7 +1100,7 @@ pub fn error() -> String {
 #[test]
 fn pub_crate_visibility_shown() {
     let (_dir, db) = index_source("pub(crate) fn internal_api() -> u32 { 42 }\n");
-    let result = context::handle_context(&db, "internal_api", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "internal_api", false, None, None, None, false).unwrap();
     assert!(
         result.contains("pub(crate)"),
         "pub(crate) visibility: {result}"
@@ -1111,7 +1111,7 @@ fn pub_crate_visibility_shown() {
 fn context_no_symbol_gives_clear_message() {
     let (_dir, db) = index_source("pub fn something() {}");
     let result =
-        context::handle_context(&db, "nonexistent_symbol", false, None, None, None).unwrap();
+        context::handle_context(&db, "nonexistent_symbol", false, None, None, None, false).unwrap();
     assert!(
         result.contains("No symbol found matching 'nonexistent_symbol'"),
         "clear error message: {result}"
@@ -1167,7 +1167,7 @@ pub struct FixedArray<const N: usize> {
 }
 ",
     );
-    let result = context::handle_context(&db, "FixedArray", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "FixedArray", false, None, None, None, false).unwrap();
     assert!(
         result.contains("FixedArray"),
         "should find struct with const generic: {result}"
@@ -1189,7 +1189,7 @@ impl<'a> Parser<'a> {
 }
 ",
     );
-    let result = context::handle_context(&db, "Parser", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Parser", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Parser"),
         "should find struct with lifetime: {result}"
@@ -1215,7 +1215,7 @@ impl Builder {
 }
 ",
     );
-    let result = context::handle_context(&db, "Builder", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Builder", false, None, None, None, false).unwrap();
     assert!(
         result.contains("new"),
         "should show method from first impl block: {result}"
@@ -1395,8 +1395,8 @@ fn callees_scoped_to_source_file() {
         ("a.rs", "pub fn caller_a() { shared(); }\n"),
         ("b.rs", "pub fn caller_b() { shared(); }\n"),
     ]);
-    let result_a = context::handle_context(&db, "caller_a", false, None, None, None).unwrap();
-    let result_b = context::handle_context(&db, "caller_b", false, None, None, None).unwrap();
+    let result_a = context::handle_context(&db, "caller_a", false, None, None, None, false).unwrap();
+    let result_b = context::handle_context(&db, "caller_b", false, None, None, None, false).unwrap();
     // Each should show shared as callee, but caller_a's callees should not
     // include anything from caller_b and vice versa
     assert!(
@@ -1591,19 +1591,19 @@ fn realistic_codebase_indexes_all_symbols() {
 fn realistic_codebase_trait_impl_detected() {
     let (_dir, db) = index_realistic_codebase();
 
-    let result = context::handle_context(&db, "UserService", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "UserService", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Handler"),
         "UserService context should mention Handler trait impl: {result}"
     );
 
-    let result = context::handle_context(&db, "Handler", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Handler", false, None, None, None, false).unwrap();
     assert!(
         result.contains("UserService"),
         "Handler context should show UserService as implementor: {result}"
     );
 
-    let result = context::handle_context(&db, "AppError", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "AppError", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Display"),
         "AppError context should show Display trait impl: {result}"

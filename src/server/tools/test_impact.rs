@@ -107,6 +107,7 @@ mod tests {
             kind: RefKind::Call,
             target_file: Some("src/lib.rs".into()),
             target_context: None,
+            ref_line: None,
         }];
         db.store_symbol_refs_fast(&refs, &symbol_map).unwrap();
         db

@@ -111,6 +111,11 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Calls-only graph traversal** — `get_callees_by_name` and `get_callers_by_name` filter to `sr.kind = 'call'`, excluding type refs and enum variant refs from call graphs, neighborhood, and callpath.
 - **Cargo test cap** — When >20 tests are related, impact/diff_impact/test_impact suggest `cargo test` without filter names instead of an unusably long command.
 - **FTS name-only for short queries** — `search_symbols` uses FTS column filter `name:"query"*` for queries <= 5 chars to prevent doc_comment noise. Longer queries still search across all FTS columns.
+- **Ref line tracking** — `symbol_refs` has a `ref_line` column storing the 1-based line where each reference occurs (captured from tree-sitter node positions). Callers in `context` and `references` show the call-site line, not the calling function's definition line. `CalleeInfo.ref_line` is `Option<i64>`; display falls back to `line_start` when NULL.
+- **Exclude tests filter** — `context`, `neighborhood`, and `callpath` accept `exclude_tests: bool` parameter. When true, test functions (`is_test = 1`) are filtered from callers/callees, keeping graph output focused on production code.
+- **Type usage compact mode** — `type_usage` accepts `compact: bool` parameter. When true, groups results by file with counts instead of listing every entry with full signatures.
+- **History show_diff** — `history` accepts `show_diff: bool` parameter. When true, uses `git log -L<start>,<end>:<file>` to show function-level code diffs per commit. Output capped at ~4000 chars.
+- **Overview filters mod/use** — `handle_overview` excludes `Mod` and `Use` symbol kinds from output to focus on actual API surface (functions, structs, enums, traits).
 
 ## Lint Configuration
 

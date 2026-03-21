@@ -8,7 +8,10 @@ pub fn handle_overview(
     include_private: bool,
     limit: Option<i64>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let symbols = db.get_symbols_by_path_prefix_filtered(path, include_private)?;
+    let mut symbols = db.get_symbols_by_path_prefix_filtered(path, include_private)?;
+
+    // Filter out structural items (mod/use) — overview shows API surface
+    symbols.retain(|s| s.kind != SymbolKind::Mod && s.kind != SymbolKind::Use);
 
     if symbols.is_empty() {
         let scope = if include_private { "" } else { "public " };
@@ -125,7 +128,7 @@ pub fn handle_overview(
 
 fn render_same_file_callees(db: &Database, output: &mut String, sym: &crate::db::StoredSymbol) {
     if sym.kind == SymbolKind::Function
-        && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path)
+        && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path, false)
     {
         let same_file_calls: Vec<&str> = callees
             .iter()
@@ -389,8 +392,8 @@ mod tests {
             .unwrap();
         let a_id = db.get_symbol_id("helper_a", "src/lib.rs").unwrap().unwrap();
         let b_id = db.get_symbol_id("helper_b", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(src_id, a_id, "call", "high").unwrap();
-        db.insert_symbol_ref(src_id, b_id, "call", "high").unwrap();
+        db.insert_symbol_ref(src_id, a_id, "call", "high", None).unwrap();
+        db.insert_symbol_ref(src_id, b_id, "call", "high", None).unwrap();
 
         let result = handle_overview(&db, "src/", true, None).unwrap();
         assert!(
@@ -507,6 +510,75 @@ mod tests {
         assert!(
             result.contains("(limited to 2, 5 total)"),
             "should show truncation note: {result}"
+        );
+    }
+
+    #[test]
+    fn test_overview_excludes_mod_and_use() {
+        let db = Database::open_in_memory().unwrap();
+        let f = db.insert_file("src/lib.rs", "h1").unwrap();
+        store_symbols(
+            &db,
+            f,
+            &[
+                Symbol {
+                    name: "server".into(),
+                    kind: SymbolKind::Mod,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 1,
+                    signature: "pub mod server".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "std::io".into(),
+                    kind: SymbolKind::Use,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 2,
+                    line_end: 2,
+                    signature: "use std::io".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "run".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 4,
+                    line_end: 10,
+                    signature: "pub fn run()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let result = handle_overview(&db, "src/", false, None).unwrap();
+        assert!(
+            result.contains("**run**"),
+            "functions should appear in overview"
+        );
+        assert!(
+            !result.contains("pub mod"),
+            "mod entries should be filtered from overview: {result}"
+        );
+        assert!(
+            !result.contains("use std::io"),
+            "use entries should be filtered from overview: {result}"
         );
     }
 }

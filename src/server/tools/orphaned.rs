@@ -178,7 +178,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let test_id = db.get_symbol_id("test_db", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(test_id, open_id, "call", "high")
+        db.insert_symbol_ref(test_id, open_id, "call", "high", None)
             .unwrap();
 
         let result = handle_orphaned(&db, None, None).unwrap();

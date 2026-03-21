@@ -100,6 +100,8 @@ struct ContextParams {
     sections: Option<Vec<String>>,
     /// Filter callers and callees to this path prefix (e.g. "src/" to exclude test callers)
     callers_path: Option<String>,
+    /// Exclude test functions from callers/callees (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -152,6 +154,8 @@ struct CallpathParams {
     all_paths: Option<bool>,
     /// Max number of paths when `all_paths=true` (default: 5)
     max_paths: Option<i64>,
+    /// Exclude test functions from paths (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -188,6 +192,8 @@ struct TypeUsageParams {
     type_name: String,
     /// Filter to files under this path prefix
     path: Option<String>,
+    /// Group results by file with counts instead of listing every entry (default: false)
+    compact: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -200,6 +206,8 @@ struct NeighborhoodParams {
     direction: Option<String>,
     /// Format: "list" (default flat), "tree" (hierarchical indented)
     format: Option<String>,
+    /// Exclude test functions from results (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -256,6 +264,8 @@ struct HistoryParams {
     symbol_name: String,
     /// Max commits to show (default: 10)
     max_commits: Option<i64>,
+    /// Show code diffs for each commit (default: false)
+    show_diff: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -386,6 +396,7 @@ impl IlluServer {
             params.file.as_deref(),
             sections.as_deref(),
             params.callers_path.as_deref(),
+            params.exclude_tests.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -511,6 +522,7 @@ impl IlluServer {
             params.max_depth,
             params.all_paths.unwrap_or(false),
             params.max_paths,
+            params.exclude_tests.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -613,6 +625,7 @@ impl IlluServer {
             params.depth,
             params.direction.as_deref(),
             params.format.as_deref(),
+            params.exclude_tests.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -630,9 +643,13 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("type_usage ▸ {}", params.type_name));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::type_usage::handle_type_usage(&db, &params.type_name, params.path.as_deref())
-                .map_err(to_mcp_err)?;
+        let result = tools::type_usage::handle_type_usage(
+            &db,
+            &params.type_name,
+            params.path.as_deref(),
+            params.compact.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -778,9 +795,14 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
-        let result =
-            tools::history::handle_history(&db, repo_path, &params.symbol_name, params.max_commits)
-                .map_err(to_mcp_err)?;
+        let result = tools::history::handle_history(
+            &db,
+            repo_path,
+            &params.symbol_name,
+            params.max_commits,
+            params.show_diff.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

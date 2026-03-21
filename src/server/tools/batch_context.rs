@@ -15,7 +15,7 @@ pub fn handle_batch_context(
         if i > 0 {
             output.push_str("\n---\n\n");
         }
-        let result = context::handle_context(db, symbol, full_body, None, None, None)?;
+        let result = context::handle_context(db, symbol, full_body, None, None, None, false)?;
         output.push_str(&result);
     }
 

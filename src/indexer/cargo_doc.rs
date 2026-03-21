@@ -98,6 +98,7 @@ pub fn generate_cargo_docs(
 }
 
 /// Parse a rustdoc JSON file and produce a formatted API summary.
+#[cfg(test)]
 fn parse_rustdoc_json(
     json_str: &str,
     crate_name: &str,
@@ -178,6 +179,7 @@ struct ItemEntry<'a> {
     kind: &'static str,
 }
 
+#[cfg(test)]
 fn collect_public_items(index: &serde_json::Map<String, serde_json::Value>) -> CollectedItems<'_> {
     let mut items = CollectedItems::new();
     for item in index.values() {
@@ -505,15 +507,6 @@ fn classify_item<'a>(
         inner,
         kind,
     })
-}
-
-/// Parse rustdoc JSON and return formatted API summary.
-/// Exposed for integration testing.
-pub fn parse_rustdoc_json_public(
-    json_str: &str,
-    crate_name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    parse_rustdoc_json(json_str, crate_name)
 }
 
 #[cfg(test)]

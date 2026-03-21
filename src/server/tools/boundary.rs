@@ -24,7 +24,7 @@ pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std:
             continue;
         }
 
-        let callers = db.get_callers(&sym.name, &sym.file_path)?;
+        let callers = db.get_callers(&sym.name, &sym.file_path, false)?;
         let mut ext_files: Vec<&str> = callers
             .iter()
             .filter(|c| !c.file_path.starts_with(path))
@@ -176,7 +176,7 @@ mod tests {
             .get_symbol_id("public_fn", "src/mod/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, public_fn_id, "call", "high")
+        db.insert_symbol_ref(caller_id, public_fn_id, "call", "high", None)
             .unwrap();
 
         // Internal caller -> internal_fn
@@ -188,7 +188,7 @@ mod tests {
             .get_symbol_id("internal_fn", "src/mod/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(helper_id, internal_fn_id, "call", "high")
+        db.insert_symbol_ref(helper_id, internal_fn_id, "call", "high", None)
             .unwrap();
 
         db

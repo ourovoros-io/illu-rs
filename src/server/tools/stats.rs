@@ -69,7 +69,7 @@ pub fn handle_stats(
     // Kind breakdown inline
     let kinds_str: Vec<String> = kind_counts
         .iter()
-        .map(|(k, c)| format!("{c} {k}s"))
+        .map(|(k, c)| pluralize_kind(k, *c))
         .collect();
     if !kinds_str.is_empty() {
         let _ = writeln!(output, "  ({})", kinds_str.join(", "));
@@ -114,6 +114,16 @@ pub fn handle_stats(
     }
 
     Ok(output)
+}
+
+fn pluralize_kind(kind: &str, count: i64) -> String {
+    if count == 1 {
+        return format!("{count} {kind}");
+    }
+    match kind {
+        "type_alias" => format!("{count} type_aliases"),
+        _ => format!("{count} {kind}s"),
+    }
 }
 
 #[cfg(test)]
@@ -170,7 +180,7 @@ mod tests {
         // test_foo calls foo (so foo is tested)
         let test_id = sym_id(&db, "test_foo");
         let foo_id = sym_id(&db, "foo");
-        db.insert_symbol_ref(test_id, foo_id, "call", "high")
+        db.insert_symbol_ref(test_id, foo_id, "call", "high", None)
             .unwrap();
 
         let result = handle_stats(&db, None).unwrap();
@@ -216,13 +226,13 @@ mod tests {
         let c3 = sym_id(&db, "caller3");
 
         // real_fn: 2 high-confidence refs
-        db.insert_symbol_ref(c1, real_id, "call", "high").unwrap();
-        db.insert_symbol_ref(c2, real_id, "call", "high").unwrap();
+        db.insert_symbol_ref(c1, real_id, "call", "high", None).unwrap();
+        db.insert_symbol_ref(c2, real_id, "call", "high", None).unwrap();
 
         // noise_fn: 3 refs but all low-confidence
-        db.insert_symbol_ref(c1, noise_id, "call", "low").unwrap();
-        db.insert_symbol_ref(c2, noise_id, "call", "low").unwrap();
-        db.insert_symbol_ref(c3, noise_id, "call", "low").unwrap();
+        db.insert_symbol_ref(c1, noise_id, "call", "low", None).unwrap();
+        db.insert_symbol_ref(c2, noise_id, "call", "low", None).unwrap();
+        db.insert_symbol_ref(c3, noise_id, "call", "low", None).unwrap();
 
         let result = handle_stats(&db, None).unwrap();
         assert!(
@@ -268,5 +278,53 @@ mod tests {
         assert!(result.contains("**Files:** 1"));
         assert!(result.contains("**Symbols:** 2"));
         assert!(!result.contains("lib_fn"));
+    }
+
+    #[test]
+    fn test_stats_pluralizes_type_alias() {
+        let db = Database::open_in_memory().unwrap();
+        let f = db.insert_file("src/lib.rs", "h1").unwrap();
+
+        let symbols = vec![
+            Symbol {
+                name: "MyAlias".into(),
+                kind: SymbolKind::TypeAlias,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 1,
+                signature: "pub type MyAlias = u64".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "OtherAlias".into(),
+                kind: SymbolKind::TypeAlias,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 2,
+                line_end: 2,
+                signature: "pub type OtherAlias = String".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+        ];
+        store_symbols(&db, f, &symbols).unwrap();
+
+        let result = handle_stats(&db, None).unwrap();
+        assert!(
+            result.contains("type_aliases"),
+            "should say 'type_aliases' not 'type_aliass': {result}"
+        );
+        assert!(
+            !result.contains("type_aliass"),
+            "must not contain 'type_aliass': {result}"
+        );
     }
 }

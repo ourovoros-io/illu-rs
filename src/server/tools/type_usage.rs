@@ -1,10 +1,12 @@
-use crate::db::Database;
+use crate::db::{Database, StoredSymbol};
+use std::collections::BTreeMap;
 use std::fmt::Write;
 
 pub fn handle_type_usage(
     db: &Database,
     type_name: &str,
     path: Option<&str>,
+    compact: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut sig_matches = db.search_symbols_by_signature(type_name)?;
 
@@ -48,9 +50,74 @@ pub fn handle_type_usage(
         return Ok(output);
     }
 
+    if compact {
+        render_compact(&mut output, type_name, &returns, &accepts, &field_matches);
+    } else {
+        render_verbose(&mut output, type_name, &returns, &accepts, &field_matches);
+    }
+
+    Ok(output)
+}
+
+fn render_compact(
+    output: &mut String,
+    type_name: &str,
+    returns: &[&StoredSymbol],
+    accepts: &[&StoredSymbol],
+    field_matches: &[StoredSymbol],
+) {
+    fn write_grouped(output: &mut String, syms_files: &[&str]) {
+        let mut by_file: BTreeMap<&str, usize> = BTreeMap::new();
+        for file in syms_files {
+            *by_file.entry(file).or_default() += 1;
+        }
+        for (file, count) in &by_file {
+            let _ = writeln!(output, "- **{file}** ({count})");
+        }
+        let _ = writeln!(output);
+    }
+
+    if !returns.is_empty() {
+        let _ = writeln!(
+            output,
+            "### Returns `{type_name}` ({} sites)\n",
+            returns.len()
+        );
+        let files: Vec<&str> = returns.iter().map(|s| s.file_path.as_str()).collect();
+        write_grouped(output, &files);
+    }
+
+    if !accepts.is_empty() {
+        let _ = writeln!(
+            output,
+            "### Accepts `{type_name}` ({} sites)\n",
+            accepts.len()
+        );
+        let files: Vec<&str> = accepts.iter().map(|s| s.file_path.as_str()).collect();
+        write_grouped(output, &files);
+    }
+
+    if !field_matches.is_empty() {
+        let _ = writeln!(
+            output,
+            "### Contains `{type_name}` as field ({} sites)\n",
+            field_matches.len()
+        );
+        let files: Vec<&str> = field_matches.iter().map(|s| s.file_path.as_str()).collect();
+        write_grouped(output, &files);
+    }
+}
+
+fn render_verbose(
+    output: &mut String,
+    type_name: &str,
+    returns: &[&StoredSymbol],
+    accepts: &[&StoredSymbol],
+    field_matches: &[StoredSymbol],
+) {
     if !returns.is_empty() {
         let _ = writeln!(output, "### Returns `{type_name}`\n");
-        for sym in &returns {
+        for sym in returns {
             let qualified = super::qualified_name(sym);
             let _ = writeln!(
                 output,
@@ -63,7 +130,7 @@ pub fn handle_type_usage(
 
     if !accepts.is_empty() {
         let _ = writeln!(output, "### Accepts `{type_name}`\n");
-        for sym in &accepts {
+        for sym in accepts {
             let qualified = super::qualified_name(sym);
             let _ = writeln!(
                 output,
@@ -76,7 +143,7 @@ pub fn handle_type_usage(
 
     if !field_matches.is_empty() {
         let _ = writeln!(output, "### Contains `{type_name}` as field\n");
-        for sym in &field_matches {
+        for sym in field_matches {
             let qualified = super::qualified_name(sym);
             let _ = writeln!(
                 output,
@@ -86,8 +153,6 @@ pub fn handle_type_usage(
         }
         let _ = writeln!(output);
     }
-
-    Ok(output)
 }
 
 #[cfg(test)]
@@ -185,7 +250,7 @@ mod tests {
     #[test]
     fn test_type_usage_in_signatures() {
         let db = setup_db();
-        let result = handle_type_usage(&db, "Config", None).unwrap();
+        let result = handle_type_usage(&db, "Config", None, false).unwrap();
 
         assert!(result.contains("## Type Usage: `Config`"));
         assert!(result.contains("### Returns `Config`"));
@@ -200,7 +265,7 @@ mod tests {
     #[test]
     fn test_type_usage_no_results() {
         let db = setup_db();
-        let result = handle_type_usage(&db, "Nonexistent", None).unwrap();
+        let result = handle_type_usage(&db, "Nonexistent", None, false).unwrap();
 
         assert!(result.contains("No usage of `Nonexistent` found"));
     }
@@ -242,8 +307,22 @@ mod tests {
         store_symbols(&db, file1, &symbols1).unwrap();
         store_symbols(&db, file2, &symbols2).unwrap();
 
-        let result = handle_type_usage(&db, "Config", Some("src/server/")).unwrap();
+        let result = handle_type_usage(&db, "Config", Some("src/server/"), false).unwrap();
         assert!(result.contains("serve_config"));
         assert!(!result.contains("use_config"));
+    }
+
+    #[test]
+    fn test_type_usage_compact_mode() {
+        let db = setup_db();
+        let result = handle_type_usage(&db, "Config", None, true).unwrap();
+
+        // Should have site counts in headers
+        assert!(result.contains("(1 sites)"));
+        // Should group by file
+        assert!(result.contains("**src/lib.rs** (1)"));
+        // Should NOT contain full signatures
+        assert!(!result.contains("pub fn load_config"));
+        assert!(!result.contains("pub fn use_config"));
     }
 }

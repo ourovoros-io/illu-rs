@@ -182,7 +182,8 @@ impl Database {
                 source_symbol_id INTEGER NOT NULL REFERENCES symbols(id),
                 target_symbol_id INTEGER NOT NULL REFERENCES symbols(id),
                 kind TEXT NOT NULL,
-                confidence TEXT NOT NULL DEFAULT 'high'
+                confidence TEXT NOT NULL DEFAULT 'high',
+                ref_line INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS dependencies (
@@ -240,11 +241,12 @@ impl Database {
         self.migrate_symbols_impl_type_column()?;
         self.migrate_symbol_refs_confidence_column()?;
         self.migrate_symbols_is_test_column()?;
+        self.migrate_symbol_refs_ref_line_column()?;
         self.check_schema_version()
     }
 
     /// Bump to force full re-index after parser/schema changes.
-    const SCHEMA_VERSION: &str = "4";
+    const SCHEMA_VERSION: &str = "5";
 
     fn check_schema_version(&self) -> SqlResult<()> {
         let current: Option<String> = self
@@ -385,6 +387,19 @@ impl Database {
         Ok(())
     }
 
+    /// Add `ref_line` column to `symbol_refs` table if missing (existing DBs).
+    fn migrate_symbol_refs_ref_line_column(&self) -> SqlResult<()> {
+        let has_col = self
+            .conn
+            .prepare("SELECT ref_line FROM symbol_refs LIMIT 0")
+            .is_ok();
+        if !has_col {
+            self.conn
+                .execute_batch("ALTER TABLE symbol_refs ADD COLUMN ref_line INTEGER")?;
+        }
+        Ok(())
+    }
+
     /// Add `is_test` column to `symbols` table if missing, then backfill from attributes.
     fn migrate_symbols_is_test_column(&self) -> SqlResult<()> {
         let has_is_test = self
@@ -414,16 +429,6 @@ impl Database {
              DELETE FROM crate_deps;
              DELETE FROM crates;
              DELETE FROM metadata;",
-        )
-    }
-
-    /// Completely reset the index, including all cached documentation.
-    pub fn clear_all(&self) -> SqlResult<()> {
-        self.clear_code_index()?;
-        self.conn.execute_batch(
-            "INSERT INTO docs_fts(docs_fts) VALUES('delete-all');
-             DELETE FROM docs;
-             DELETE FROM dependencies;",
         )
     }
 
@@ -561,12 +566,13 @@ impl Database {
         target_id: SymbolId,
         kind: &str,
         confidence: &str,
+        ref_line: Option<i64>,
     ) -> SqlResult<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO symbol_refs \
-             (source_symbol_id, target_symbol_id, kind, confidence) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![source_id, target_id, kind, confidence],
+             (source_symbol_id, target_symbol_id, kind, confidence, ref_line) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![source_id, target_id, kind, confidence, ref_line],
         )?;
         Ok(())
     }
@@ -1403,16 +1409,32 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees(&self, symbol_name: &str, source_file: &str) -> SqlResult<Vec<CalleeInfo>> {
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type \
+    pub fn get_callees(
+        &self,
+        symbol_name: &str,
+        source_file: &str,
+        exclude_tests: bool,
+    ) -> SqlResult<Vec<CalleeInfo>> {
+        let query = if exclude_tests {
+            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type, \
+             sr.ref_line \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              JOIN files sf ON sf.id = ss.file_id \
-             WHERE ss.name = ?1 AND sf.path = ?2",
-        )?;
+             WHERE ss.name = ?1 AND sf.path = ?2 AND ts.is_test = 0"
+        } else {
+            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type, \
+             sr.ref_line \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             WHERE ss.name = ?1 AND sf.path = ?2"
+        };
+        let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, source_file])?;
         while let Some(row) = rows.next()? {
@@ -1423,22 +1445,39 @@ impl Database {
                 ref_kind: row.get(3)?,
                 line_start: row.get(4)?,
                 impl_type: row.get(5)?,
+                ref_line: row.get(6)?,
             });
         }
         Ok(results)
     }
 
     /// Find symbols that directly reference the given symbol (reverse of `get_callees`).
-    pub fn get_callers(&self, symbol_name: &str, target_file: &str) -> SqlResult<Vec<CalleeInfo>> {
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type \
+    pub fn get_callers(
+        &self,
+        symbol_name: &str,
+        target_file: &str,
+        exclude_tests: bool,
+    ) -> SqlResult<Vec<CalleeInfo>> {
+        let query = if exclude_tests {
+            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
+             sr.ref_line \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              JOIN files tf ON tf.id = ts.file_id \
-             WHERE ts.name = ?1 AND tf.path = ?2",
-        )?;
+             WHERE ts.name = ?1 AND tf.path = ?2 AND ss.is_test = 0"
+        } else {
+            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
+             sr.ref_line \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             JOIN files tf ON tf.id = ts.file_id \
+             WHERE ts.name = ?1 AND tf.path = ?2"
+        };
+        let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, target_file])?;
         while let Some(row) = rows.next()? {
@@ -1449,6 +1488,7 @@ impl Database {
                 ref_kind: row.get(3)?,
                 line_start: row.get(4)?,
                 impl_type: row.get(5)?,
+                ref_line: row.get(6)?,
             });
         }
         Ok(results)
@@ -1458,16 +1498,26 @@ impl Database {
         &self,
         symbol_name: &str,
         min_confidence: Option<&str>,
+        exclude_tests: bool,
     ) -> SqlResult<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare_cached(
+        let query = if exclude_tests {
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2)",
-        )?;
+             AND (?2 IS NULL OR sr.confidence = ?2) AND ts.is_test = 0"
+        } else {
+            "SELECT DISTINCT ts.name, f.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             WHERE ss.name = ?1 AND sr.kind = 'call' \
+             AND (?2 IS NULL OR sr.confidence = ?2)"
+        };
+        let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, min_confidence])?;
         while let Some(row) = rows.next()? {
@@ -1480,16 +1530,26 @@ impl Database {
         &self,
         symbol_name: &str,
         min_confidence: Option<&str>,
+        exclude_tests: bool,
     ) -> SqlResult<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare_cached(
+        let query = if exclude_tests {
             "SELECT DISTINCT ss.name, sf.path \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              WHERE ts.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2)",
-        )?;
+             AND (?2 IS NULL OR sr.confidence = ?2) AND ss.is_test = 0"
+        } else {
+            "SELECT DISTINCT ss.name, sf.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             WHERE ts.name = ?1 AND sr.kind = 'call' \
+             AND (?2 IS NULL OR sr.confidence = ?2)"
+        };
+        let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, min_confidence])?;
         while let Some(row) = rows.next()? {
@@ -1583,42 +1643,7 @@ impl Database {
                 r.target_context.as_deref(),
             );
             if let (Some((sid, _)), Some((tid, confidence))) = (source_id, target_id) {
-                self.insert_symbol_ref(sid, tid, &r.kind.to_string(), confidence)?;
-                count += 1;
-            }
-        }
-        Ok(count)
-    }
-
-    /// Insert symbol references from parsed refs, looking up IDs by name.
-    /// Caller should wrap in a transaction for performance.
-    pub fn store_symbol_refs(&self, refs: &[crate::indexer::parser::SymbolRef]) -> SqlResult<u64> {
-        let mut count = 0;
-        for r in refs {
-            let source_id = self.get_symbol_id(&r.source_name, &r.source_file)?;
-            let (target_id, confidence) = if let Some(ctx) = &r.target_context {
-                if let Some(id) = self.get_symbol_id_in_impl(&r.target_name, ctx)? {
-                    (Some(id), "high")
-                } else if let Some(tf) = &r.target_file {
-                    if let Some(id) = self.get_symbol_id(&r.target_name, tf)? {
-                        (Some(id), "high")
-                    } else {
-                        (self.get_symbol_id_by_name(&r.target_name)?, "low")
-                    }
-                } else {
-                    (self.get_symbol_id_by_name(&r.target_name)?, "low")
-                }
-            } else if let Some(target_file) = &r.target_file {
-                if let Some(id) = self.get_symbol_id(&r.target_name, target_file)? {
-                    (Some(id), "high")
-                } else {
-                    (self.get_symbol_id_by_name(&r.target_name)?, "low")
-                }
-            } else {
-                (self.get_symbol_id_by_name(&r.target_name)?, "low")
-            };
-            if let (Some(sid), Some(tid)) = (source_id, target_id) {
-                self.insert_symbol_ref(sid, tid, &r.kind.to_string(), confidence)?;
+                self.insert_symbol_ref(sid, tid, &r.kind.to_string(), confidence, r.ref_line)?;
                 count += 1;
             }
         }
@@ -1972,6 +1997,7 @@ pub struct CalleeInfo {
     pub ref_kind: String,
     pub line_start: i64,
     pub impl_type: Option<String>,
+    pub ref_line: Option<i64>,
 }
 
 #[cfg(test)]
@@ -2378,11 +2404,11 @@ mod tests {
             .unwrap();
         let callee_b_id = SymbolId(db.conn.last_insert_rowid());
         // Insert refs
-        db.insert_symbol_ref(caller_id, callee_a_id, "call", "high")
+        db.insert_symbol_ref(caller_id, callee_a_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(caller_id, callee_b_id, "type_ref", "high")
+        db.insert_symbol_ref(caller_id, callee_b_id, "type_ref", "high", None)
             .unwrap();
-        let callees = db.get_callees("caller", "src/lib.rs").unwrap();
+        let callees = db.get_callees("caller", "src/lib.rs", false).unwrap();
         assert_eq!(callees.len(), 2);
         let names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"callee_a"));
@@ -2439,7 +2465,7 @@ mod tests {
             )
             .unwrap();
         let main_id = SymbolId(db.conn.last_insert_rowid());
-        db.insert_symbol_ref(main_id, sym_id, "type_ref", "high")
+        db.insert_symbol_ref(main_id, sym_id, "type_ref", "high", None)
             .unwrap();
 
         // Delete first file's data
@@ -2454,7 +2480,7 @@ mod tests {
         let impls = db.get_trait_impls_for_type("Foo").unwrap();
         assert!(impls.is_empty());
         // Verify: ref to deleted symbol gone
-        let callees = db.get_callees("main", "src/main.rs").unwrap();
+        let callees = db.get_callees("main", "src/main.rs", false).unwrap();
         assert!(callees.is_empty());
         // Verify: second file still intact
         assert!(db.get_file_hash("src/main.rs").unwrap().is_some());
@@ -2866,7 +2892,7 @@ mod tests {
             .unwrap();
         let beta_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(beta_id, alpha_id, "call", "high")
+        db.insert_symbol_ref(beta_id, alpha_id, "call", "high", None)
             .unwrap();
 
         // Verify the ref exists
@@ -2964,24 +2990,24 @@ mod tests {
             )
             .unwrap();
         let target_id = SymbolId(db.conn.last_insert_rowid());
-        db.insert_symbol_ref(caller_id, target_id, "call", "high")
+        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
             .unwrap();
 
-        let callers = db.get_callers_by_name("target_fn", None).unwrap();
+        let callers = db.get_callers_by_name("target_fn", None, false).unwrap();
         assert_eq!(callers.len(), 1);
         assert_eq!(callers[0].0, "caller_fn");
         assert_eq!(callers[0].1, "src/lib.rs");
 
         // No callers for caller_fn
-        let empty = db.get_callers_by_name("caller_fn", None).unwrap();
+        let empty = db.get_callers_by_name("caller_fn", None, false).unwrap();
         assert!(empty.is_empty());
 
         // Type refs should be excluded
-        db.insert_symbol_ref(caller_id, target_id, "type_ref", "high")
+        db.insert_symbol_ref(caller_id, target_id, "type_ref", "high", None)
             .unwrap();
-        let callers = db.get_callers_by_name("target_fn", None).unwrap();
+        let callers = db.get_callers_by_name("target_fn", None, false).unwrap();
         assert_eq!(callers.len(), 1, "type_ref should not appear in callers");
-        let callees = db.get_callees_by_name("caller_fn", None).unwrap();
+        let callees = db.get_callees_by_name("caller_fn", None, false).unwrap();
         assert_eq!(callees.len(), 1, "type_ref should not appear in callees");
     }
 
@@ -3015,7 +3041,7 @@ mod tests {
             .unwrap();
         let tgt_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(src_id, tgt_id, "call", "high")
+        db.insert_symbol_ref(src_id, tgt_id, "call", "high", None)
             .unwrap();
 
         let edges = db.get_file_dependencies("src/", None).unwrap();
@@ -3054,7 +3080,7 @@ mod tests {
             .unwrap();
         let s2 = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(s1, s2, "call", "high").unwrap();
+        db.insert_symbol_ref(s1, s2, "call", "high", None).unwrap();
 
         let edges = db.get_file_dependencies("src/", None).unwrap();
         assert!(edges.is_empty());
@@ -3089,7 +3115,7 @@ mod tests {
         let target_id = SymbolId(db.conn.last_insert_rowid());
 
         // Insert a high-confidence ref
-        db.insert_symbol_ref(caller_id, target_id, "call", "high")
+        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
             .unwrap();
 
         // Create another pair for a low-confidence ref
@@ -3105,7 +3131,7 @@ mod tests {
             .unwrap();
         let noise_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(noise_id, target_id, "call", "low")
+        db.insert_symbol_ref(noise_id, target_id, "call", "low", None)
             .unwrap();
 
         // Without filter: both edges
@@ -3155,10 +3181,10 @@ mod tests {
         let c = SymbolId(db.conn.last_insert_rowid());
 
         // b -> a, c -> a (a has 2 incoming refs)
-        db.insert_symbol_ref(b, a, "call", "high").unwrap();
-        db.insert_symbol_ref(c, a, "call", "high").unwrap();
+        db.insert_symbol_ref(b, a, "call", "high", None).unwrap();
+        db.insert_symbol_ref(c, a, "call", "high", None).unwrap();
         // b -> c (c has 1 incoming ref)
-        db.insert_symbol_ref(b, c, "call", "high").unwrap();
+        db.insert_symbol_ref(b, c, "call", "high", None).unwrap();
 
         let results = db.get_most_referenced_symbols(10, "", None).unwrap();
         assert_eq!(results.len(), 2);
@@ -3201,10 +3227,10 @@ mod tests {
         let c = SymbolId(db.conn.last_insert_rowid());
 
         // b -> a, b -> c (b has 2 outgoing refs)
-        db.insert_symbol_ref(b, a, "call", "high").unwrap();
-        db.insert_symbol_ref(b, c, "call", "high").unwrap();
+        db.insert_symbol_ref(b, a, "call", "high", None).unwrap();
+        db.insert_symbol_ref(b, c, "call", "high", None).unwrap();
         // a -> c (a has 1 outgoing ref)
-        db.insert_symbol_ref(a, c, "call", "high").unwrap();
+        db.insert_symbol_ref(a, c, "call", "high", None).unwrap();
 
         let results = db.get_most_referencing_symbols(10, "", None).unwrap();
         assert_eq!(results.len(), 2);
