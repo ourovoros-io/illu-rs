@@ -1064,6 +1064,26 @@ impl Database {
         Ok(results)
     }
 
+    /// Exact name match (no FTS). Returns symbols where `name`
+    /// equals the query exactly.
+    pub fn search_symbols_exact(&self, name: &str) -> SqlResult<Vec<StoredSymbol>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.name = ?1 \
+             ORDER BY f.path, s.line_start",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![name])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
     pub fn get_dependency_by_name(&self, name: &str) -> SqlResult<Option<StoredDep>> {
         let mut stmt = self.conn.prepare(
             "SELECT name, version, is_direct, repository_url, features \
