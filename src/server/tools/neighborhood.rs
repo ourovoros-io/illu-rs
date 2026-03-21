@@ -428,4 +428,69 @@ mod tests {
             "test caller should be excluded"
         );
     }
+
+    fn insert_symbol_with_kind(
+        db: &Database,
+        file_id: crate::db::FileId,
+        name: &str,
+        kind: &str,
+        line_start: i64,
+        line_end: i64,
+    ) -> SymbolId {
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, ?2, ?3, 'public', ?4, ?5, ?6)",
+                params![
+                    file_id,
+                    name,
+                    kind,
+                    line_start,
+                    line_end,
+                    format!("fn {name}()")
+                ],
+            )
+            .unwrap();
+        let id = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts (rowid, name, signature, doc_comment) \
+                 VALUES (?1, ?2, ?3, '')",
+                params![id, name, format!("fn {name}()")],
+            )
+            .unwrap();
+        id
+    }
+
+    #[test]
+    fn test_neighborhood_excludes_constants() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/a.rs", "hash1").unwrap();
+
+        let caller_id =
+            insert_symbol_with_kind(&db, file_id, "caller_fn", "function", 1, 5);
+        let const_id =
+            insert_symbol_with_kind(&db, file_id, "MY_CONST", "const", 7, 7);
+        let fn_id =
+            insert_symbol_with_kind(&db, file_id, "real_fn", "function", 9, 12);
+
+        db.insert_symbol_ref(caller_id, const_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(caller_id, fn_id, "call", "high", None)
+            .unwrap();
+
+        let result =
+            handle_neighborhood(&db, "caller_fn", Some(1), Some("down"), None, false)
+                .unwrap();
+        assert!(
+            result.contains("real_fn"),
+            "should show function callees"
+        );
+        assert!(
+            !result.contains("MY_CONST"),
+            "should NOT show constant callees in call graph"
+        );
+    }
 }

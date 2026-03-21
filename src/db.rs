@@ -1529,7 +1529,8 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2) AND ts.is_test = 0"
+             AND (?2 IS NULL OR sr.confidence = ?2) AND ts.is_test = 0 \
+             AND ts.kind NOT IN ('const', 'static')"
         } else {
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
@@ -1537,7 +1538,8 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2)"
+             AND (?2 IS NULL OR sr.confidence = ?2) \
+             AND ts.kind NOT IN ('const', 'static')"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
@@ -1561,7 +1563,8 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              WHERE ts.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2) AND ss.is_test = 0"
+             AND (?2 IS NULL OR sr.confidence = ?2) AND ss.is_test = 0 \
+             AND ss.kind NOT IN ('const', 'static')"
         } else {
             "SELECT DISTINCT ss.name, sf.path \
              FROM symbol_refs sr \
@@ -1569,7 +1572,8 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              WHERE ts.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2)"
+             AND (?2 IS NULL OR sr.confidence = ?2) \
+             AND ss.kind NOT IN ('const', 'static')"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
