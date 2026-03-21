@@ -89,10 +89,11 @@ fn handle_docs_with_topic(
             let mut output = String::new();
             let _ = writeln!(output, "## {dep_name} — {topic}\n");
             for doc in &like_results {
+                let content = extract_topic_section(&doc.content, topic);
                 let _ = writeln!(
                     output,
                     "### {} ({})\n\n{}\n",
-                    doc.dependency_name, doc.source, doc.content
+                    doc.dependency_name, doc.source, content
                 );
             }
             return Ok(output);
@@ -135,13 +136,75 @@ fn handle_docs_with_topic(
     let mut output = String::new();
     let _ = writeln!(output, "## {dep_name} — {topic}\n");
     for doc in &filtered {
+        let content = extract_topic_section(&doc.content, topic);
         let _ = writeln!(
             output,
             "### {} ({})\n\n{}\n",
-            doc.dependency_name, doc.source, doc.content
+            doc.dependency_name, doc.source, content
         );
     }
     Ok(output)
+}
+
+/// Extract the relevant section around a topic from a large doc string.
+/// Finds paragraphs containing the topic and returns surrounding context.
+fn extract_topic_section(content: &str, topic: &str) -> String {
+    let topic_lower = topic.to_lowercase();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut relevant_ranges: Vec<(usize, usize)> = Vec::new();
+
+    // Find lines containing the topic
+    for (i, line) in lines.iter().enumerate() {
+        if line.to_lowercase().contains(&topic_lower) {
+            let start = i.saturating_sub(2);
+            let end = (i + 5).min(lines.len());
+            relevant_ranges.push((start, end));
+        }
+    }
+
+    if relevant_ranges.is_empty() {
+        // No specific match — return truncated content
+        let truncated: String = content.chars().take(1000).collect();
+        if content.len() > 1000 {
+            return format!("{truncated}\n\n*(truncated — {topic} not found in specific section)*");
+        }
+        return truncated;
+    }
+
+    // Merge overlapping ranges
+    relevant_ranges.sort_by_key(|r| r.0);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for range in &relevant_ranges {
+        if let Some(last) = merged.last_mut()
+            && range.0 <= last.1 + 1
+        {
+            last.1 = last.1.max(range.1);
+            continue;
+        }
+        merged.push(*range);
+    }
+
+    let mut result = String::new();
+    for (i, (start, end)) in merged.iter().enumerate() {
+        if i > 0 {
+            result.push_str("\n...\n\n");
+        }
+        for line in &lines[*start..*end] {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    if merged.len() < relevant_ranges.len() || merged.last().is_some_and(|r| r.1 < lines.len()) {
+        let total = lines.len();
+        let shown: usize = merged.iter().map(|(s, e)| e - s).sum();
+        let _ = write!(
+            result,
+            "\n*(showing {shown} of {total} lines matching '{topic}')*"
+        );
+    }
+
+    result
 }
 
 #[cfg(test)]
