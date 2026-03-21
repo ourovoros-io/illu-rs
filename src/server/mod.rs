@@ -249,6 +249,14 @@ struct BlameParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct HistoryParams {
+    /// Symbol name (supports `Type::method` syntax)
+    symbol_name: String,
+    /// Max commits to show (default: 10)
+    max_commits: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct BoundaryParams {
     /// Path prefix defining the module boundary (e.g. "src/server/tools/")
     path: String,
@@ -707,6 +715,26 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "history",
+        description = "Show git commit history for a symbol's line range. Shows who changed it, when, and why — useful for understanding evolution and recent modifications."
+    )]
+    async fn history(
+        &self,
+        Parameters(params): Parameters<HistoryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: history");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("history \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let repo_path = &self.config.repo_path;
+        let result =
+            tools::history::handle_history(&db, repo_path, &params.symbol_name, params.max_commits)
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "boundary",
         description = "Analyze module boundaries: which symbols are used by code outside the given path (public API) vs only used internally (safe to refactor)."
     )]
@@ -783,6 +811,7 @@ impl ServerHandler for IlluServer {
                  'rename_plan' for rename impact preview, \
                  'similar' for finding structurally similar symbols, \
                  'blame' for git blame on symbols, \
+                 'history' for git commit history on symbols, \
                  'boundary' for module API boundary analysis, \
                  'health' for index quality diagnosis, \
                  'crate_graph' for workspace dependency visualization."

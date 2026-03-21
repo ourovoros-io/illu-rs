@@ -9,6 +9,7 @@ pub mod docs;
 pub mod file_graph;
 pub mod freshness;
 pub mod health;
+pub mod history;
 pub mod hotspots;
 pub mod impact;
 pub mod implements;
