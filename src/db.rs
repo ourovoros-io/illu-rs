@@ -512,7 +512,9 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT f.path, COUNT(s.id) \
              FROM files f \
-             LEFT JOIN symbols s ON s.file_id = f.id AND s.visibility = 'public' \
+             LEFT JOIN symbols s ON s.file_id = f.id \
+                AND s.visibility IN ('public', 'pub(crate)') \
+                AND s.kind NOT IN ('use', 'mod') \
              WHERE f.path LIKE ?1 ESCAPE '\\' \
              GROUP BY f.path \
              ORDER BY f.path",
@@ -1303,15 +1305,18 @@ impl Database {
     }
 
     pub fn get_trait_impls_for_trait(&self, trait_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
+        // Match exact name OR last segment (e.g. "ProtocolHandler"
+        // matches "iroh::protocol::ProtocolHandler")
+        let like_suffix = format!("%::{trait_name}");
         let mut stmt = self.conn.prepare(
             "SELECT ti.type_name, ti.trait_name, f.path, \
                     ti.line_start, ti.line_end \
              FROM trait_impls ti \
              JOIN files f ON f.id = ti.file_id \
-             WHERE ti.trait_name = ?1",
+             WHERE ti.trait_name = ?1 OR ti.trait_name LIKE ?2",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![trait_name])?;
+        let mut rows = stmt.query(params![trait_name, like_suffix])?;
         while let Some(row) = rows.next()? {
             results.push(row_to_stored_trait_impl(row)?);
         }
