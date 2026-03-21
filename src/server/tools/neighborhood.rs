@@ -224,7 +224,7 @@ impl<'a> TreeRenderer<'a> {
                 .get_callers_by_name(name, Some("high"), self.exclude_tests)?
         } else {
             self.db
-                .get_callees_by_name(name, None, self.exclude_tests)?
+                .get_callees_by_name(name, Some("high"), self.exclude_tests)?
         };
 
         let child_prefix = if is_root {

@@ -520,12 +520,17 @@ fn refresh_removes_deleted_file_refs() {
         "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
     )
     .unwrap();
+    // lib.rs declares extra as a module so cross-file refs get high confidence
     std::fs::write(
         src_dir.join("lib.rs"),
-        "pub fn base() {}\npub fn caller() { base(); }\n",
+        "pub mod extra;\npub fn base() {}\npub fn caller() { base(); }\n",
     )
     .unwrap();
-    std::fs::write(src_dir.join("extra.rs"), "pub fn extra_caller() {}\n").unwrap();
+    std::fs::write(
+        src_dir.join("extra.rs"),
+        "use crate::base;\npub fn extra_caller() { base(); }\n",
+    )
+    .unwrap();
 
     let db = Database::open_in_memory().unwrap();
     let config = IndexConfig {
@@ -533,7 +538,7 @@ fn refresh_removes_deleted_file_refs() {
     };
     index_repo(&db, &config).unwrap();
 
-    // Verify extra_caller symbol exists before delete
+    // Verify extra_caller exists and references base (via high-confidence import)
     let syms = db.search_symbols("extra_caller").unwrap();
     assert!(
         !syms.is_empty(),

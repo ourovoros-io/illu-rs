@@ -1727,7 +1727,8 @@ impl Database {
                    SELECT 1 FROM symbol_refs sr2 \
                    JOIN symbols s2 ON s2.id = sr2.target_symbol_id \
                    WHERE s2.name = s.name \
-                     AND (s.impl_type IS NULL OR s2.impl_type = s.impl_type) \
+                     AND sr2.confidence = 'high' \
+                     AND (s.impl_type IS NOT NULL AND s2.impl_type = s.impl_type) \
                ) \
              ORDER BY f.path, s.line_start"
         } else {
@@ -1746,7 +1747,8 @@ impl Database {
                    SELECT 1 FROM symbol_refs sr2 \
                    JOIN symbols s2 ON s2.id = sr2.target_symbol_id \
                    WHERE s2.name = s.name \
-                     AND (s.impl_type IS NULL OR s2.impl_type = s.impl_type) \
+                     AND sr2.confidence = 'high' \
+                     AND (s.impl_type IS NOT NULL AND s2.impl_type = s.impl_type) \
                ) \
              ORDER BY f.path, s.line_start"
         };

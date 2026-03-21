@@ -27,7 +27,6 @@ pub fn handle_callpath(
         return Ok(format!("Target symbol '{to}' not found."));
     }
 
-    let from_name = base_name(from);
     let to_name = base_name(to);
 
     if all_paths {
@@ -37,9 +36,9 @@ pub fn handle_callpath(
             max_paths,
             exclude_tests,
         };
-        handle_all_paths(db, from, to, from_name, to_name, &cfg)
+        handle_all_paths(db, from, to, &from_syms, to_name, &cfg)
     } else {
-        handle_shortest_path(db, from, to, from_name, to_name, max_depth, exclude_tests)
+        handle_shortest_path(db, from, to, &from_syms, to_name, max_depth, exclude_tests)
     }
 }
 
@@ -50,7 +49,7 @@ fn handle_shortest_path(
     db: &Database,
     from: &str,
     to: &str,
-    _from_name: &str,
+    from_syms: &[crate::db::StoredSymbol],
     to_name: &str,
     max_depth: usize,
     exclude_tests: bool,
@@ -60,8 +59,7 @@ fn handle_shortest_path(
     let mut queue: VecDeque<(BfsNode, usize)> = VecDeque::new();
 
     // Seed BFS with all definitions of the source symbol
-    let from_syms = super::resolve_symbol(db, from)?;
-    for sym in &from_syms {
+    for sym in from_syms {
         let node = (sym.name.clone(), sym.file_path.clone());
         visited.insert(node.clone());
         queue.push_back((node, 0));
@@ -189,14 +187,13 @@ fn handle_all_paths(
     db: &Database,
     from: &str,
     to: &str,
-    _from_name: &str,
+    from_syms: &[crate::db::StoredSymbol],
     to_name: &str,
     cfg: &DfsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let from_syms = super::resolve_symbol(db, from)?;
     let mut results: Vec<Vec<String>> = Vec::new();
 
-    for sym in &from_syms {
+    for sym in from_syms {
         let start_node = (sym.name.clone(), sym.file_path.clone());
         let mut current_path = vec![start_node.clone()];
         let mut visited: HashSet<BfsNode> = HashSet::new();

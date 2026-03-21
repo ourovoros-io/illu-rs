@@ -69,19 +69,19 @@ pub fn handle_type_usage(
     Ok(output)
 }
 
+fn is_word_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
 /// Check if `text` contains `word` as a whole word (not a substring of a longer identifier).
 #[must_use]
 pub fn contains_whole_word(text: &str, word: &str) -> bool {
     let mut start = 0;
     while let Some(pos) = text[start..].find(word) {
         let abs_pos = start + pos;
-        let before_ok = abs_pos == 0
-            || !text.as_bytes()[abs_pos - 1].is_ascii_alphanumeric()
-                && text.as_bytes()[abs_pos - 1] != b'_';
+        let before_ok = abs_pos == 0 || !is_word_char(text.as_bytes()[abs_pos - 1]);
         let after_pos = abs_pos + word.len();
-        let after_ok = after_pos >= text.len()
-            || !text.as_bytes()[after_pos].is_ascii_alphanumeric()
-                && text.as_bytes()[after_pos] != b'_';
+        let after_ok = after_pos >= text.len() || !is_word_char(text.as_bytes()[after_pos]);
         if before_ok && after_ok {
             return true;
         }
@@ -355,5 +355,28 @@ mod tests {
         // Should NOT contain full signatures
         assert!(!result.contains("pub fn load_config"));
         assert!(!result.contains("pub fn use_config"));
+    }
+
+    #[test]
+    fn test_contains_whole_word() {
+        assert!(contains_whole_word("fn foo(cfg: &Config)", "Config"));
+        assert!(contains_whole_word("Config", "Config"));
+        assert!(contains_whole_word("-> Config", "Config"));
+        assert!(contains_whole_word("Option<Config>", "Config"));
+
+        // Should NOT match substrings of longer identifiers
+        assert!(!contains_whole_word("SyncPlanConflict", "SyncPlan"));
+        assert!(!contains_whole_word(
+            "fn foo(cfg: &SyncPlanFile)",
+            "SyncPlan"
+        ));
+        assert!(!contains_whole_word("_Config", "Config"));
+        assert!(!contains_whole_word("MyConfig", "Config"));
+        assert!(!contains_whole_word("Config2", "Config"));
+
+        // Boundary cases
+        assert!(contains_whole_word("(Config)", "Config"));
+        assert!(contains_whole_word("&Config,", "Config"));
+        assert!(contains_whole_word("Vec<Config>", "Config"));
     }
 }
