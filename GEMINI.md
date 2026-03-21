@@ -61,7 +61,6 @@ This repo is indexed by illu (36 tools). **Use illu tools as your first step** â
 | `@illu cross_impact <symbol>` | `mcp_illu_cross_impact` | `symbol_name: "<symbol>"` |
 | `@illu cross_deps` | `mcp_illu_cross_deps` | |
 | `@illu cross_callpath <from> <to>` | `mcp_illu_cross_callpath` | `from: "<from>", to: "<to>"` |
-| `@illu install` | *(CLI only)* | |
 
 ### Workflow rules
 
