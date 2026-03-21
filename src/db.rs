@@ -132,6 +132,19 @@ impl Database {
         Ok(db)
     }
 
+    pub fn open_readonly(path: &std::path::Path) -> SqlResult<Self> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let repo_root = path
+            .parent()
+            .filter(|p| p.file_name().is_some_and(|n| n == ".illu"))
+            .and_then(|p| p.parent())
+            .map(std::path::Path::to_path_buf);
+        Ok(Self { conn, repo_root })
+    }
+
     pub fn repo_root(&self) -> Option<&std::path::Path> {
         self.repo_root.as_deref()
     }
@@ -1942,6 +1955,80 @@ impl Database {
         }
         Ok(results)
     }
+
+    /// Find symbols in this DB that reference a target symbol by name.
+    pub fn find_cross_refs(
+        &self,
+        target_name: &str,
+        target_impl_type: Option<&str>,
+    ) -> SqlResult<Vec<CrossRef>> {
+        let (sql, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(it) = target_impl_type {
+                (
+                    "SELECT DISTINCT s.name, s.impl_type, f.path, s.line_start
+                     FROM symbol_refs sr
+                     JOIN symbols s ON sr.source_symbol_id = s.id
+                     JOIN symbols t ON sr.target_symbol_id = t.id
+                     JOIN files f ON s.file_id = f.id
+                     WHERE t.name = ?1 AND t.impl_type = ?2
+                     ORDER BY f.path, s.line_start LIMIT 50",
+                    vec![Box::new(target_name.to_string()), Box::new(it.to_string())],
+                )
+            } else {
+                (
+                    "SELECT DISTINCT s.name, s.impl_type, f.path, s.line_start
+                     FROM symbol_refs sr
+                     JOIN symbols s ON sr.source_symbol_id = s.id
+                     JOIN symbols t ON sr.target_symbol_id = t.id
+                     JOIN files f ON s.file_id = f.id
+                     WHERE t.name = ?1
+                     ORDER BY f.path, s.line_start LIMIT 50",
+                    vec![Box::new(target_name.to_string())],
+                )
+            };
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            Ok(CrossRef {
+                name: row.get(0)?,
+                impl_type: row.get(1)?,
+                file_path: row.get(2)?,
+                line_start: row.get(3)?,
+            })
+        })?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+
+    /// Check if a symbol with the given name exists.
+    pub fn symbol_exists(&self, name: &str) -> SqlResult<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM symbols WHERE name = ?1",
+            [name],
+            |r| r.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Get direct call-type callees of a symbol by name.
+    pub fn get_direct_callees(&self, symbol_name: &str) -> SqlResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT t.name
+             FROM symbol_refs sr
+             JOIN symbols s ON sr.source_symbol_id = s.id
+             JOIN symbols t ON sr.target_symbol_id = t.id
+             WHERE s.name = ?1 AND sr.kind = 'call'
+             LIMIT 100",
+        )?;
+        let rows = stmt.query_map([symbol_name], |row| row.get(0))?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct CrossRef {
+    pub name: String,
+    pub impl_type: Option<String>,
+    pub file_path: String,
+    pub line_start: i64,
 }
 
 pub struct SymbolIdMap {
@@ -3581,5 +3668,39 @@ mod tests {
         assert_eq!(largest[0].lines, 101); // 110 - 10 + 1
         assert_eq!(largest[1].name, "medium");
         assert_eq!(largest[1].lines, 31); // 150 - 120 + 1
+    }
+
+    #[test]
+    fn test_open_readonly() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let illu_dir = dir.path().join(".illu");
+        std::fs::create_dir_all(&illu_dir).unwrap();
+        let db_path = illu_dir.join("index.db");
+
+        // Create a DB with data first
+        {
+            let db = Database::open(&db_path).unwrap();
+            db.conn
+                .execute(
+                    "INSERT INTO files (path, content_hash) VALUES (?1, ?2)",
+                    ["src/lib.rs", "abc123"],
+                )
+                .unwrap();
+        }
+
+        // Open readonly — reads work
+        let db = Database::open_readonly(&db_path).unwrap();
+        let count: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Writes should fail
+        let result = db.conn.execute(
+            "INSERT INTO files (path, content_hash) VALUES (?1, ?2)",
+            ["src/main.rs", "def456"],
+        );
+        assert!(result.is_err());
     }
 }

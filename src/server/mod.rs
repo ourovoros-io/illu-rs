@@ -15,15 +15,17 @@ use std::sync::{Mutex, MutexGuard};
 pub struct IlluServer {
     db: std::sync::Arc<Mutex<Database>>,
     config: std::sync::Arc<IndexConfig>,
+    registry: std::sync::Arc<crate::registry::Registry>,
     tool_router: ToolRouter<Self>,
 }
 
 impl IlluServer {
     #[must_use]
-    pub fn new(db: Database, config: IndexConfig) -> Self {
+    pub fn new(db: Database, config: IndexConfig, registry: crate::registry::Registry) -> Self {
         Self {
             db: std::sync::Arc::new(Mutex::new(db)),
             config: std::sync::Arc::new(config),
+            registry: std::sync::Arc::new(registry),
             tool_router: Self::tool_router(),
         }
     }
@@ -343,6 +345,40 @@ struct GraphExportParams {
 
 #[derive(Deserialize, JsonSchema)]
 struct FreshnessParams {}
+
+#[derive(Deserialize, JsonSchema)]
+struct ReposParams {}
+
+#[derive(Deserialize, JsonSchema)]
+struct CrossQueryParams {
+    /// Search term
+    query: String,
+    scope: Option<String>,
+    kind: Option<String>,
+    attribute: Option<String>,
+    signature: Option<String>,
+    path: Option<String>,
+    limit: Option<i64>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CrossImpactParams {
+    /// Symbol name (supports `Type::method` syntax)
+    symbol_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CrossDepsParams {}
+
+#[derive(Deserialize, JsonSchema)]
+struct CrossCallpathParams {
+    /// Source symbol name (in current repo)
+    from: String,
+    /// Target symbol name (in another repo)
+    to: String,
+    /// Target repo name (optional — searches all if omitted)
+    target_repo: Option<String>,
+}
 
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
     McpError::internal_error(e.to_string(), None)
@@ -1018,6 +1054,110 @@ impl IlluServer {
                 .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
+
+    #[tool(
+        name = "repos",
+        description = "List all registered repos with status, symbol counts, and which is the active session repo."
+    )]
+    async fn repos(
+        &self,
+        Parameters(_params): Parameters<ReposParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Tool call: repos");
+        let _guard = crate::status::StatusGuard::new("repos");
+        let result = tools::repos::handle_repos(&self.registry, &self.config.repo_path)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "cross_query",
+        description = "Search symbols across other registered repos. Same parameters as `query` but searches all repos except the current one."
+    )]
+    async fn cross_query(
+        &self,
+        Parameters(params): Parameters<CrossQueryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(query = %params.query, "Tool call: cross_query");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("cross_query \u{25b8} {}", params.query));
+        let opts = tools::cross_query::CrossQueryOpts {
+            query: &params.query,
+            scope: params.scope.as_deref(),
+            kind: params.kind.as_deref(),
+            attribute: params.attribute.as_deref(),
+            signature: params.signature.as_deref(),
+            path: params.path.as_deref(),
+            limit: params.limit,
+        };
+        let result =
+            tools::cross_query::handle_cross_query(&self.registry, &self.config.repo_path, &opts)
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "cross_impact",
+        description = "Find references to a symbol in other registered repos. Name-based matching across repo boundaries."
+    )]
+    async fn cross_impact(
+        &self,
+        Parameters(params): Parameters<CrossImpactParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: cross_impact");
+        let _guard = crate::status::StatusGuard::new(&format!(
+            "cross_impact \u{25b8} {}",
+            params.symbol_name
+        ));
+        let result = tools::cross_impact::handle_cross_impact(
+            &self.registry,
+            &self.config.repo_path,
+            &params.symbol_name,
+        )
+        .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "cross_deps",
+        description = "Show inter-repo dependencies: path deps between registered repos and shared crate dependencies."
+    )]
+    async fn cross_deps(
+        &self,
+        Parameters(_params): Parameters<CrossDepsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Tool call: cross_deps");
+        let _guard = crate::status::StatusGuard::new("cross_deps");
+        let result = tools::cross_deps::handle_cross_deps(&self.registry).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "cross_callpath",
+        description = "Find call chains spanning repos via bridge symbols. Identifies shared symbols between the current repo and target repos that could form a call path."
+    )]
+    async fn cross_callpath(
+        &self,
+        Parameters(params): Parameters<CrossCallpathParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(from = %params.from, to = %params.to, "Tool call: cross_callpath");
+        let _guard = crate::status::StatusGuard::new(&format!(
+            "cross_callpath \u{25b8} {} \u{2192} {}",
+            params.from, params.to
+        ));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::cross_callpath::handle_cross_callpath(
+            &db,
+            &self.registry,
+            &self.config.repo_path,
+            &params.from,
+            &params.to,
+            params.target_repo.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
 }
 
 #[tool_handler]
@@ -1057,7 +1197,12 @@ impl ServerHandler for IlluServer {
                  'crate_impact' for cross-crate symbol impact in workspaces, \
                  'graph_export' for DOT/Graphviz export of call or file graphs, \
                  'test_impact' for finding which tests break when changing a symbol, \
-                 'orphaned' for finding symbols with no callers and no test coverage."
+                 'orphaned' for finding symbols with no callers and no test coverage, \
+                 'repos' for listing registered repos with status, \
+                 'cross_query' for searching symbols across all registered repos, \
+                 'cross_impact' for finding cross-repo references to a symbol, \
+                 'cross_deps' for showing inter-repo dependency relationships, \
+                 'cross_callpath' for finding call chains spanning repo boundaries."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
