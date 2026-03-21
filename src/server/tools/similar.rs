@@ -123,7 +123,7 @@ fn score_candidates<'a>(
             return_type,
             target_callees,
         )?;
-        if score > 0 {
+        if score >= 2 {
             scored.push((score, candidate, reasons));
         }
     }
