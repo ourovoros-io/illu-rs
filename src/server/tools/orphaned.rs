@@ -177,10 +177,7 @@ mod tests {
             .get_symbol_id("open_in_memory", "src/lib.rs")
             .unwrap()
             .unwrap();
-        let test_id = db
-            .get_symbol_id("test_db", "src/lib.rs")
-            .unwrap()
-            .unwrap();
+        let test_id = db.get_symbol_id("test_db", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(test_id, open_id, "call", "high")
             .unwrap();
 

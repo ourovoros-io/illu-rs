@@ -67,6 +67,19 @@ pub(crate) fn qualified_name(sym: &StoredSymbol) -> String {
     }
 }
 
+const MAX_CARGO_TEST_NAMES: usize = 20;
+
+pub(crate) fn format_cargo_test_suggestion(test_names: &[&str]) -> String {
+    if test_names.len() <= MAX_CARGO_TEST_NAMES {
+        format!("cargo test {}", test_names.join(" "))
+    } else {
+        format!(
+            "cargo test  # {} tests affected, run full suite",
+            test_names.len()
+        )
+    }
+}
+
 /// Check if a symbol is an entry point (main, #[test]) that should
 /// be excluded from unused/untested reports.
 pub(crate) fn is_entry_point(sym: &StoredSymbol) -> bool {

@@ -954,7 +954,13 @@ impl Database {
         let use_trigram = query.len() >= 3;
 
         if fts_safe {
-            let fts_query = format!("\"{query}\"*");
+            // Short queries cause FTS noise from doc_comment matches;
+            // restrict to name column only for terms <= 5 chars
+            let fts_query = if query.len() <= 5 {
+                format!("name:\"{query}\"*")
+            } else {
+                format!("\"{query}\"*")
+            };
             let (sql, substr_param) = if use_trigram {
                 (
                     "WITH fts_results AS ( \
@@ -1459,7 +1465,8 @@ impl Database {
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
-             WHERE ss.name = ?1 AND (?2 IS NULL OR sr.confidence = ?2)",
+             WHERE ss.name = ?1 AND sr.kind = 'call' \
+             AND (?2 IS NULL OR sr.confidence = ?2)",
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, min_confidence])?;
@@ -1480,7 +1487,8 @@ impl Database {
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
-             WHERE ts.name = ?1 AND (?2 IS NULL OR sr.confidence = ?2)",
+             WHERE ts.name = ?1 AND sr.kind = 'call' \
+             AND (?2 IS NULL OR sr.confidence = ?2)",
         )?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, min_confidence])?;
@@ -2967,6 +2975,14 @@ mod tests {
         // No callers for caller_fn
         let empty = db.get_callers_by_name("caller_fn", None).unwrap();
         assert!(empty.is_empty());
+
+        // Type refs should be excluded
+        db.insert_symbol_ref(caller_id, target_id, "type_ref", "high")
+            .unwrap();
+        let callers = db.get_callers_by_name("target_fn", None).unwrap();
+        assert_eq!(callers.len(), 1, "type_ref should not appear in callers");
+        let callees = db.get_callees_by_name("caller_fn", None).unwrap();
+        assert_eq!(callees.len(), 1, "type_ref should not appear in callees");
     }
 
     #[test]

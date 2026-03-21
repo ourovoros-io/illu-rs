@@ -47,9 +47,10 @@ pub fn handle_test_impact(
 
     // Suggested cargo test command
     let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
+    let suggestion = super::format_cargo_test_suggestion(&test_names);
     let _ = writeln!(output, "---\n### Suggested Command\n");
     let _ = writeln!(output, "```");
-    let _ = writeln!(output, "cargo test -- {}", test_names.join(" "));
+    let _ = writeln!(output, "{suggestion}");
     let _ = writeln!(output, "```");
 
     Ok(output)

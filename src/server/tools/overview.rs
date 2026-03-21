@@ -30,7 +30,10 @@ pub fn handle_overview(
         if sym.kind == SymbolKind::EnumVariant {
             continue;
         }
-        if by_file.last().is_none_or(|(f, _)| *f != sym.file_path.as_str()) {
+        let needs_new_group = by_file
+            .last()
+            .is_none_or(|(f, _)| *f != sym.file_path.as_str());
+        if needs_new_group {
             by_file.push((&sym.file_path, Vec::new()));
         }
         if let Some(last) = by_file.last_mut() {
@@ -43,21 +46,26 @@ pub fn handle_overview(
     if let Some(max) = max_symbols
         && max < total_eligible
     {
-        let guaranteed = by_file.len().min(max);
-        let remaining = max.saturating_sub(guaranteed);
-        let pool = total_eligible.saturating_sub(guaranteed);
+        if max < by_file.len() {
+            // Fewer slots than files: keep first N files with 1 symbol each
+            by_file.truncate(max);
+            for (_file, syms) in &mut by_file {
+                syms.truncate(1);
+            }
+        } else {
+            let remaining = max.saturating_sub(by_file.len());
+            let pool: usize = by_file.iter().map(|(_, s)| s.len().saturating_sub(1)).sum();
 
-        for (_file, syms) in &mut by_file {
-            let extra = if pool > 0 && remaining > 0 {
-                // Integer proportion: (overflow - 1) * remaining / pool
-                // using multiply-then-divide to avoid floats
-                let overflow = syms.len().saturating_sub(1);
-                overflow * remaining / pool
-            } else {
-                0
-            };
-            let budget = (1 + extra).min(syms.len());
-            syms.truncate(budget);
+            for (_file, syms) in &mut by_file {
+                let extra = if pool > 0 && remaining > 0 {
+                    let overflow = syms.len().saturating_sub(1);
+                    overflow * remaining / pool
+                } else {
+                    0
+                };
+                let budget = (1 + extra).min(syms.len());
+                syms.truncate(budget);
+            }
         }
     }
 
@@ -87,18 +95,7 @@ pub fn handle_overview(
 
             let _ = writeln!(output);
 
-            if sym.kind == SymbolKind::Function
-                && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path)
-            {
-                let same_file_calls: Vec<&str> = callees
-                    .iter()
-                    .filter(|c| c.file_path == sym.file_path && c.ref_kind == "call")
-                    .map(|c| c.name.as_str())
-                    .collect();
-                if !same_file_calls.is_empty() {
-                    let _ = writeln!(output, "    calls: {}", same_file_calls.join(", "));
-                }
-            }
+            render_same_file_callees(db, &mut output, sym);
         }
     }
 
@@ -124,6 +121,21 @@ pub fn handle_overview(
     );
 
     Ok(output)
+}
+
+fn render_same_file_callees(db: &Database, output: &mut String, sym: &crate::db::StoredSymbol) {
+    if sym.kind == SymbolKind::Function
+        && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path)
+    {
+        let same_file_calls: Vec<&str> = callees
+            .iter()
+            .filter(|c| c.file_path == sym.file_path && c.ref_kind == "call")
+            .map(|c| c.name.as_str())
+            .collect();
+        if !same_file_calls.is_empty() {
+            let _ = writeln!(output, "    calls: {}", same_file_calls.join(", "));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -451,6 +463,50 @@ mod tests {
         assert!(
             result.contains("small_fn_"),
             "small file should have at least one symbol shown"
+        );
+    }
+
+    #[test]
+    fn test_overview_limit_smaller_than_file_count() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create 5 files with 1 symbol each
+        for i in 0..5 {
+            let fid = db
+                .insert_file(&format!("src/f{i}.rs"), &format!("h{i}"))
+                .unwrap();
+            store_symbols(
+                &db,
+                fid,
+                &[Symbol {
+                    name: format!("fn_{i}"),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: format!("src/f{i}.rs"),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: format!("pub fn fn_{i}()"),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                }],
+            )
+            .unwrap();
+        }
+
+        // Limit=2 with 5 files: should show exactly 2 files
+        let result = handle_overview(&db, "src/", false, Some(2)).unwrap();
+        let file_headers: Vec<_> = result.lines().filter(|l| l.starts_with("### ")).collect();
+        assert_eq!(
+            file_headers.len(),
+            2,
+            "limit=2 should show exactly 2 files, got: {file_headers:?}"
+        );
+        assert!(
+            result.contains("(limited to 2, 5 total)"),
+            "should show truncation note: {result}"
         );
     }
 }

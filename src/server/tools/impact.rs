@@ -85,7 +85,8 @@ pub fn handle_impact(
             );
         }
         let test_names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
-        let _ = writeln!(output, "\nSuggested: `cargo test {}`", test_names.join(" "));
+        let suggestion = super::format_cargo_test_suggestion(&test_names);
+        let _ = writeln!(output, "\nSuggested: `{suggestion}`");
     }
 
     Ok(output)
@@ -632,8 +633,12 @@ mod tests {
         .unwrap();
 
         let open_id = db.get_symbol_id("open", "src/lib.rs").unwrap().unwrap();
-        let caller_id = db.get_symbol_id("caller_fn", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(caller_id, open_id, "call", "high").unwrap();
+        let caller_id = db
+            .get_symbol_id("caller_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(caller_id, open_id, "call", "high")
+            .unwrap();
 
         let result = handle_impact(&db, "Database::open", None, false).unwrap();
         assert!(
@@ -683,8 +688,12 @@ mod tests {
         .unwrap();
 
         let open_id = db.get_symbol_id("open", "src/lib.rs").unwrap().unwrap();
-        let test_id = db.get_symbol_id("test_open", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(test_id, open_id, "call", "high").unwrap();
+        let test_id = db
+            .get_symbol_id("test_open", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(test_id, open_id, "call", "high")
+            .unwrap();
 
         let result = handle_impact(&db, "Database::open", None, false).unwrap();
         assert!(
