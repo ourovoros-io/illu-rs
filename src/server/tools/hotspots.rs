@@ -16,10 +16,15 @@ pub fn handle_hotspots(
     let most_referenced = db.get_most_referenced_symbols(max, prefix, Some("high"))?;
     if !most_referenced.is_empty() {
         let _ = writeln!(output, "### Most Referenced (fragile to change)\n");
-        for (i, (name, file, count)) in most_referenced.iter().enumerate() {
+        for (i, (name, file, count, impl_type)) in most_referenced.iter().enumerate() {
+            let display = if let Some(it) = impl_type {
+                format!("{it}::{name}")
+            } else {
+                name.clone()
+            };
             let _ = writeln!(
                 output,
-                "{}. **{name}** ({file}) — {count} references",
+                "{}. **{display}** ({file}) — {count} references",
                 i + 1
             );
         }

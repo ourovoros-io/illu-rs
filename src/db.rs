@@ -26,6 +26,8 @@ newtype_id!(SymbolId);
 newtype_id!(CrateId);
 newtype_id!(DepId);
 
+pub type SymbolRefCount = (String, String, i64, Option<String>);
+
 fn escape_like(s: &str) -> String {
     s.replace('%', r"\%").replace('_', r"\_")
 }
@@ -1668,11 +1670,12 @@ impl Database {
         limit: i64,
         path_prefix: &str,
         min_confidence: Option<&str>,
-    ) -> SqlResult<Vec<(String, String, i64)>> {
+    ) -> SqlResult<Vec<SymbolRefCount>> {
         let pattern = format!("{}%", escape_like(path_prefix));
         let mut stmt = self.conn.prepare_cached(
             "SELECT ts.name, f.path, \
-                    COUNT(DISTINCT sr.source_symbol_id) as ref_count \
+                    COUNT(DISTINCT sr.source_symbol_id) as ref_count, \
+                    ts.impl_type \
              FROM symbol_refs sr \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
@@ -1685,7 +1688,7 @@ impl Database {
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
         while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+            results.push((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?));
         }
         Ok(results)
     }

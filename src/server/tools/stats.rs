@@ -87,11 +87,16 @@ pub fn handle_stats(
     let _ = writeln!(output);
 
     // Most referenced
-    let most_ref = db.get_most_referenced_symbols(5, prefix, None)?;
+    let most_ref = db.get_most_referenced_symbols(5, prefix, Some("high"))?;
     if !most_ref.is_empty() {
         let _ = writeln!(output, "### Most Referenced\n");
-        for (name, file, count) in &most_ref {
-            let _ = writeln!(output, "- **{name}** ({file}) — {count} refs");
+        for (name, file, count, impl_type) in &most_ref {
+            let display = if let Some(it) = impl_type {
+                format!("{it}::{name}")
+            } else {
+                name.clone()
+            };
+            let _ = writeln!(output, "- **{display}** ({file}) — {count} refs");
         }
         let _ = writeln!(output);
     }
@@ -188,6 +193,46 @@ mod tests {
         assert!(result.contains("**Files:** 0"));
         assert!(result.contains("**Symbols:** 0"));
         assert!(result.contains("**Tests:** 0"));
+    }
+
+    #[test]
+    fn test_stats_most_referenced_uses_high_confidence() {
+        let db = Database::open_in_memory().unwrap();
+        let f = db.insert_file("src/lib.rs", "h1").unwrap();
+
+        let symbols = vec![
+            make_sym("real_fn", SymbolKind::Function, "src/lib.rs", None),
+            make_sym("noise_fn", SymbolKind::Function, "src/lib.rs", None),
+            make_sym("caller1", SymbolKind::Function, "src/lib.rs", None),
+            make_sym("caller2", SymbolKind::Function, "src/lib.rs", None),
+            make_sym("caller3", SymbolKind::Function, "src/lib.rs", None),
+        ];
+        store_symbols(&db, f, &symbols).unwrap();
+
+        let real_id = sym_id(&db, "real_fn");
+        let noise_id = sym_id(&db, "noise_fn");
+        let c1 = sym_id(&db, "caller1");
+        let c2 = sym_id(&db, "caller2");
+        let c3 = sym_id(&db, "caller3");
+
+        // real_fn: 2 high-confidence refs
+        db.insert_symbol_ref(c1, real_id, "call", "high").unwrap();
+        db.insert_symbol_ref(c2, real_id, "call", "high").unwrap();
+
+        // noise_fn: 3 refs but all low-confidence
+        db.insert_symbol_ref(c1, noise_id, "call", "low").unwrap();
+        db.insert_symbol_ref(c2, noise_id, "call", "low").unwrap();
+        db.insert_symbol_ref(c3, noise_id, "call", "low").unwrap();
+
+        let result = handle_stats(&db, None).unwrap();
+        assert!(
+            result.contains("real_fn"),
+            "high-confidence refs should appear in most referenced"
+        );
+        assert!(
+            !result.contains("noise_fn"),
+            "low-confidence-only refs should NOT inflate most referenced"
+        );
     }
 
     #[test]
