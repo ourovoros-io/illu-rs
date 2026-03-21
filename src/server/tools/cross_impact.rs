@@ -28,7 +28,7 @@ pub fn handle_cross_impact(
             continue;
         };
 
-        let refs = query_refs(&db, name, impl_type)?;
+        let refs = db.find_cross_refs(name, impl_type)?;
 
         if !refs.is_empty() {
             found_any = true;
@@ -39,12 +39,12 @@ pub fn handle_cross_impact(
                 repo.path.display(),
                 refs.len()
             );
-            for (sname, simpl, file, line) in &refs {
-                let qualified = match simpl {
-                    Some(it) => format!("{it}::{sname}"),
-                    None => sname.clone(),
+            for r in &refs {
+                let qualified = match &r.impl_type {
+                    Some(it) => format!("{it}::{}", r.name),
+                    None => r.name.clone(),
                 };
-                let _ = writeln!(out, "- `{qualified}` ({file}:{line})");
+                let _ = writeln!(out, "- `{qualified}` ({}:{})", r.file_path, r.line_start);
             }
             out.push('\n');
         }
@@ -54,51 +54,4 @@ pub fn handle_cross_impact(
         out.push_str("No references to this symbol found in other repos.\n");
     }
     Ok(out)
-}
-
-type RefRow = (String, Option<String>, String, i64);
-
-fn query_refs(
-    db: &Database,
-    name: &str,
-    impl_type: Option<&str>,
-) -> Result<Vec<RefRow>, Box<dyn std::error::Error>> {
-    let sql = if impl_type.is_some() {
-        "SELECT DISTINCT s.name, s.impl_type, f.path, s.line_start
-         FROM symbol_refs sr
-         JOIN symbols s ON sr.source_symbol_id = s.id
-         JOIN symbols t ON sr.target_symbol_id = t.id
-         JOIN files f ON s.file_id = f.id
-         WHERE t.name = ?1 AND t.impl_type = ?2
-         ORDER BY f.path, s.line_start LIMIT 50"
-    } else {
-        "SELECT DISTINCT s.name, s.impl_type, f.path, s.line_start
-         FROM symbol_refs sr
-         JOIN symbols s ON sr.source_symbol_id = s.id
-         JOIN symbols t ON sr.target_symbol_id = t.id
-         JOIN files f ON s.file_id = f.id
-         WHERE t.name = ?1
-         ORDER BY f.path, s.line_start LIMIT 50"
-    };
-
-    let mut stmt = db.conn.prepare(sql)?;
-    let rows = if let Some(it) = impl_type {
-        stmt.query_map(rusqlite::params![name, it], map_row)?
-            .filter_map(std::result::Result::ok)
-            .collect()
-    } else {
-        stmt.query_map(rusqlite::params![name], map_row)?
-            .filter_map(std::result::Result::ok)
-            .collect()
-    };
-    Ok(rows)
-}
-
-fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RefRow> {
-    Ok((
-        row.get::<_, String>(0)?,
-        row.get::<_, Option<String>>(1)?,
-        row.get::<_, String>(2)?,
-        row.get::<_, i64>(3)?,
-    ))
 }

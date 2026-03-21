@@ -18,16 +18,7 @@ pub fn handle_cross_callpath(
 
     let mut out = format!("## Cross-Repo Callpath: `{from}` \u{2192} `{to}`\n\n");
 
-    let from_exists: i64 = primary_db
-        .conn
-        .query_row(
-            "SELECT COUNT(*) FROM symbols WHERE name = ?1",
-            [from],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-
-    if from_exists == 0 {
+    if !primary_db.symbol_exists(from)? {
         return Ok(format!("`{from}` not found in the current repo."));
     }
 
@@ -37,7 +28,7 @@ pub fn handle_cross_callpath(
         other_repos
     };
 
-    let callees = get_callees_of(primary_db, from)?;
+    let callees = primary_db.get_direct_callees(from)?;
     let mut found = false;
 
     for repo in &repos_to_search {
@@ -46,14 +37,10 @@ pub fn handle_cross_callpath(
             continue;
         };
 
-        let to_exists: i64 = db
-            .conn
-            .query_row("SELECT COUNT(*) FROM symbols WHERE name = ?1", [to], |r| {
-                r.get(0)
-            })
-            .unwrap_or(0);
-
-        if to_exists == 0 {
+        let Ok(to_exists) = db.symbol_exists(to) else {
+            continue;
+        };
+        if !to_exists {
             continue;
         }
 
@@ -88,33 +75,11 @@ pub fn handle_cross_callpath(
     Ok(out)
 }
 
-fn get_callees_of(db: &Database, from: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let mut stmt = db.conn.prepare(
-        "SELECT DISTINCT t.name
-         FROM symbol_refs sr
-         JOIN symbols s ON sr.source_symbol_id = s.id
-         JOIN symbols t ON sr.target_symbol_id = t.id
-         WHERE s.name = ?1 AND sr.kind = 'call' LIMIT 100",
-    )?;
-    let callees: Vec<String> = stmt
-        .query_map([from], |row| row.get(0))?
-        .filter_map(std::result::Result::ok)
-        .collect();
-    Ok(callees)
-}
-
 fn find_bridges(db: &Database, callees: &[String]) -> Vec<String> {
     let mut bridges = Vec::new();
     for callee in callees {
-        let exists: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM symbols WHERE name = ?1",
-                [callee.as_str()],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
-        if exists > 0 {
+        let exists = db.symbol_exists(callee).unwrap_or(false);
+        if exists {
             bridges.push(callee.clone());
         }
     }

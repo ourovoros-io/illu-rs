@@ -498,7 +498,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (db, config)
             };
 
-            register_repo(repo_path);
+            if has_cargo {
+                register_repo(repo_path);
+            }
 
             let registry = {
                 let path = illu_rs::registry::Registry::default_path()
