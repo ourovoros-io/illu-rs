@@ -212,7 +212,7 @@ fn render_callers(
 
     let _ = writeln!(output, "### Called By\n");
     for c in &callers {
-        let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+        let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
     }
     let _ = writeln!(output);
 
@@ -242,7 +242,7 @@ fn render_callees(
     if !calls.is_empty() {
         let _ = writeln!(output, "**Calls:**");
         for c in &calls {
-            let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+            let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
         }
         let _ = writeln!(output);
     }
@@ -250,7 +250,7 @@ fn render_callees(
     if !type_refs.is_empty() {
         let _ = writeln!(output, "**Uses types:**");
         for c in &type_refs {
-            let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+            let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
         }
         let _ = writeln!(output);
     }

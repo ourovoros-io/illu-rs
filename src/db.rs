@@ -1256,7 +1256,7 @@ impl Database {
 
     pub fn get_callees(&self, symbol_name: &str, source_file: &str) -> SqlResult<Vec<CalleeInfo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind \
+            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
@@ -1272,6 +1272,7 @@ impl Database {
                 kind: row.get(1)?,
                 file_path: row.get(2)?,
                 ref_kind: row.get(3)?,
+                line_start: row.get(4)?,
             });
         }
         Ok(results)
@@ -1280,7 +1281,7 @@ impl Database {
     /// Find symbols that directly reference the given symbol (reverse of `get_callees`).
     pub fn get_callers(&self, symbol_name: &str, target_file: &str) -> SqlResult<Vec<CalleeInfo>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind \
+            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
@@ -1296,6 +1297,7 @@ impl Database {
                 kind: row.get(1)?,
                 file_path: row.get(2)?,
                 ref_kind: row.get(3)?,
+                line_start: row.get(4)?,
             });
         }
         Ok(results)
@@ -1712,6 +1714,7 @@ pub struct CalleeInfo {
     pub kind: String,
     pub file_path: String,
     pub ref_kind: String,
+    pub line_start: i64,
 }
 
 #[cfg(test)]
