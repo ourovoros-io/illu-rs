@@ -19,7 +19,7 @@ pub fn handle_similar(
     let return_type = target_sig.split_once("->").map(|(_, r)| r.trim());
 
     let target_callees: HashSet<String> = db
-        .get_callees_by_name(&target.name)?
+        .get_callees_by_name(&target.name, None)?
         .into_iter()
         .map(|(name, _)| name)
         .collect();
@@ -147,7 +147,7 @@ fn score_one(
 
     if !target_callees.is_empty() {
         let cand_callees: HashSet<String> = db
-            .get_callees_by_name(cand_name)?
+            .get_callees_by_name(cand_name, None)?
             .into_iter()
             .map(|(name, _)| name)
             .collect();

@@ -1391,36 +1391,74 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees_by_name(&self, symbol_name: &str) -> SqlResult<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT DISTINCT ts.name, f.path \
-             FROM symbol_refs sr \
-             JOIN symbols ss ON ss.id = sr.source_symbol_id \
-             JOIN symbols ts ON ts.id = sr.target_symbol_id \
-             JOIN files f ON f.id = ts.file_id \
-             WHERE ss.name = ?1",
-        )?;
+    pub fn get_callees_by_name(
+        &self,
+        symbol_name: &str,
+        min_confidence: Option<&str>,
+    ) -> SqlResult<Vec<(String, String)>> {
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name])?;
-        while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?));
+        if let Some(conf) = min_confidence {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT DISTINCT ts.name, f.path \
+                 FROM symbol_refs sr \
+                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
+                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
+                 JOIN files f ON f.id = ts.file_id \
+                 WHERE ss.name = ?1 AND sr.confidence = ?2",
+            )?;
+            let mut rows = stmt.query(params![symbol_name, conf])?;
+            while let Some(row) = rows.next()? {
+                results.push((row.get(0)?, row.get(1)?));
+            }
+        } else {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT DISTINCT ts.name, f.path \
+                 FROM symbol_refs sr \
+                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
+                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
+                 JOIN files f ON f.id = ts.file_id \
+                 WHERE ss.name = ?1",
+            )?;
+            let mut rows = stmt.query(params![symbol_name])?;
+            while let Some(row) = rows.next()? {
+                results.push((row.get(0)?, row.get(1)?));
+            }
         }
         Ok(results)
     }
 
-    pub fn get_callers_by_name(&self, symbol_name: &str) -> SqlResult<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT DISTINCT ss.name, sf.path \
-             FROM symbol_refs sr \
-             JOIN symbols ss ON ss.id = sr.source_symbol_id \
-             JOIN symbols ts ON ts.id = sr.target_symbol_id \
-             JOIN files sf ON sf.id = ss.file_id \
-             WHERE ts.name = ?1",
-        )?;
+    pub fn get_callers_by_name(
+        &self,
+        symbol_name: &str,
+        min_confidence: Option<&str>,
+    ) -> SqlResult<Vec<(String, String)>> {
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name])?;
-        while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?));
+        if let Some(conf) = min_confidence {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT DISTINCT ss.name, sf.path \
+                 FROM symbol_refs sr \
+                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
+                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
+                 JOIN files sf ON sf.id = ss.file_id \
+                 WHERE ts.name = ?1 AND sr.confidence = ?2",
+            )?;
+            let mut rows = stmt.query(params![symbol_name, conf])?;
+            while let Some(row) = rows.next()? {
+                results.push((row.get(0)?, row.get(1)?));
+            }
+        } else {
+            let mut stmt = self.conn.prepare_cached(
+                "SELECT DISTINCT ss.name, sf.path \
+                 FROM symbol_refs sr \
+                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
+                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
+                 JOIN files sf ON sf.id = ss.file_id \
+                 WHERE ts.name = ?1",
+            )?;
+            let mut rows = stmt.query(params![symbol_name])?;
+            while let Some(row) = rows.next()? {
+                results.push((row.get(0)?, row.get(1)?));
+            }
         }
         Ok(results)
     }
@@ -1638,22 +1676,42 @@ impl Database {
         &self,
         limit: i64,
         path_prefix: &str,
+        min_confidence: Option<&str>,
     ) -> SqlResult<Vec<(String, String, i64)>> {
         let pattern = format!("{path_prefix}%");
-        let mut stmt = self.conn.prepare(
-            "SELECT ts.name, f.path, COUNT(DISTINCT sr.source_symbol_id) as ref_count \
-             FROM symbol_refs sr \
-             JOIN symbols ts ON ts.id = sr.target_symbol_id \
-             JOIN files f ON f.id = ts.file_id \
-             WHERE f.path LIKE ?1 \
-             GROUP BY ts.id \
-             ORDER BY ref_count DESC \
-             LIMIT ?2",
-        )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![pattern, limit])?;
-        while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        if let Some(conf) = min_confidence {
+            let mut stmt = self.conn.prepare(
+                "SELECT ts.name, f.path, \
+                        COUNT(DISTINCT sr.source_symbol_id) as ref_count \
+                 FROM symbol_refs sr \
+                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
+                 JOIN files f ON f.id = ts.file_id \
+                 WHERE f.path LIKE ?1 AND sr.confidence = ?3 \
+                 GROUP BY ts.id \
+                 ORDER BY ref_count DESC \
+                 LIMIT ?2",
+            )?;
+            let mut rows = stmt.query(params![pattern, limit, conf])?;
+            while let Some(row) = rows.next()? {
+                results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+            }
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT ts.name, f.path, \
+                        COUNT(DISTINCT sr.source_symbol_id) as ref_count \
+                 FROM symbol_refs sr \
+                 JOIN symbols ts ON ts.id = sr.target_symbol_id \
+                 JOIN files f ON f.id = ts.file_id \
+                 WHERE f.path LIKE ?1 \
+                 GROUP BY ts.id \
+                 ORDER BY ref_count DESC \
+                 LIMIT ?2",
+            )?;
+            let mut rows = stmt.query(params![pattern, limit])?;
+            while let Some(row) = rows.next()? {
+                results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+            }
         }
         Ok(results)
     }
@@ -1663,22 +1721,42 @@ impl Database {
         &self,
         limit: i64,
         path_prefix: &str,
+        min_confidence: Option<&str>,
     ) -> SqlResult<Vec<(String, String, i64)>> {
         let pattern = format!("{path_prefix}%");
-        let mut stmt = self.conn.prepare(
-            "SELECT ss.name, f.path, COUNT(DISTINCT sr.target_symbol_id) as ref_count \
-             FROM symbol_refs sr \
-             JOIN symbols ss ON ss.id = sr.source_symbol_id \
-             JOIN files f ON f.id = ss.file_id \
-             WHERE f.path LIKE ?1 \
-             GROUP BY ss.id \
-             ORDER BY ref_count DESC \
-             LIMIT ?2",
-        )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![pattern, limit])?;
-        while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        if let Some(conf) = min_confidence {
+            let mut stmt = self.conn.prepare(
+                "SELECT ss.name, f.path, \
+                        COUNT(DISTINCT sr.target_symbol_id) as ref_count \
+                 FROM symbol_refs sr \
+                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
+                 JOIN files f ON f.id = ss.file_id \
+                 WHERE f.path LIKE ?1 AND sr.confidence = ?3 \
+                 GROUP BY ss.id \
+                 ORDER BY ref_count DESC \
+                 LIMIT ?2",
+            )?;
+            let mut rows = stmt.query(params![pattern, limit, conf])?;
+            while let Some(row) = rows.next()? {
+                results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+            }
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT ss.name, f.path, \
+                        COUNT(DISTINCT sr.target_symbol_id) as ref_count \
+                 FROM symbol_refs sr \
+                 JOIN symbols ss ON ss.id = sr.source_symbol_id \
+                 JOIN files f ON f.id = ss.file_id \
+                 WHERE f.path LIKE ?1 \
+                 GROUP BY ss.id \
+                 ORDER BY ref_count DESC \
+                 LIMIT ?2",
+            )?;
+            let mut rows = stmt.query(params![pattern, limit])?;
+            while let Some(row) = rows.next()? {
+                results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+            }
         }
         Ok(results)
     }
@@ -2882,13 +2960,13 @@ mod tests {
         db.insert_symbol_ref(caller_id, target_id, "call", "high")
             .unwrap();
 
-        let callers = db.get_callers_by_name("target_fn").unwrap();
+        let callers = db.get_callers_by_name("target_fn", None).unwrap();
         assert_eq!(callers.len(), 1);
         assert_eq!(callers[0].0, "caller_fn");
         assert_eq!(callers[0].1, "src/lib.rs");
 
         // No callers for caller_fn
-        let empty = db.get_callers_by_name("caller_fn").unwrap();
+        let empty = db.get_callers_by_name("caller_fn", None).unwrap();
         assert!(empty.is_empty());
     }
 
@@ -3067,7 +3145,7 @@ mod tests {
         // b -> c (c has 1 incoming ref)
         db.insert_symbol_ref(b, c, "call", "high").unwrap();
 
-        let results = db.get_most_referenced_symbols(10, "").unwrap();
+        let results = db.get_most_referenced_symbols(10, "", None).unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, "a");
         assert_eq!(results[0].2, 2);
@@ -3113,7 +3191,7 @@ mod tests {
         // a -> c (a has 1 outgoing ref)
         db.insert_symbol_ref(a, c, "call", "high").unwrap();
 
-        let results = db.get_most_referencing_symbols(10, "").unwrap();
+        let results = db.get_most_referencing_symbols(10, "", None).unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, "b");
         assert_eq!(results[0].2, 2);

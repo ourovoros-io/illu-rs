@@ -58,7 +58,7 @@ fn handle_shortest_path(
             continue;
         }
 
-        let callees = db.get_callees_by_name(&current)?;
+        let callees = db.get_callees_by_name(&current, None)?;
         for (callee_name, _file) in callees {
             if visited.contains(&callee_name) {
                 continue;
@@ -133,7 +133,7 @@ fn find_all_paths(
         .ok_or("current_path must not be empty")?
         .clone();
 
-    let callees = db.get_callees_by_name(&current)?;
+    let callees = db.get_callees_by_name(&current, None)?;
     for (callee_name, _file) in callees {
         if results.len() >= max_paths {
             break;
