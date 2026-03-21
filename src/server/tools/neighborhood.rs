@@ -129,9 +129,11 @@ mod tests {
         let beta_id = insert_symbol(&db, file_id, "beta");
 
         // alpha -> center
-        db.insert_symbol_ref(alpha_id, center_id, "call").unwrap();
+        db.insert_symbol_ref(alpha_id, center_id, "call", "high")
+            .unwrap();
         // center -> beta
-        db.insert_symbol_ref(center_id, beta_id, "call").unwrap();
+        db.insert_symbol_ref(center_id, beta_id, "call", "high")
+            .unwrap();
 
         db
     }

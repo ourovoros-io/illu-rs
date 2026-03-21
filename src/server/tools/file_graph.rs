@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 pub fn handle_file_graph(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let edges = db.get_file_dependencies(path)?;
+    let edges = db.get_file_dependencies(path, Some("high"))?;
 
     let mut output = String::new();
     let _ = writeln!(output, "## File Dependency Graph: {path}\n");
@@ -70,7 +70,8 @@ mod tests {
             .unwrap();
         let tgt_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(src_id, tgt_id, "call").unwrap();
+        db.insert_symbol_ref(src_id, tgt_id, "call", "high")
+            .unwrap();
         db
     }
 
@@ -120,7 +121,7 @@ mod tests {
             .unwrap();
         let s2 = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(s1, s2, "call").unwrap();
+        db.insert_symbol_ref(s1, s2, "call", "high").unwrap();
 
         let result = handle_file_graph(&db, "src/").unwrap();
         assert!(result.contains("No file dependencies found"));

@@ -633,12 +633,14 @@ impl IlluServer {
         Parameters(params): Parameters<RenamePlanParams>,
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(symbol = %params.symbol_name, "Tool call: rename_plan");
-        let _guard =
-            crate::status::StatusGuard::new(&format!("rename_plan \u{25b8} {}", params.symbol_name));
+        let _guard = crate::status::StatusGuard::new(&format!(
+            "rename_plan \u{25b8} {}",
+            params.symbol_name
+        ));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::rename_plan::handle_rename_plan(&db, &params.symbol_name)
-            .map_err(to_mcp_err)?;
+        let result =
+            tools::rename_plan::handle_rename_plan(&db, &params.symbol_name).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

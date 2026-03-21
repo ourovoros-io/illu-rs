@@ -178,7 +178,8 @@ impl Database {
                 id INTEGER PRIMARY KEY,
                 source_symbol_id INTEGER NOT NULL REFERENCES symbols(id),
                 target_symbol_id INTEGER NOT NULL REFERENCES symbols(id),
-                kind TEXT NOT NULL
+                kind TEXT NOT NULL,
+                confidence TEXT NOT NULL DEFAULT 'high'
             );
 
             CREATE TABLE IF NOT EXISTS dependencies (
@@ -223,9 +224,18 @@ impl Database {
 
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
                 content, content=docs, content_rowid=id
-            );
+            );",
+        )?;
+        self.create_indexes()?;
+        self.migrate_fts_schema()?;
+        self.migrate_docs_module_column()?;
+        self.migrate_symbols_impl_type_column()?;
+        self.migrate_symbol_refs_confidence_column()
+    }
 
-            CREATE INDEX IF NOT EXISTS idx_symbols_name
+    fn create_indexes(&self) -> SqlResult<()> {
+        self.conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_symbols_name
                 ON symbols(name);
             CREATE INDEX IF NOT EXISTS idx_symbols_file_id
                 ON symbols(file_id);
@@ -243,10 +253,7 @@ impl Database {
                 ON dependencies(name);
             CREATE INDEX IF NOT EXISTS idx_docs_dep_id
                 ON docs(dependency_id);",
-        )?;
-        self.migrate_fts_schema()?;
-        self.migrate_docs_module_column()?;
-        self.migrate_symbols_impl_type_column()
+        )
     }
 
     /// Detect old FTS schema and rebuild if needed.
@@ -315,6 +322,20 @@ impl Database {
         if !sql.contains("impl_type") {
             self.conn
                 .execute_batch("ALTER TABLE symbols ADD COLUMN impl_type TEXT")?;
+        }
+        Ok(())
+    }
+
+    /// Add `confidence` column to `symbol_refs` table if missing (existing DBs).
+    fn migrate_symbol_refs_confidence_column(&self) -> SqlResult<()> {
+        let has_confidence = self
+            .conn
+            .prepare("SELECT confidence FROM symbol_refs LIMIT 0")
+            .is_ok();
+        if !has_confidence {
+            self.conn.execute_batch(
+                "ALTER TABLE symbol_refs ADD COLUMN confidence TEXT NOT NULL DEFAULT 'high'",
+            )?;
         }
         Ok(())
     }
@@ -478,12 +499,13 @@ impl Database {
         source_id: SymbolId,
         target_id: SymbolId,
         kind: &str,
+        confidence: &str,
     ) -> SqlResult<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO symbol_refs \
-             (source_symbol_id, target_symbol_id, kind) \
-             VALUES (?1, ?2, ?3)",
-            params![source_id, target_id, kind],
+             (source_symbol_id, target_symbol_id, kind, confidence) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![source_id, target_id, kind, confidence],
         )?;
         Ok(())
     }
@@ -1397,8 +1419,8 @@ impl Database {
                 r.target_file.as_deref(),
                 r.target_context.as_deref(),
             );
-            if let (Some(sid), Some(tid)) = (source_id, target_id) {
-                self.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
+            if let (Some((sid, _)), Some((tid, confidence))) = (source_id, target_id) {
+                self.insert_symbol_ref(sid, tid, &r.kind.to_string(), confidence)?;
                 count += 1;
             }
         }
@@ -1411,22 +1433,29 @@ impl Database {
         let mut count = 0;
         for r in refs {
             let source_id = self.get_symbol_id(&r.source_name, &r.source_file)?;
-            let target_id = if let Some(ctx) = &r.target_context {
-                self.get_symbol_id_in_impl(&r.target_name, ctx)?
-                    .or(if let Some(tf) = &r.target_file {
-                        self.get_symbol_id(&r.target_name, tf)?
+            let (target_id, confidence) = if let Some(ctx) = &r.target_context {
+                if let Some(id) = self.get_symbol_id_in_impl(&r.target_name, ctx)? {
+                    (Some(id), "high")
+                } else if let Some(tf) = &r.target_file {
+                    if let Some(id) = self.get_symbol_id(&r.target_name, tf)? {
+                        (Some(id), "high")
                     } else {
-                        None
-                    })
-                    .or(self.get_symbol_id_by_name(&r.target_name)?)
+                        (self.get_symbol_id_by_name(&r.target_name)?, "low")
+                    }
+                } else {
+                    (self.get_symbol_id_by_name(&r.target_name)?, "low")
+                }
             } else if let Some(target_file) = &r.target_file {
-                self.get_symbol_id(&r.target_name, target_file)?
-                    .or(self.get_symbol_id_by_name(&r.target_name)?)
+                if let Some(id) = self.get_symbol_id(&r.target_name, target_file)? {
+                    (Some(id), "high")
+                } else {
+                    (self.get_symbol_id_by_name(&r.target_name)?, "low")
+                }
             } else {
-                self.get_symbol_id_by_name(&r.target_name)?
+                (self.get_symbol_id_by_name(&r.target_name)?, "low")
             };
             if let (Some(sid), Some(tid)) = (source_id, target_id) {
-                self.insert_symbol_ref(sid, tid, &r.kind.to_string())?;
+                self.insert_symbol_ref(sid, tid, &r.kind.to_string(), confidence)?;
                 count += 1;
             }
         }
@@ -1475,9 +1504,13 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_file_dependencies(&self, path_prefix: &str) -> SqlResult<Vec<(String, String)>> {
+    pub fn get_file_dependencies(
+        &self,
+        path_prefix: &str,
+        min_confidence: Option<&str>,
+    ) -> SqlResult<Vec<(String, String)>> {
         let pattern = format!("{path_prefix}%");
-        let mut stmt = self.conn.prepare_cached(
+        let sql = if min_confidence.is_some() {
             "SELECT DISTINCT sf.path, tf.path \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
@@ -1485,10 +1518,25 @@ impl Database {
              JOIN files sf ON sf.id = ss.file_id \
              JOIN files tf ON tf.id = ts.file_id \
              WHERE sf.path LIKE ?1 AND sf.path != tf.path \
-             ORDER BY sf.path, tf.path",
-        )?;
+             AND sr.confidence = ?2 \
+             ORDER BY sf.path, tf.path"
+        } else {
+            "SELECT DISTINCT sf.path, tf.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             JOIN files tf ON tf.id = ts.file_id \
+             WHERE sf.path LIKE ?1 AND sf.path != tf.path \
+             ORDER BY sf.path, tf.path"
+        };
+        let mut stmt = self.conn.prepare_cached(sql)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![pattern])?;
+        let mut rows = if let Some(conf) = min_confidence {
+            stmt.query(params![pattern, conf])?
+        } else {
+            stmt.query(params![pattern])?
+        };
         while let Some(row) = rows.next()? {
             results.push((row.get(0)?, row.get(1)?));
         }
@@ -1561,22 +1609,22 @@ impl SymbolIdMap {
         name: &str,
         target_file: Option<&str>,
         target_context: Option<&str>,
-    ) -> Option<SymbolId> {
+    ) -> Option<(SymbolId, &'static str)> {
         if let Some(ctx) = target_context
             && let Some(id) = self
                 .impl_qualified
                 .get(&(name.to_string(), ctx.to_string()))
         {
-            return Some(*id);
+            return Some((*id, "high"));
         }
         if let Some(file) = target_file
             && let Some(id) = self
                 .file_qualified
                 .get(&(name.to_string(), file.to_string()))
         {
-            return Some(*id);
+            return Some((*id, "high"));
         }
-        self.name_only.get(name).copied()
+        self.name_only.get(name).map(|id| (*id, "low"))
     }
 }
 
@@ -2068,9 +2116,9 @@ mod tests {
             .unwrap();
         let callee_b_id = SymbolId(db.conn.last_insert_rowid());
         // Insert refs
-        db.insert_symbol_ref(caller_id, callee_a_id, "call")
+        db.insert_symbol_ref(caller_id, callee_a_id, "call", "high")
             .unwrap();
-        db.insert_symbol_ref(caller_id, callee_b_id, "type_ref")
+        db.insert_symbol_ref(caller_id, callee_b_id, "type_ref", "high")
             .unwrap();
         let callees = db.get_callees("caller", "src/lib.rs").unwrap();
         assert_eq!(callees.len(), 2);
@@ -2129,7 +2177,8 @@ mod tests {
             )
             .unwrap();
         let main_id = SymbolId(db.conn.last_insert_rowid());
-        db.insert_symbol_ref(main_id, sym_id, "type_ref").unwrap();
+        db.insert_symbol_ref(main_id, sym_id, "type_ref", "high")
+            .unwrap();
 
         // Delete first file's data
         db.delete_file_data("src/lib.rs").unwrap();
@@ -2555,7 +2604,8 @@ mod tests {
             .unwrap();
         let beta_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(beta_id, alpha_id, "call").unwrap();
+        db.insert_symbol_ref(beta_id, alpha_id, "call", "high")
+            .unwrap();
 
         // Verify the ref exists
         let count: i64 = db
@@ -2652,7 +2702,8 @@ mod tests {
             )
             .unwrap();
         let target_id = SymbolId(db.conn.last_insert_rowid());
-        db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
+        db.insert_symbol_ref(caller_id, target_id, "call", "high")
+            .unwrap();
 
         let callers = db.get_callers_by_name("target_fn").unwrap();
         assert_eq!(callers.len(), 1);
@@ -2694,14 +2745,15 @@ mod tests {
             .unwrap();
         let tgt_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(src_id, tgt_id, "call").unwrap();
+        db.insert_symbol_ref(src_id, tgt_id, "call", "high")
+            .unwrap();
 
-        let edges = db.get_file_dependencies("src/").unwrap();
+        let edges = db.get_file_dependencies("src/", None).unwrap();
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0], ("src/a.rs".to_string(), "src/b.rs".to_string()));
 
         // Wrong prefix returns empty
-        let empty = db.get_file_dependencies("other/").unwrap();
+        let empty = db.get_file_dependencies("other/", None).unwrap();
         assert!(empty.is_empty());
     }
 
@@ -2732,10 +2784,71 @@ mod tests {
             .unwrap();
         let s2 = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(s1, s2, "call").unwrap();
+        db.insert_symbol_ref(s1, s2, "call", "high").unwrap();
 
-        let edges = db.get_file_dependencies("src/").unwrap();
+        let edges = db.get_file_dependencies("src/", None).unwrap();
         assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn test_confidence_filtering() {
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/a.rs", "h1").unwrap();
+        let f2 = db.insert_file("src/b.rs", "h2").unwrap();
+
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'caller', 'function', 'public', 1, 5, 'fn caller()')",
+                params![f1],
+            )
+            .unwrap();
+        let caller_id = SymbolId(db.conn.last_insert_rowid());
+
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'target', 'function', 'public', 1, 5, 'fn target()')",
+                params![f2],
+            )
+            .unwrap();
+        let target_id = SymbolId(db.conn.last_insert_rowid());
+
+        // Insert a high-confidence ref
+        db.insert_symbol_ref(caller_id, target_id, "call", "high")
+            .unwrap();
+
+        // Create another pair for a low-confidence ref
+        let f3 = db.insert_file("src/c.rs", "h3").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature) \
+                 VALUES (?1, 'noise', 'function', 'public', 1, 5, 'fn noise()')",
+                params![f3],
+            )
+            .unwrap();
+        let noise_id = SymbolId(db.conn.last_insert_rowid());
+
+        db.insert_symbol_ref(noise_id, target_id, "call", "low")
+            .unwrap();
+
+        // Without filter: both edges
+        let all = db.get_file_dependencies("src/", None).unwrap();
+        assert_eq!(all.len(), 2);
+
+        // With high filter: only high-confidence edge
+        let high_only = db.get_file_dependencies("src/", Some("high")).unwrap();
+        assert_eq!(high_only.len(), 1);
+        assert_eq!(
+            high_only[0],
+            ("src/a.rs".to_string(), "src/b.rs".to_string())
+        );
     }
 
     #[test]
@@ -2772,10 +2885,10 @@ mod tests {
         let c = SymbolId(db.conn.last_insert_rowid());
 
         // b -> a, c -> a (a has 2 incoming refs)
-        db.insert_symbol_ref(b, a, "call").unwrap();
-        db.insert_symbol_ref(c, a, "call").unwrap();
+        db.insert_symbol_ref(b, a, "call", "high").unwrap();
+        db.insert_symbol_ref(c, a, "call", "high").unwrap();
         // b -> c (c has 1 incoming ref)
-        db.insert_symbol_ref(b, c, "call").unwrap();
+        db.insert_symbol_ref(b, c, "call", "high").unwrap();
 
         let results = db.get_most_referenced_symbols(10, "").unwrap();
         assert_eq!(results.len(), 2);
@@ -2818,10 +2931,10 @@ mod tests {
         let c = SymbolId(db.conn.last_insert_rowid());
 
         // b -> a, b -> c (b has 2 outgoing refs)
-        db.insert_symbol_ref(b, a, "call").unwrap();
-        db.insert_symbol_ref(b, c, "call").unwrap();
+        db.insert_symbol_ref(b, a, "call", "high").unwrap();
+        db.insert_symbol_ref(b, c, "call", "high").unwrap();
         // a -> c (a has 1 outgoing ref)
-        db.insert_symbol_ref(a, c, "call").unwrap();
+        db.insert_symbol_ref(a, c, "call", "high").unwrap();
 
         let results = db.get_most_referencing_symbols(10, "").unwrap();
         assert_eq!(results.len(), 2);

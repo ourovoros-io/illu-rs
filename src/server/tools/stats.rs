@@ -169,7 +169,8 @@ mod tests {
         // test_foo calls foo (so foo is tested)
         let test_id = sym_id(&db, "test_foo");
         let foo_id = sym_id(&db, "foo");
-        db.insert_symbol_ref(test_id, foo_id, "call").unwrap();
+        db.insert_symbol_ref(test_id, foo_id, "call", "high")
+            .unwrap();
 
         let result = handle_stats(&db, None).unwrap();
 

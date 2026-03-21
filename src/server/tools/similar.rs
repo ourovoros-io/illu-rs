@@ -36,8 +36,7 @@ pub fn handle_similar(
     };
 
     candidates.retain(|s| {
-        (s.name != target.name || s.file_path != target.file_path)
-            && s.kind == target.kind
+        (s.name != target.name || s.file_path != target.file_path) && s.kind == target.kind
     });
     if let Some(p) = path {
         candidates.retain(|s| s.file_path.starts_with(p));
@@ -61,7 +60,9 @@ pub fn handle_similar(
         let _ = writeln!(
             output,
             "{}. **{cqname}** (score: {score}) — {}:{}",
-            i + 1, sym.file_path, sym.line_start
+            i + 1,
+            sym.file_path,
+            sym.line_start
         );
         let _ = writeln!(output, "   `{}`", sym.signature);
         let _ = writeln!(output, "   Shared: {}", reasons.join(", "));
@@ -90,9 +91,14 @@ fn score_candidates<'a>(
     let mut scored: Vec<ScoredSymbol<'_>> = Vec::new();
 
     for candidate in candidates {
-        let (score, reasons) =
-            score_one(db, target_params, &candidate.signature, &candidate.name,
-                      return_type, target_callees)?;
+        let (score, reasons) = score_one(
+            db,
+            target_params,
+            &candidate.signature,
+            &candidate.name,
+            return_type,
+            target_callees,
+        )?;
         if score > 0 {
             scored.push((score, candidate, reasons));
         }
