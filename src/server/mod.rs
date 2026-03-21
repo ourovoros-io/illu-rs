@@ -192,6 +192,8 @@ struct TypeUsageParams {
     type_name: String,
     /// Filter to files under this path prefix
     path: Option<String>,
+    /// Group results by file with counts instead of listing every entry (default: false)
+    compact: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -639,9 +641,13 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("type_usage ▸ {}", params.type_name));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::type_usage::handle_type_usage(&db, &params.type_name, params.path.as_deref())
-                .map_err(to_mcp_err)?;
+        let result = tools::type_usage::handle_type_usage(
+            &db,
+            &params.type_name,
+            params.path.as_deref(),
+            params.compact.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
