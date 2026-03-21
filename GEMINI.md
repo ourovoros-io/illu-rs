@@ -3,7 +3,7 @@
 <!-- illu:start -->
 ## Code Intelligence (illu)
 
-This repo is indexed by illu (31 tools). **Use illu tools as your first step** â€” before reading files, before grep, before guessing at code structure.
+This repo is indexed by illu (36 tools). **Use illu tools as your first step** â€” before reading files, before grep, before guessing at code structure.
 
 ### When to use illu
 
@@ -17,6 +17,8 @@ This repo is indexed by illu (31 tools). **Use illu tools as your first step** â
 - **Finding which tests to run**: `@illu test_impact` after changing a symbol
 - **Dead code detection**: `@illu unused` or `@illu orphaned` to find unreferenced symbols
 - **Index health**: `@illu freshness` to check if the index is current
+- **Cross-repo analysis**: `@illu cross_query` to find symbols in other repos, `@illu cross_impact` to check cross-repo effects
+- **Repo overview**: `@illu repos` to see all registered repos
 
 ### Commands
 
@@ -54,6 +56,12 @@ This repo is indexed by illu (31 tools). **Use illu tools as your first step** â
 | `@illu crate_graph` | `mcp_illu_crate_graph` | |
 | `@illu blame <symbol>` | `mcp_illu_blame` | `symbol_name: "<symbol>"` |
 | `@illu history <symbol>` | `mcp_illu_history` | `symbol_name: "<symbol>"` |
+| `@illu repos` | `mcp_illu_repos` | |
+| `@illu cross_query <term>` | `mcp_illu_cross_query` | `query: "<term>"` |
+| `@illu cross_impact <symbol>` | `mcp_illu_cross_impact` | `symbol_name: "<symbol>"` |
+| `@illu cross_deps` | `mcp_illu_cross_deps` | |
+| `@illu cross_callpath <from> <to>` | `mcp_illu_cross_callpath` | `from: "<from>", to: "<to>"` |
+| `@illu install` | *(CLI only)* | |
 
 ### Workflow rules
 

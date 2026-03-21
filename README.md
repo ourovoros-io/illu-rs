@@ -15,54 +15,69 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-dea584?style=flat-square&logo=rust" alt="Rust 2024"/>
-  <img src="https://img.shields.io/badge/tools-31-blue?style=flat-square" alt="31 tools"/>
-  <img src="https://img.shields.io/badge/tests-528_passing-brightgreen?style=flat-square" alt="528 tests"/>
+  <img src="https://img.shields.io/badge/tools-36-blue?style=flat-square" alt="36 tools"/>
+  <img src="https://img.shields.io/badge/tests-540_passing-brightgreen?style=flat-square" alt="540 tests"/>
 </p>
 
 ---
 
 ## Get Started
 
-Install and set up in your Rust project:
+Install illu and set it up globally:
 
 ```bash
 # Install (works on macOS and Linux)
 git clone https://github.com/GeorgiosDelkos/illu-rs.git
 cargo install --path illu-rs
 
-# Set up in your Rust project
-cd your-project
-illu-rs init
+# Global setup — works in every Rust repo automatically
+illu-rs install
 ```
 
-That's it. Open **Claude Code** or **Gemini CLI** in the repo — illu is already running.
+That's it. Open **Claude Code** or **Gemini CLI** in any Rust project — illu auto-detects the repo, indexes it, and starts serving tools. Works with **git worktrees** too — each worktree gets its own isolated index.
 
-`init` indexes your codebase, writes the MCP config for both clients, and adds usage instructions to `CLAUDE.md` and `GEMINI.md`. Every time the server starts, it detects changed files and re-indexes only what's needed (sub-second).
+`install` writes MCP config to `~/.claude/settings.json` and `~/.gemini/settings.json`, adds usage instructions to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, and sets up a global gitignore for `.illu/`.
 
 > **Requirements:** Rust toolchain and a C compiler (Xcode CLI tools on macOS, `build-essential` on Linux). All C dependencies (SQLite, tree-sitter) are compiled from source — no system libraries needed.
 
 <details>
-<summary>Manual setup (without <code>init</code>)</summary>
+<summary>Per-repo setup (alternative to global install)</summary>
 
-Add to `.mcp.json` (Claude Code) or `.gemini/settings.json` (Gemini CLI):
+For repo-specific configuration, use `init` instead:
+
+```bash
+cd your-project
+illu-rs init
+```
+
+This writes `.mcp.json` and agent instructions to the repo itself. Useful for repo-specific overrides.
+
+</details>
+
+<details>
+<summary>Manual MCP config</summary>
+
+Add to your MCP settings file:
 
 ```json
 {
   "mcpServers": {
     "illu": {
       "command": "/path/to/illu-rs",
-      "args": ["--repo", "/path/to/your/project", "serve"],
+      "args": ["serve"],
       "env": { "RUST_LOG": "warn" }
     }
   }
 }
 ```
 
+Without `--repo`, illu auto-detects the repo from CWD via `git rev-parse --show-toplevel`.
+
 </details>
 
 ## What Your AI Gets
 
-illu gives your AI agent **31 tools** through the [Model Context Protocol](https://modelcontextprotocol.io/), organized into five categories:
+illu gives your AI agent **36 tools** through the [Model Context Protocol](https://modelcontextprotocol.io/), organized into six categories, including cross-repo intelligence:
 
 ### Search and Navigate
 
@@ -390,6 +405,48 @@ See whether the index is current or stale. Shows the indexed commit vs HEAD and 
 
 Reports ref confidence distribution, signature quality, noise sources, and coverage metrics.
 
+### Multi-Repo Intelligence
+
+#### See all your repos — `repos`
+
+Dashboard of all registered repos with status and symbol counts. Repos auto-register when illu starts in them.
+
+```
+(no params)   → table of all repos: name, path, status (active/indexed/missing), symbol count
+```
+
+#### Search across repos — `cross_query`
+
+Find symbols in other registered repos. Same parameters as `query`, results grouped by repo.
+
+```
+query: "Database"   → finds Database structs/impls across all your repos
+```
+
+#### Cross-repo impact — `cross_impact`
+
+"If I change this symbol, what breaks in other repos?" Name-based reference search across all registered repos.
+
+```
+symbol_name: "SharedConfig"   → references in other repos that use this type
+```
+
+#### Inter-repo dependencies — `cross_deps`
+
+Shows how repos relate: path dependencies (direct source links) and shared crate dependencies.
+
+```
+(no params)   → path deps between repos + shared crates table
+```
+
+#### Cross-repo call chains — `cross_callpath`
+
+Find symbols that bridge between repos — callees in the current repo that also exist in another.
+
+```
+from: "process_request", to: "handle_event", target_repo: "event-service"
+```
+
 ## Works With
 
 <table>
@@ -398,18 +455,18 @@ Reports ref confidence distribution, signature quality, noise sources, and cover
 
 ### <img src="https://img.shields.io/badge/-5A29E4?style=flat-square&logo=anthropic&logoColor=white" height="20" align="center"/> &nbsp;Claude Code
 
-Auto-configured via `.mcp.json` and `CLAUDE.md`
+Auto-configured via `illu-rs install` (global) or `illu-rs init` (per-repo)
 
-31 tools: `mcp__illu__query`, `mcp__illu__context`, `mcp__illu__impact`, etc.
+36 tools: `mcp__illu__query`, `mcp__illu__context`, `mcp__illu__cross_query`, etc.
 
 </td>
 <td width="50%" align="center">
 
 ### <img src="https://img.shields.io/badge/-4285F4?style=flat-square&logo=google&logoColor=white" height="20" align="center"/> &nbsp;Gemini CLI
 
-Auto-configured via `.gemini/settings.json` and `GEMINI.md`
+Auto-configured via `illu-rs install` (global) or `illu-rs init` (per-repo)
 
-31 tools: `@illu query`, `@illu context`, `@illu impact`, etc.
+36 tools: `@illu query`, `@illu context`, `@illu cross_query`, etc.
 
 </td>
 </tr>
@@ -421,6 +478,12 @@ Any MCP client with stdio transport support works — illu speaks standard MCP.
 
 | Feature | What it does |
 |---------|-------------|
+| **Global install** | `illu-rs install` configures Claude Code + Gemini CLI globally — works in every repo |
+| **Worktree support** | Each git worktree gets its own isolated index, auto-detected from CWD |
+| **Multi-repo registry** | Repos auto-register in `~/.illu/registry.toml`; worktrees dedup by shared git dir |
+| **Cross-repo search** | `cross_query` searches symbols across all registered repos |
+| **Cross-repo impact** | `cross_impact` finds references to a symbol in other repos |
+| **Cross-repo dependencies** | `cross_deps` shows path deps and shared crates between repos |
 | **Zero-config setup** | `illu-rs init` configures everything for both Claude and Gemini |
 | **Incremental indexing** | Content-hashed — only re-parses files that changed, cleans stale refs |
 | **Workspace support** | Multi-crate workspaces with cross-crate reference resolution |
@@ -510,6 +573,8 @@ See [`extensions/statusline/`](extensions/statusline/) for standalone and add-to
     Claude Code         Gemini CLI          Any MCP client
 ```
 
+**Multi-repo:** Each repo gets its own index. A global registry at `~/.illu/registry.toml` tracks all repos. Cross-repo tools open other indexes read-only on demand.
+
 <details>
 <summary>Architecture</summary>
 
@@ -518,6 +583,8 @@ src/
 ├── main.rs              # CLI, init, MCP server startup
 ├── lib.rs               # Shared utilities
 ├── status.rs            # Real-time status file (.illu/status)
+├── git.rs               # Git operations (worktree detection, toplevel)
+├── registry.rs          # Multi-repo registry (~/.illu/registry.toml)
 ├── db.rs                # SQLite (schema, queries, FTS5 + trigram)
 ├── indexer/
 │   ├── mod.rs           # Orchestrator (index, refresh, skill file)
@@ -529,7 +596,7 @@ src/
 │   └── docs.rs          # Doc fetching (cargo doc → docs.rs → GitHub)
 └── server/
     ├── mod.rs           # MCP server (rmcp, tool routing)
-    └── tools/           # 31 tool handlers
+    └── tools/           # 36 tool handlers
         ├── query.rs         # Symbol/doc/file/body search
         ├── context.rs       # Full symbol context with callers/callees
         ├── batch_context.rs # Multi-symbol context
@@ -560,7 +627,12 @@ src/
         ├── freshness.rs     # Index staleness check
         ├── health.rs        # Index quality diagnosis
         ├── blame.rs         # Git blame per symbol
-        └── history.rs       # Git history per symbol
+        ├── history.rs       # Git history per symbol
+        ├── repos.rs         # Registered repos dashboard
+        ├── cross_query.rs   # Cross-repo symbol search
+        ├── cross_impact.rs  # Cross-repo impact analysis
+        ├── cross_deps.rs    # Inter-repo dependency graph
+        └── cross_callpath.rs # Cross-repo call chain tracing
 ```
 
 </details>
@@ -569,7 +641,7 @@ src/
 <summary>Development</summary>
 
 ```bash
-cargo test                                                    # 528 tests
+cargo test                                                    # 540 tests
 cargo clippy --all-targets --all-features -- -D warnings      # strict lints
 cargo fmt --all -- --check                                    # formatting
 RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
@@ -577,10 +649,10 @@ RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
 
 | Test Suite | Count | What it guards |
 |------------|-------|----------------|
-| Unit | 339 | Parser, DB, indexer, tool handlers |
+| Unit | 359 | Parser, DB, indexer, tool handlers, registry |
 | Data integrity | 68 | Line numbers, refs, cross-crate resolution, stale cleanup |
 | Data quality | 61 | End-to-end tool output format and content |
-| Integration | 24 | Full pipeline: index, query, verify |
+| Integration | 28 | Full pipeline: index, query, verify + cross-repo |
 | Self-index | 19 | illu indexes itself — validates real-world accuracy |
 | Error paths | 6 | Edge cases: empty files, missing symbols, Unicode |
 
