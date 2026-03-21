@@ -4,29 +4,7 @@ use std::fmt::Write;
 
 type ScoredSymbol<'a> = (usize, &'a StoredSymbol, Vec<String>);
 
-const NOISY_SIMILAR_CALLEES: &[&str] = &[
-    "new",
-    "from",
-    "into",
-    "default",
-    "clone",
-    "build",
-    "init",
-    "fmt",
-    "write",
-    "writeln",
-    "push",
-    "len",
-    "is_empty",
-    "to_string",
-    "to_owned",
-    "as_str",
-    "as_ref",
-    "iter",
-    "collect",
-    "map",
-    "filter",
-];
+use super::NOISY_CALLEES;
 
 pub fn handle_similar(
     db: &Database,
@@ -177,7 +155,7 @@ fn score_one(
             .collect();
         let shared: Vec<_> = target_callees
             .intersection(&cand_callees)
-            .filter(|name| !NOISY_SIMILAR_CALLEES.contains(&name.as_str()))
+            .filter(|name| !NOISY_CALLEES.contains(&name.as_str()))
             .collect();
         if !shared.is_empty() {
             score += shared.len();

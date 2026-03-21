@@ -772,6 +772,18 @@ fn is_noisy_symbol(name: &str) -> bool {
     NOISY_SYMBOL_NAMES.contains(&name)
 }
 
+/// Derive a target file path from a module-qualified call like `parser::foo`.
+/// For `src/indexer/mod.rs` calling `parser::foo`, returns `src/indexer/parser.rs`.
+fn module_to_file(current_file: &str, module_name: &str) -> Option<String> {
+    let parent = std::path::Path::new(current_file).parent()?;
+    Some(
+        parent
+            .join(format!("{module_name}.rs"))
+            .to_string_lossy()
+            .to_string(),
+    )
+}
+
 /// Extract type context from a simple scoped identifier like `Database::new`.
 /// Returns the type/module name if the first child is an identifier or type identifier.
 fn extract_scoped_context(node: &Node, source: &str) -> Option<String> {
@@ -1488,19 +1500,29 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
         true
     }
 
-    /// Handle a simple `Type::method` scoped identifier.
+    /// Handle a simple `Type::method` or `module::function` scoped identifier.
     /// Returns `true` if handled (caller should NOT descend).
+    ///
+    /// Lowercase qualifiers (e.g. `parser::extract_refs`) are treated as
+    /// module paths: we derive the target file from the current file's
+    /// directory so the ref gets file-qualified → high confidence.
     fn handle_scoped_call(&mut self, child: &Node, refs: &mut Vec<SymbolRef>) -> bool {
-        let Some(type_context) = extract_scoped_context(child, self.ctx.source) else {
+        let Some(qualifier) = extract_scoped_context(child, self.ctx.source) else {
             return false;
         };
         let last_idx = u32::try_from(child.child_count().saturating_sub(1));
         if let Some(method_node) = last_idx.ok().and_then(|i| child.child(i)) {
             let method_name = node_text(&method_node, self.ctx.source);
             let line = i64::try_from(method_node.start_position().row + 1).ok();
-            if self.ctx.known_symbols.contains(&type_context) || !is_constructor_name(&method_name)
+
+            let is_module = qualifier.starts_with(|c: char| c.is_lowercase());
+            if is_module {
+                let target_file = module_to_file(self.ctx.file_path, &qualifier);
+                self.try_add_qualified(&method_name, RefKind::Call, None, target_file, line, refs);
+            } else if self.ctx.known_symbols.contains(&qualifier)
+                || !is_constructor_name(&method_name)
             {
-                self.try_add(&method_name, RefKind::Call, Some(type_context), line, refs);
+                self.try_add(&method_name, RefKind::Call, Some(qualifier), line, refs);
             }
         }
         true

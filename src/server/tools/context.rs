@@ -67,6 +67,8 @@ pub fn handle_context(
 }
 
 /// Resolve symbols supporting `Type::method` syntax and optional file filter.
+/// When both a struct/enum/trait and its impl block match, keep only the
+/// concrete definition to avoid duplicate caller lists.
 fn resolve_symbols(
     db: &Database,
     symbol_name: &str,
@@ -76,6 +78,13 @@ fn resolve_symbols(
 
     if let Some(fp) = file {
         symbols.retain(|s| s.file_path == fp);
+    }
+
+    let has_definition = symbols
+        .iter()
+        .any(|s| s.kind != crate::indexer::parser::SymbolKind::Impl);
+    if has_definition {
+        symbols.retain(|s| s.kind != crate::indexer::parser::SymbolKind::Impl);
     }
 
     Ok(symbols)
@@ -342,10 +351,20 @@ fn render_related(
     sym: &StoredSymbol,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let siblings = db.get_symbols_by_path_prefix(&sym.file_path)?;
+    let is_type_def = matches!(
+        sym.kind,
+        SymbolKind::Struct | SymbolKind::Enum | SymbolKind::Trait
+    );
     let related: Vec<_> = siblings
         .iter()
         .filter(|s| s.name != sym.name || s.line_start != sym.line_start)
-        .filter(|s| s.impl_type == sym.impl_type)
+        .filter(|s| {
+            if s.impl_type == sym.impl_type {
+                return true;
+            }
+            // For struct/enum/trait: also show methods whose impl_type matches the type name
+            is_type_def && s.impl_type.as_deref() == Some(&sym.name)
+        })
         .filter(|s| {
             s.kind != SymbolKind::Use
                 && s.kind != SymbolKind::Mod
@@ -360,6 +379,8 @@ fn render_related(
 
     let label = if let Some(it) = &sym.impl_type {
         format!("Related (impl {it})")
+    } else if is_type_def {
+        format!("Related (impl {})", sym.name)
     } else {
         "Related (same file)".to_string()
     };

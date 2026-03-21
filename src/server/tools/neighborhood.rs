@@ -83,7 +83,9 @@ fn bfs_collect(
             Direction::Up => db.get_callers_by_name(&current, None, exclude_tests)?,
         };
         for (neighbor, file_path) in neighbors {
-            if !visited.contains_key(&neighbor) {
+            if !visited.contains_key(&neighbor)
+                && !super::NOISY_CALLEES.contains(&neighbor.as_str())
+            {
                 visited.insert(neighbor.clone(), (d + 1, file_path));
                 queue.push_back((neighbor, d + 1));
             }
@@ -197,6 +199,10 @@ impl<'a> TreeRenderer<'a> {
             format!("{prefix}│   ")
         };
 
+        let children: Vec<_> = children
+            .into_iter()
+            .filter(|(name, _)| !super::NOISY_CALLEES.contains(&name.as_str()))
+            .collect();
         for (i, (child, _)) in children.iter().enumerate() {
             let last = i == children.len() - 1;
             self.render(child, depth + 1, &child_prefix, last, false)?;

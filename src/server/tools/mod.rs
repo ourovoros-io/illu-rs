@@ -72,6 +72,30 @@ pub(crate) fn qualified_name(sym: &StoredSymbol) -> String {
     }
 }
 
+pub(crate) const NOISY_CALLEES: &[&str] = &[
+    "new",
+    "from",
+    "into",
+    "default",
+    "clone",
+    "build",
+    "init",
+    "fmt",
+    "write",
+    "writeln",
+    "push",
+    "len",
+    "is_empty",
+    "to_string",
+    "to_owned",
+    "as_str",
+    "as_ref",
+    "iter",
+    "collect",
+    "map",
+    "filter",
+];
+
 const MAX_CARGO_TEST_NAMES: usize = 20;
 
 pub(crate) fn format_cargo_test_suggestion(test_names: &[&str]) -> String {
