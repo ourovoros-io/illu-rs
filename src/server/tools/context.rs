@@ -1452,7 +1452,7 @@ mod tests {
                 doc_comment: None,
                 body: None,
                 details: None,
-                attributes: Some("#[test]".into()),
+                attributes: Some("test".into()),
                 impl_type: None,
             }],
         )

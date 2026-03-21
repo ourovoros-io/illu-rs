@@ -1,5 +1,6 @@
 use crate::db::Database;
 use crate::indexer::parser::SymbolKind;
+use crate::indexer::store::is_test_attribute;
 use std::fmt::Write;
 
 pub fn handle_stats(
@@ -33,13 +34,13 @@ pub fn handle_stats(
     // Test count
     let test_count = functions
         .iter()
-        .filter(|s| s.attributes.as_deref().is_some_and(|a| a.contains("test")))
+        .filter(|s| s.attributes.as_deref().is_some_and(is_test_attribute))
         .count();
 
     // Non-test, non-main function count for coverage calc
     let fn_count = functions
         .iter()
-        .filter(|s| !s.attributes.as_deref().is_some_and(|a| a.contains("test")))
+        .filter(|s| !s.attributes.as_deref().is_some_and(is_test_attribute))
         .filter(|s| s.name != "main")
         .count();
 
@@ -167,12 +168,7 @@ mod tests {
         let symbols = vec![
             make_sym("foo", SymbolKind::Function, "src/lib.rs", None),
             make_sym("bar", SymbolKind::Function, "src/lib.rs", None),
-            make_sym(
-                "test_foo",
-                SymbolKind::Function,
-                "src/lib.rs",
-                Some("#[test]"),
-            ),
+            make_sym("test_foo", SymbolKind::Function, "src/lib.rs", Some("test")),
             make_sym("MyStruct", SymbolKind::Struct, "src/lib.rs", None),
         ];
         store_symbols(&db, f, &symbols).unwrap();
