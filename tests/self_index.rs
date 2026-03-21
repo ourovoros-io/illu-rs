@@ -469,7 +469,7 @@ fn self_references_database_shows_refs() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = references::handle_references(&db, "Database", None).unwrap();
+    let result = references::handle_references(&db, "Database", None, false).unwrap();
     assert!(
         result.contains("## References: Database"),
         "header: {result}"

@@ -5,6 +5,7 @@ pub fn handle_references(
     db: &Database,
     symbol_name: &str,
     path: Option<&str>,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
@@ -28,7 +29,7 @@ pub fn handle_references(
         );
     }
 
-    let call_count = render_call_sites(db, &symbols, path, &mut output)?;
+    let call_count = render_call_sites(db, &symbols, path, exclude_tests, &mut output)?;
     let base_name = symbol_name.rsplit("::").next().unwrap_or(symbol_name);
     let type_count = render_type_usage(db, base_name, path, &mut output)?;
     let impl_count = render_trait_impls(db, base_name, &mut output)?;
@@ -46,6 +47,7 @@ fn render_call_sites(
     db: &Database,
     symbols: &[crate::db::StoredSymbol],
     path: Option<&str>,
+    exclude_tests: bool,
     output: &mut String,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let _ = writeln!(output, "\n### Call Sites\n");
@@ -61,7 +63,9 @@ fn render_call_sites(
             let line = c.ref_line.unwrap_or(c.line_start);
             if seen.insert((c.name.clone(), c.file_path.clone(), line)) {
                 if c.is_test {
-                    test.push((c.name, c.file_path, line));
+                    if !exclude_tests {
+                        test.push((c.name, c.file_path, line));
+                    }
                 } else {
                     prod.push((c.name, c.file_path, line));
                 }
@@ -187,7 +191,7 @@ mod tests {
     #[test]
     fn test_references_found() {
         let db = setup_db();
-        let result = handle_references(&db, "Config", None).unwrap();
+        let result = handle_references(&db, "Config", None, false).unwrap();
         assert!(result.contains("## References: Config"));
         assert!(result.contains("### Definition"));
         assert!(result.contains("Config"));
@@ -196,14 +200,14 @@ mod tests {
     #[test]
     fn test_references_not_found() {
         let db = setup_db();
-        let result = handle_references(&db, "Nonexistent", None).unwrap();
+        let result = handle_references(&db, "Nonexistent", None, false).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
     #[test]
     fn test_references_type_usage() {
         let db = setup_db();
-        let result = handle_references(&db, "Config", None).unwrap();
+        let result = handle_references(&db, "Config", None, false).unwrap();
         assert!(result.contains("Type Usage"));
         assert!(result.contains("load"));
     }
@@ -265,7 +269,7 @@ mod tests {
         db.insert_symbol_ref(caller_id, enum_id, "call", "high", Some(22))
             .unwrap();
 
-        let result = handle_references(&db, "Status", None).unwrap();
+        let result = handle_references(&db, "Status", None, false).unwrap();
         // caller should appear exactly once despite multiple Status definitions
         let caller_count = result.matches("caller (src/lib.rs:").count();
         assert_eq!(
@@ -338,13 +342,92 @@ mod tests {
         db.insert_symbol_ref(test_id, target_id, "call", "high", Some(13))
             .unwrap();
 
-        let result = handle_references(&db, "target", None).unwrap();
+        let result = handle_references(&db, "target", None, false).unwrap();
         // Production callers should appear before test callers
         let prod_pos = result.find("prod_caller").unwrap();
         let test_pos = result.find("test_caller").unwrap();
         assert!(
             prod_pos < test_pos,
             "production callers should appear before test callers: {result}"
+        );
+    }
+
+    #[test]
+    fn test_references_exclude_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        let symbols = vec![
+            Symbol {
+                name: "target".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn target()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "prod_caller".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 7,
+                line_end: 10,
+                signature: "pub fn prod_caller()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "test_caller".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Private,
+                file_path: "src/lib.rs".into(),
+                line_start: 12,
+                line_end: 15,
+                signature: "fn test_caller()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: Some("test".into()),
+                impl_type: None,
+            },
+        ];
+        store_symbols(&db, file_id, &symbols).unwrap();
+
+        let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
+        let prod_id = db
+            .get_symbol_id("prod_caller", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_id = db
+            .get_symbol_id("test_caller", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(prod_id, target_id, "call", "high", Some(8))
+            .unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call", "high", Some(13))
+            .unwrap();
+
+        let result = handle_references(&db, "target", None, true).unwrap();
+        assert!(
+            result.contains("prod_caller"),
+            "production caller should appear: {result}"
+        );
+        assert!(
+            !result.contains("test_caller"),
+            "test caller should be excluded: {result}"
+        );
+        assert!(
+            result.contains("1 call site"),
+            "summary should count only prod callers: {result}"
         );
     }
 
@@ -405,7 +488,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_references(&db, "Config", None).unwrap();
+        let result = handle_references(&db, "Config", None, false).unwrap();
         // The `use` statement should NOT appear in Type Usage
         assert!(
             !result.contains("use crate::Config"),

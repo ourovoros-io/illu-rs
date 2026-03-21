@@ -142,6 +142,8 @@ struct DiffImpactParams {
     git_ref: Option<String>,
     /// Only list changed symbols, skip downstream impact analysis (default: false)
     changes_only: Option<bool>,
+    /// Skip downstream impact but still show untested changes and related tests (default: false)
+    compact: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -283,6 +285,8 @@ struct ReferencesParams {
     symbol_name: String,
     /// Filter results to files under this path prefix
     path: Option<String>,
+    /// Exclude test functions from call sites (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -513,6 +517,7 @@ impl IlluServer {
             repo_path,
             params.git_ref.as_deref(),
             params.changes_only.unwrap_or(false),
+            params.compact.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -854,9 +859,13 @@ impl IlluServer {
             crate::status::StatusGuard::new(&format!("references \u{25b8} {}", params.symbol_name));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::references::handle_references(&db, &params.symbol_name, params.path.as_deref())
-                .map_err(to_mcp_err)?;
+        let result = tools::references::handle_references(
+            &db,
+            &params.symbol_name,
+            params.path.as_deref(),
+            params.exclude_tests.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
