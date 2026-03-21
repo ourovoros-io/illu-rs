@@ -416,6 +416,79 @@ fn extract_package_name(cargo_toml: &str) -> Option<String> {
         .map(String::from)
 }
 
+const TOOL_SECTIONS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Search & Navigate",
+        &[
+            ("query", "Search symbols, docs, or files. Filters: kind, attribute, signature, path."),
+            ("context", "Full symbol context: source, callers, callees, trait impls. Supports `Type::method`, `sections` filter, `exclude_tests`."),
+            ("batch_context", "Context for multiple symbols in one call."),
+            ("symbols_at", "Find symbols at a file:line location."),
+            ("overview", "Public symbols under a path, grouped by file."),
+            ("tree", "File/module hierarchy."),
+        ],
+    ),
+    (
+        "Impact Analysis",
+        &[
+            ("impact", "Transitive dependents of a symbol (configurable depth)."),
+            ("diff_impact", "Batch impact for all symbols in a git diff."),
+            ("test_impact", "Which tests break when changing a symbol."),
+            ("crate_impact", "Which workspace crates are affected."),
+        ],
+    ),
+    (
+        "Call Graph",
+        &[
+            ("callpath", "Shortest or all paths between two symbols."),
+            ("neighborhood", "Callers/callees within N hops (list or tree format)."),
+            ("references", "Unified view: call sites, type usage, trait impls."),
+            ("type_usage", "Where a type appears in signatures and struct fields."),
+            ("file_graph", "File-level dependency graph."),
+            ("graph_export", "DOT/Graphviz export of call or file graphs."),
+        ],
+    ),
+    (
+        "Discovery & Audit",
+        &[
+            ("unused", "Symbols with no incoming references."),
+            ("orphaned", "Symbols with no callers AND no test coverage."),
+            ("boundary", "Public API vs internal-only classification for a module."),
+            ("similar", "Functions with matching signatures and call patterns."),
+            ("rename_plan", "All locations to update before renaming a symbol."),
+            ("doc_coverage", "Undocumented symbols with coverage percentage."),
+            ("hotspots", "Most-referenced, most-complex, and largest functions."),
+            ("stats", "File/symbol counts, test coverage, top references."),
+        ],
+    ),
+    (
+        "Dependencies & Git",
+        &[
+            ("docs", "Version-pinned dependency documentation, filterable by topic."),
+            ("implements", "Trait/type implementation relationships."),
+            ("crate_graph", "Workspace inter-crate dependency graph."),
+            ("blame", "Git blame on a symbol's line range."),
+            ("history", "Git commit history for a symbol, with optional diffs."),
+            ("freshness", "Index staleness check."),
+            ("health", "Index quality diagnosis."),
+        ],
+    ),
+];
+
+fn write_tool_listing(out: &mut String) {
+    use std::fmt::Write;
+
+    let total: usize = TOOL_SECTIONS.iter().map(|(_, tools)| tools.len()).sum();
+    let _ = writeln!(out, "## Tools ({total} available)\n");
+    for (section, tools) in TOOL_SECTIONS {
+        let _ = writeln!(out, "### {section}\n");
+        for (name, desc) in *tools {
+            let _ = writeln!(out, "- **{name}** — {desc}");
+        }
+        let _ = writeln!(out);
+    }
+}
+
 /// Generate a Claude skill markdown file listing available
 /// MCP tools and the project's direct dependencies.
 #[must_use]
@@ -430,38 +503,7 @@ pub(crate) fn generate_claude_skill(direct_dep_names: &[&str]) -> String {
          Use the following MCP tools to explore the codebase \
          and its dependencies.\n"
     );
-    let _ = writeln!(out, "## Tools\n");
-    let _ = writeln!(
-        out,
-        "- **query** — Search symbols, docs, or files. \
-         Pass `scope` (symbols/docs/files/all)."
-    );
-    let _ = writeln!(
-        out,
-        "- **context** — Get full context for a symbol: \
-         doc comments, definition, source body, struct fields, \
-         trait implementations, and callees."
-    );
-    let _ = writeln!(
-        out,
-        "- **impact** — Analyze the impact of changing a \
-         symbol by finding all transitive dependents."
-    );
-    let _ = writeln!(
-        out,
-        "- **diff_impact** — Analyze impact of git changes. \
-         Shows modified symbols and their downstream dependents."
-    );
-    let _ = writeln!(
-        out,
-        "- **docs** — Get documentation for a dependency, \
-         optionally filtered by topic."
-    );
-    let _ = writeln!(
-        out,
-        "- **overview** — Get a structural overview of all \
-         public symbols under a file path prefix.\n"
-    );
+    write_tool_listing(&mut out);
     let _ = writeln!(out, "## Direct Dependencies\n");
 
     if direct_dep_names.is_empty() {
@@ -675,12 +717,18 @@ pub fn hello() -> &'static str { "hello" }
         let skill = generate_claude_skill(&["serde", "tokio"]);
         assert!(skill.contains("serde"));
         assert!(skill.contains("tokio"));
-        assert!(skill.contains("docs"));
-        assert!(skill.contains("context"));
+        assert!(skill.contains("31 available"));
         assert!(skill.contains("query"));
+        assert!(skill.contains("context"));
         assert!(skill.contains("impact"));
         assert!(skill.contains("diff_impact"));
+        assert!(skill.contains("test_impact"));
+        assert!(skill.contains("neighborhood"));
+        assert!(skill.contains("boundary"));
+        assert!(skill.contains("orphaned"));
+        assert!(skill.contains("blame"));
         assert!(skill.contains("overview"));
+        assert!(skill.contains("docs"));
     }
 
     #[test]

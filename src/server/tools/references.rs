@@ -28,75 +28,116 @@ pub fn handle_references(
         );
     }
 
-    // Call sites (callers)
+    let call_count = render_call_sites(db, &symbols, path, &mut output)?;
+    let base_name = symbol_name.rsplit("::").next().unwrap_or(symbol_name);
+    let type_count = render_type_usage(db, base_name, path, &mut output)?;
+    let impl_count = render_trait_impls(db, base_name, &mut output)?;
+
+    let _ = writeln!(
+        output,
+        "\n---\n**Summary:** {call_count} call site(s), \
+         {type_count} signature usage(s), {impl_count} trait impl(s)",
+    );
+
+    Ok(output)
+}
+
+fn render_call_sites(
+    db: &Database,
+    symbols: &[crate::db::StoredSymbol],
+    path: Option<&str>,
+    output: &mut String,
+) -> Result<usize, Box<dyn std::error::Error>> {
     let _ = writeln!(output, "\n### Call Sites\n");
-    let mut call_count = 0usize;
-    for sym in &symbols {
-        let callers = db.get_callers(&sym.name, &sym.file_path, false)?;
-        for c in &callers {
-            if path.is_none() || c.file_path.starts_with(path.unwrap_or("")) {
-                let line = c.ref_line.unwrap_or(c.line_start);
-                let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, line);
-                call_count += 1;
+    let mut seen: std::collections::HashSet<(String, String, i64)> =
+        std::collections::HashSet::new();
+    let mut prod = Vec::new();
+    let mut test = Vec::new();
+    for sym in symbols {
+        for c in db.get_callers(&sym.name, &sym.file_path, false)? {
+            if path.is_some_and(|p| !c.file_path.starts_with(p)) {
+                continue;
+            }
+            let line = c.ref_line.unwrap_or(c.line_start);
+            if seen.insert((c.name.clone(), c.file_path.clone(), line)) {
+                if c.is_test {
+                    test.push((c.name, c.file_path, line));
+                } else {
+                    prod.push((c.name, c.file_path, line));
+                }
             }
         }
     }
-    if call_count == 0 {
+    let count = prod.len() + test.len();
+    for (name, file, line) in &prod {
+        let _ = writeln!(output, "- {name} ({file}:{line})");
+    }
+    if !prod.is_empty() && !test.is_empty() {
+        output.push('\n');
+    }
+    for (name, file, line) in &test {
+        let _ = writeln!(output, "- {name} ({file}:{line})");
+    }
+    if count == 0 {
         let _ = writeln!(output, "No call sites found.");
     }
+    Ok(count)
+}
 
-    // Type usage in signatures
+fn render_type_usage(
+    db: &Database,
+    base_name: &str,
+    path: Option<&str>,
+    output: &mut String,
+) -> Result<usize, Box<dyn std::error::Error>> {
     let _ = writeln!(output, "\n### Type Usage in Signatures\n");
-    let base_name = symbol_name.rsplit("::").next().unwrap_or(symbol_name);
     let sig_results = db.search_symbols_by_signature(base_name)?;
-    let mut type_count = 0usize;
+    let mut entries = Vec::new();
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     for s in &sig_results {
-        if s.name != base_name && (path.is_none() || s.file_path.starts_with(path.unwrap_or(""))) {
-            let qname = super::qualified_name(s);
-            let _ = writeln!(
-                output,
-                "- **{qname}** — `{}`",
-                super::truncate_snippet(&s.signature, 120)
-            );
-            type_count += 1;
+        if s.name == base_name || s.kind == crate::indexer::parser::SymbolKind::Use {
+            continue;
+        }
+        if path.is_some_and(|p| !s.file_path.starts_with(p)) {
+            continue;
+        }
+        let qname = super::qualified_name(s);
+        if seen.insert((qname.clone(), s.file_path.clone())) {
+            entries.push((qname, s.signature.clone()));
         }
     }
-    if type_count == 0 {
+    for (qname, sig) in &entries {
+        let _ = writeln!(
+            output,
+            "- **{qname}** — `{}`",
+            super::truncate_snippet(sig, 120)
+        );
+    }
+    if entries.is_empty() {
         let _ = writeln!(output, "Not used in any signatures.");
     }
+    Ok(entries.len())
+}
 
-    // Trait implementations
+fn render_trait_impls(
+    db: &Database,
+    base_name: &str,
+    output: &mut String,
+) -> Result<usize, Box<dyn std::error::Error>> {
     let _ = writeln!(output, "\n### Trait Implementations\n");
     let type_impls = db.get_trait_impls_for_type(base_name)?;
     let trait_impls = db.get_trait_impls_for_trait(base_name)?;
     if type_impls.is_empty() && trait_impls.is_empty() {
         let _ = writeln!(output, "No trait implementations found.");
     }
-    for ti in &type_impls {
+    for ti in type_impls.iter().chain(&trait_impls) {
         let _ = writeln!(
             output,
             "- `{}` implements `{}` ({}:{}-{})",
             ti.type_name, ti.trait_name, ti.file_path, ti.line_start, ti.line_end
         );
     }
-    for ti in &trait_impls {
-        let _ = writeln!(
-            output,
-            "- `{}` implements `{}` ({}:{}-{})",
-            ti.type_name, ti.trait_name, ti.file_path, ti.line_start, ti.line_end
-        );
-    }
-
-    // Summary
-    let _ = writeln!(
-        output,
-        "\n---\n**Summary:** {} call site(s), {} signature usage(s), {} trait impl(s)",
-        call_count,
-        type_count,
-        type_impls.len() + trait_impls.len()
-    );
-
-    Ok(output)
+    Ok(type_impls.len() + trait_impls.len())
 }
 
 #[cfg(test)]
@@ -165,5 +206,215 @@ mod tests {
         let result = handle_references(&db, "Config", None).unwrap();
         assert!(result.contains("Type Usage"));
         assert!(result.contains("load"));
+    }
+
+    #[test]
+    fn test_references_dedup_multi_definition() {
+        // Simulate a symbol with multiple definition rows (enum + impl blocks)
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        let symbols = vec![
+            Symbol {
+                name: "Status".into(),
+                kind: SymbolKind::Enum,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub enum Status".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "Status".into(),
+                kind: SymbolKind::Impl,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 7,
+                line_end: 15,
+                signature: "impl Status".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "caller".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 20,
+                line_end: 25,
+                signature: "pub fn caller(s: Status)".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+        ];
+        store_symbols(&db, file_id, &symbols).unwrap();
+
+        // caller references both Status definitions
+        let enum_id = db.get_symbol_id("Status", "src/lib.rs").unwrap().unwrap();
+        let caller_id = db.get_symbol_id("caller", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(caller_id, enum_id, "call", "high", Some(22))
+            .unwrap();
+
+        let result = handle_references(&db, "Status", None).unwrap();
+        // caller should appear exactly once despite multiple Status definitions
+        let caller_count = result.matches("caller (src/lib.rs:").count();
+        assert_eq!(
+            caller_count, 1,
+            "caller should appear exactly once, got {caller_count}: {result}"
+        );
+    }
+
+    #[test]
+    fn test_references_separates_prod_and_test_callers() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        let symbols = vec![
+            Symbol {
+                name: "target".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn target()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "prod_caller".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 7,
+                line_end: 10,
+                signature: "pub fn prod_caller()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "test_caller".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Private,
+                file_path: "src/lib.rs".into(),
+                line_start: 12,
+                line_end: 15,
+                signature: "fn test_caller()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: Some("test".into()),
+                impl_type: None,
+            },
+        ];
+        store_symbols(&db, file_id, &symbols).unwrap();
+
+        let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
+        let prod_id = db
+            .get_symbol_id("prod_caller", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let test_id = db
+            .get_symbol_id("test_caller", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(prod_id, target_id, "call", "high", Some(8))
+            .unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call", "high", Some(13))
+            .unwrap();
+
+        let result = handle_references(&db, "target", None).unwrap();
+        // Production callers should appear before test callers
+        let prod_pos = result.find("prod_caller").unwrap();
+        let test_pos = result.find("test_caller").unwrap();
+        assert!(
+            prod_pos < test_pos,
+            "production callers should appear before test callers: {result}"
+        );
+    }
+
+    #[test]
+    fn test_references_excludes_use_from_type_usage() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        let f2 = db.insert_file("src/other.rs", "hash2").unwrap();
+        let symbols = vec![
+            Symbol {
+                name: "Config".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub struct Config".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "load".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 7,
+                line_end: 10,
+                signature: "pub fn load() -> Config".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+        ];
+        store_symbols(&db, file_id, &symbols).unwrap();
+        // A `use` import that mentions Config in its signature
+        store_symbols(
+            &db,
+            f2,
+            &[Symbol {
+                name: "use crate::Config;".into(),
+                kind: SymbolKind::Use,
+                visibility: Visibility::Private,
+                file_path: "src/other.rs".into(),
+                line_start: 1,
+                line_end: 1,
+                signature: "use crate::Config;".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        let result = handle_references(&db, "Config", None).unwrap();
+        // The `use` statement should NOT appear in Type Usage
+        assert!(
+            !result.contains("use crate::Config"),
+            "use imports should be filtered from type usage: {result}"
+        );
+        // But the real type usage (load) should still appear
+        assert!(
+            result.contains("load"),
+            "real type usage should still appear: {result}"
+        );
     }
 }

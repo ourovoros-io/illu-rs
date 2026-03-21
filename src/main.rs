@@ -112,7 +112,7 @@ fn illu_agent_section(cmd_prefix: &str, tool_prefix: &str) -> String {
         "{ILLU_SECTION_START}
 ## Code Intelligence (illu)
 
-This repo is indexed by illu. **Use illu tools as your first step** — before reading files, \
+This repo is indexed by illu (31 tools). **Use illu tools as your first step** — before reading files, \
 before grep, before guessing at code structure.
 
 ### When to use illu
@@ -120,10 +120,12 @@ before grep, before guessing at code structure.
 - **Starting any task**: `{cmd_prefix} query` the relevant symbols to understand what exists
 - **Before modifying a function/struct/trait**: `{cmd_prefix} impact` to see what depends on it
 - **Debugging or tracing issues**: `{cmd_prefix} context` to get the full definition and references
+- **Understanding call flow**: `{cmd_prefix} neighborhood` or `{cmd_prefix} callpath` to explore the call graph
+- **Before refactoring a module**: `{cmd_prefix} boundary` to see what's public API vs internal
 - **Using an external crate**: `{cmd_prefix} docs` to check how it's used in this project
 - **Before reading files**: query first — illu tells you exactly where things are
-- **Finding call paths**: `{cmd_prefix} callpath` to trace how one symbol reaches another
-- **Dead code detection**: `{cmd_prefix} unused` to find unreferenced symbols
+- **Finding which tests to run**: `{cmd_prefix} test_impact` after changing a symbol
+- **Dead code detection**: `{cmd_prefix} unused` or `{cmd_prefix} orphaned` to find unreferenced symbols
 - **Index health**: `{cmd_prefix} freshness` to check if the index is current
 
 ### Commands
@@ -132,25 +134,44 @@ before grep, before guessing at code structure.
 |------------|----------|--------|
 | `{cmd_prefix} query <term>` | `{tool_prefix}query` | `query: \"<term>\"` |
 | `{cmd_prefix} query <term> --scope <s>` | `{tool_prefix}query` | `query: \"<term>\", scope: \"<s>\"` |
+| `{cmd_prefix} query * --kind struct` | `{tool_prefix}query` | `query: \"*\", kind: \"struct\"` |
+| `{cmd_prefix} query * --sig \"-> Result\"` | `{tool_prefix}query` | `query: \"*\", signature: \"-> Result\"` |
 | `{cmd_prefix} context <symbol>` | `{tool_prefix}context` | `symbol_name: \"<symbol>\"` |
 | `{cmd_prefix} context Type::method` | `{tool_prefix}context` | `symbol_name: \"Type::method\"` |
-| `{cmd_prefix} context <symbol> --file <f>` | `{tool_prefix}context` | `symbol_name: \"<symbol>\", file: \"<f>\"` |
+| `{cmd_prefix} context <sym> --sections source,callers` | `{tool_prefix}context` | `symbol_name: \"<sym>\", sections: [\"source\", \"callers\"]` |
+| `{cmd_prefix} context <sym> --exclude-tests` | `{tool_prefix}context` | `symbol_name: \"<sym>\", exclude_tests: true` |
+| `{cmd_prefix} batch_context <sym1> <sym2>` | `{tool_prefix}batch_context` | `symbols: [\"<sym1>\", \"<sym2>\"]` |
 | `{cmd_prefix} impact <symbol>` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\"` |
 | `{cmd_prefix} impact <symbol> --depth 1` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\", depth: 1` |
-| `{cmd_prefix} docs <dep>` | `{tool_prefix}docs` | `dependency: \"<dep>\"` |
-| `{cmd_prefix} docs <dep> --topic <t>` | `{tool_prefix}docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
+| `{cmd_prefix} diff_impact` | `{tool_prefix}diff_impact` | *(unstaged changes)* |
+| `{cmd_prefix} diff_impact main` | `{tool_prefix}diff_impact` | `git_ref: \"main\"` |
+| `{cmd_prefix} test_impact <symbol>` | `{tool_prefix}test_impact` | `symbol_name: \"<symbol>\"` |
 | `{cmd_prefix} callpath <from> <to>` | `{tool_prefix}callpath` | `from: \"<from>\", to: \"<to>\"` |
-| `{cmd_prefix} batch_context <sym1> <sym2>` | `{tool_prefix}batch_context` | `symbols: [\"<sym1>\", \"<sym2>\"]` |
+| `{cmd_prefix} neighborhood <symbol>` | `{tool_prefix}neighborhood` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} neighborhood <sym> --format tree` | `{tool_prefix}neighborhood` | `symbol_name: \"<sym>\", format: \"tree\"` |
+| `{cmd_prefix} references <symbol>` | `{tool_prefix}references` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} boundary src/server/` | `{tool_prefix}boundary` | `path: \"src/server/\"` |
 | `{cmd_prefix} unused` | `{tool_prefix}unused` | |
 | `{cmd_prefix} unused --path src/server/` | `{tool_prefix}unused` | `path: \"src/server/\"` |
+| `{cmd_prefix} orphaned` | `{tool_prefix}orphaned` | |
+| `{cmd_prefix} overview src/` | `{tool_prefix}overview` | `path: \"src/\"` |
+| `{cmd_prefix} stats` | `{tool_prefix}stats` | |
+| `{cmd_prefix} hotspots` | `{tool_prefix}hotspots` | |
+| `{cmd_prefix} implements --trait Display` | `{tool_prefix}implements` | `trait_name: \"Display\"` |
+| `{cmd_prefix} docs <dep>` | `{tool_prefix}docs` | `dependency: \"<dep>\"` |
+| `{cmd_prefix} docs <dep> --topic <t>` | `{tool_prefix}docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
 | `{cmd_prefix} freshness` | `{tool_prefix}freshness` | |
 | `{cmd_prefix} crate_graph` | `{tool_prefix}crate_graph` | |
+| `{cmd_prefix} blame <symbol>` | `{tool_prefix}blame` | `symbol_name: \"<symbol>\"` |
+| `{cmd_prefix} history <symbol>` | `{tool_prefix}history` | `symbol_name: \"<symbol>\"` |
 
 ### Workflow rules
 
 1. **Locate before you read**: `{cmd_prefix} query` or `{cmd_prefix} context` to find the right file:line, then Read only what you need
 2. **Impact before you change**: always run `{cmd_prefix} impact` before modifying any public symbol
 3. **Chain tools**: `{cmd_prefix} query` to find candidates → `{cmd_prefix} context` for the one you need → `{cmd_prefix} impact` before changing it
+4. **Save tokens**: use `sections: [\"source\", \"callers\"]` on context/batch_context to fetch only what you need
+5. **Production focus**: use `exclude_tests: true` on context/neighborhood/callpath to filter out test functions
 {ILLU_SECTION_END}"
     )
 }
@@ -393,7 +414,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Impact { symbol }) => {
             let db = open_or_index(repo_path)?;
-            let result = handle_impact(&db, &symbol, None, false)?;
+            let result = handle_impact(&db, &symbol, None, false, false)?;
             print_result(&result);
         }
         Some(Command::Docs { dep, topic }) => {

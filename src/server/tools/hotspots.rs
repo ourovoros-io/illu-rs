@@ -5,6 +5,7 @@ pub fn handle_hotspots(
     db: &Database,
     path: Option<&str>,
     limit: Option<i64>,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let prefix = path.unwrap_or("");
     let max = limit.unwrap_or(10);
@@ -13,7 +14,8 @@ pub fn handle_hotspots(
     let _ = writeln!(output, "## Hotspots\n");
 
     // Most referenced (fragile to change)
-    let most_referenced = db.get_most_referenced_symbols(max, prefix, Some("high"))?;
+    let most_referenced =
+        db.get_most_referenced_symbols_filtered(max, prefix, Some("high"), exclude_tests)?;
     if !most_referenced.is_empty() {
         let _ = writeln!(output, "### Most Referenced (fragile to change)\n");
         for (i, (name, file, count, impl_type)) in most_referenced.iter().enumerate() {
@@ -138,7 +140,7 @@ mod tests {
     #[test]
     fn test_hotspots_with_data() {
         let db = setup_db_with_refs();
-        let result = handle_hotspots(&db, None, None).unwrap();
+        let result = handle_hotspots(&db, None, None, false).unwrap();
 
         assert!(result.contains("## Hotspots"));
         assert!(result.contains("### Most Referenced (fragile to change)"));
@@ -159,7 +161,7 @@ mod tests {
     #[test]
     fn test_hotspots_empty() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_hotspots(&db, None, None).unwrap();
+        let result = handle_hotspots(&db, None, None, false).unwrap();
 
         assert!(result.contains("No hotspots found."));
     }
@@ -183,8 +185,59 @@ mod tests {
         db.insert_symbol_ref(lib_id, server_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_hotspots(&db, Some("src/server/"), None).unwrap();
+        let result = handle_hotspots(&db, Some("src/server/"), None, false).unwrap();
         assert!(result.contains("server_fn"));
         assert!(!result.contains("lib_fn"));
+    }
+
+    #[test]
+    fn test_hotspots_exclude_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let f = db.insert_file("src/lib.rs", "h1").unwrap();
+
+        store_symbols(
+            &db,
+            f,
+            &[
+                make_fn("target_fn", "src/lib.rs", 1, 10),
+                make_fn("prod_caller", "src/lib.rs", 12, 20),
+                Symbol {
+                    name: "test_caller".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 22,
+                    line_end: 30,
+                    signature: "fn test_caller()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let target_id = sym_id(&db, "target_fn");
+        let prod_id = sym_id(&db, "prod_caller");
+        let test_id = sym_id(&db, "test_caller");
+
+        // 1 prod ref + 1 test ref
+        db.insert_symbol_ref(prod_id, target_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
+            .unwrap();
+
+        // Without exclude: 2 references
+        let result = handle_hotspots(&db, None, None, false).unwrap();
+        assert!(result.contains("2 references"));
+
+        // With exclude: only 1 reference (prod only)
+        let result = handle_hotspots(&db, None, None, true).unwrap();
+        assert!(
+            result.contains("1 reference"),
+            "should count only prod references: {result}"
+        );
     }
 }

@@ -258,4 +258,24 @@ mod tests {
             "LIKE fallback should find FTS5 in doc content\n{result}"
         );
     }
+
+    #[test]
+    fn test_docs_topic_like_case_insensitive() {
+        let db = Database::open_in_memory().unwrap();
+        let dep_id = db.insert_dependency("tokio", "1.0.0", true, None).unwrap();
+        db.store_doc_with_module(
+            dep_id,
+            "docs.rs",
+            "Tokio provides async Runtime for executing futures",
+            "runtime",
+        )
+        .unwrap();
+
+        // Search with lowercase — should find "Runtime" in uppercase
+        let result = handle_docs(&db, "tokio", Some("runtime")).unwrap();
+        assert!(
+            result.contains("Runtime"),
+            "case-insensitive LIKE should find Runtime via 'runtime'\n{result}"
+        );
+    }
 }

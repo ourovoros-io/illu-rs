@@ -161,50 +161,68 @@ pub fn handle_diff_impact(
         return Ok(output);
     }
 
-    // Run impact analysis for each changed symbol (with output budget)
+    render_downstream_impact(db, &mut output, &changed_symbols)?;
+    render_test_coverage(db, &mut output, &changed_symbols);
+
+    Ok(output)
+}
+
+fn render_downstream_impact(
+    db: &Database,
+    output: &mut String,
+    changed_symbols: &[(String, crate::db::StoredSymbol)],
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut impact_sections = Vec::new();
-    for (_file, sym) in &changed_symbols {
+    for (_file, sym) in changed_symbols {
         let dependents = db.impact_dependents(&sym.name, sym.impl_type.as_deref())?;
         if !dependents.is_empty() {
             impact_sections.push((sym.name.clone(), dependents));
         }
     }
 
-    if !impact_sections.is_empty() {
-        let _ = writeln!(output, "\n### Downstream Impact\n");
-        let mut truncated = false;
-        for (name, dependents) in &impact_sections {
+    if impact_sections.is_empty() {
+        return Ok(());
+    }
+
+    let _ = writeln!(output, "\n### Downstream Impact\n");
+    let mut truncated = false;
+    let mut seen_deps: std::collections::HashSet<(&str, &str, i64)> =
+        std::collections::HashSet::new();
+    for (name, dependents) in &impact_sections {
+        if output.len() > MAX_DIFF_OUTPUT {
+            truncated = true;
+            break;
+        }
+        let new_deps: Vec<_> = dependents
+            .iter()
+            .filter(|dep| seen_deps.insert((&dep.name, &dep.file_path, dep.depth)))
+            .collect();
+        if new_deps.is_empty() {
+            continue;
+        }
+        let _ = writeln!(output, "#### {name}");
+        for dep in &new_deps {
+            let _ = writeln!(
+                output,
+                "- {} ({}) — depth {}",
+                dep.name, dep.file_path, dep.depth
+            );
             if output.len() > MAX_DIFF_OUTPUT {
                 truncated = true;
                 break;
             }
-            let _ = writeln!(output, "#### {name}");
-            for dep in dependents {
-                let _ = writeln!(
-                    output,
-                    "- {} ({}) — depth {}",
-                    dep.name, dep.file_path, dep.depth
-                );
-                if output.len() > MAX_DIFF_OUTPUT {
-                    truncated = true;
-                    break;
-                }
-            }
-        }
-        if truncated {
-            let total: usize = impact_sections.iter().map(|(_, d)| d.len()).sum();
-            let _ = writeln!(
-                output,
-                "\n*(truncated — {total} total dependents across {} symbols. \
-                 Use `impact` on individual symbols for full details.)*",
-                impact_sections.len()
-            );
         }
     }
-
-    render_test_coverage(db, &mut output, &changed_symbols);
-
-    Ok(output)
+    if truncated {
+        let total: usize = impact_sections.iter().map(|(_, d)| d.len()).sum();
+        let _ = writeln!(
+            output,
+            "\n*(truncated — {total} total dependents across {} symbols. \
+             Use `impact` on individual symbols for full details.)*",
+            impact_sections.len()
+        );
+    }
+    Ok(())
 }
 
 fn render_test_coverage(
@@ -402,6 +420,113 @@ diff --git a/src/lib.rs b/src/lib.rs
         let dependents = db.impact_dependents("target_fn", None).unwrap();
         assert_eq!(dependents.len(), 1);
         assert_eq!(dependents[0].name, "caller_fn");
+    }
+
+    #[test]
+    fn test_diff_impact_cross_seed_dedup() {
+        use std::fmt::Write;
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "fn_a".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn fn_a()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "fn_b".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 11,
+                    signature: "pub fn fn_b()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "shared_caller".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 13,
+                    line_end: 20,
+                    signature: "pub fn shared_caller()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let a_id = db.get_symbol_id("fn_a", "src/lib.rs").unwrap().unwrap();
+        let b_id = db.get_symbol_id("fn_b", "src/lib.rs").unwrap().unwrap();
+        let caller_id = db
+            .get_symbol_id("shared_caller", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        // shared_caller calls both fn_a and fn_b
+        db.insert_symbol_ref(caller_id, a_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(caller_id, b_id, "call", "high", None)
+            .unwrap();
+
+        // Both fn_a and fn_b changed — shared_caller is downstream of both
+        let dependents_a = db.impact_dependents("fn_a", None).unwrap();
+        let dependents_b = db.impact_dependents("fn_b", None).unwrap();
+        assert!(!dependents_a.is_empty());
+        assert!(!dependents_b.is_empty());
+
+        // Simulate what handle_diff_impact does: collect impact per seed
+        let impact_sections = vec![
+            ("fn_a".to_string(), dependents_a),
+            ("fn_b".to_string(), dependents_b),
+        ];
+
+        // Render with cross-seed dedup
+        let mut output = String::new();
+        let mut seen_deps: std::collections::HashSet<(String, String, i64)> =
+            std::collections::HashSet::new();
+        for (name, dependents) in &impact_sections {
+            let new_deps: Vec<_> = dependents
+                .iter()
+                .filter(|dep| {
+                    seen_deps.insert((dep.name.clone(), dep.file_path.clone(), dep.depth))
+                })
+                .collect();
+            if new_deps.is_empty() {
+                continue;
+            }
+            let _ = writeln!(output, "#### {name}");
+            for dep in &new_deps {
+                let _ = writeln!(output, "- {} ({})", dep.name, dep.file_path);
+            }
+        }
+
+        // shared_caller should appear exactly once
+        let count = output.matches("shared_caller").count();
+        assert_eq!(
+            count, 1,
+            "shared_caller should appear exactly once across seeds, got {count}: {output}"
+        );
     }
 
     #[test]
