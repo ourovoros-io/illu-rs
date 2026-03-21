@@ -1,4 +1,5 @@
 pub mod batch_context;
+pub mod boundary;
 pub mod callpath;
 pub mod context;
 pub mod crate_graph;

@@ -243,6 +243,12 @@ struct SimilarParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct BoundaryParams {
+    /// Path prefix defining the module boundary (e.g. "src/server/tools/")
+    path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -673,6 +679,23 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "boundary",
+        description = "Analyze module boundaries: which symbols are used by code outside the given path (public API) vs only used internally (safe to refactor)."
+    )]
+    async fn boundary(
+        &self,
+        Parameters(params): Parameters<BoundaryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = %params.path, "Tool call: boundary");
+        let _guard = crate::status::StatusGuard::new(&format!("boundary \u{25b8} {}", params.path));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::boundary::handle_boundary(&db, &params.path).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "crate_graph",
         description = "Show the workspace crate dependency graph. Lists all crates and their inter-crate dependencies."
     )]
@@ -716,6 +739,7 @@ impl ServerHandler for IlluServer {
                  'stats' for codebase statistics and health metrics, \
                  'rename_plan' for rename impact preview, \
                  'similar' for finding structurally similar symbols, \
+                 'boundary' for module API boundary analysis, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),
