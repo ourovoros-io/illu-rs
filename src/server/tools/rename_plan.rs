@@ -1,5 +1,4 @@
 use crate::db::{Database, StoredSymbol};
-use crate::indexer::parser::SymbolKind;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
@@ -106,12 +105,8 @@ fn write_field_usage(
     db: &Database,
     base_name: &str,
 ) -> Result<usize, Box<dyn std::error::Error>> {
-    let all = db.get_symbols_by_path_prefix_filtered("", true)?;
-    let matches: Vec<_> = all
-        .iter()
-        .filter(|s| s.kind == SymbolKind::Struct && s.name != base_name)
-        .filter(|s| s.details.as_deref().is_some_and(|d| d.contains(base_name)))
-        .collect();
+    let mut matches = db.search_symbols_by_details(base_name, "")?;
+    matches.retain(|s| s.name != base_name);
     if !matches.is_empty() {
         let _ = writeln!(output, "### Struct Fields ({} structs)\n", matches.len());
         for sym in &matches {
@@ -178,7 +173,7 @@ fn write_doc_mentions(
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::{Symbol, Visibility};
+    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn make_symbol(name: &str, kind: SymbolKind, file: &str, line: usize) -> Symbol {

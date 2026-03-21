@@ -1,6 +1,5 @@
 use crate::db::Database;
 use crate::indexer::parser::SymbolKind;
-use std::collections::BTreeMap;
 use std::fmt::Write;
 
 pub fn handle_stats(
@@ -19,37 +18,34 @@ pub fn handle_stats(
         }
     );
 
-    // Symbol breakdown by kind
-    let symbols = db.get_symbols_by_path_prefix_filtered(prefix, true)?;
-    let mut kind_counts: BTreeMap<String, usize> = BTreeMap::new();
-    for sym in &symbols {
-        *kind_counts.entry(sym.kind.to_string()).or_default() += 1;
-    }
+    // Symbol breakdown by kind (targeted SQL, no load-all)
+    let kind_counts = db.count_symbols_by_kind(prefix)?;
+    let total_symbols: i64 = kind_counts.iter().map(|(_, c)| c).sum();
 
     // File count
     let file_counts = db.get_file_symbol_counts(prefix)?;
     let file_count = file_counts.len();
 
+    // Load only functions for test coverage calculation
+    let mut functions = db.get_symbols_by_path_prefix_filtered(prefix, true)?;
+    functions.retain(|s| s.kind == SymbolKind::Function);
+
     // Test count
-    let test_count = symbols
+    let test_count = functions
         .iter()
         .filter(|s| s.attributes.as_deref().is_some_and(|a| a.contains("test")))
         .count();
 
     // Non-test, non-main function count for coverage calc
-    let fn_count = symbols
+    let fn_count = functions
         .iter()
-        .filter(|s| s.kind == SymbolKind::Function)
         .filter(|s| !s.attributes.as_deref().is_some_and(|a| a.contains("test")))
         .filter(|s| s.name != "main")
         .count();
 
     // Untested function count
     let mut untested = 0;
-    for sym in &symbols {
-        if sym.kind != SymbolKind::Function {
-            continue;
-        }
+    for sym in &functions {
         if sym
             .attributes
             .as_deref()
@@ -68,7 +64,7 @@ pub fn handle_stats(
 
     let _ = writeln!(output, "### Overview\n");
     let _ = writeln!(output, "- **Files:** {file_count}");
-    let _ = writeln!(output, "- **Symbols:** {}", symbols.len());
+    let _ = writeln!(output, "- **Symbols:** {total_symbols}");
 
     // Kind breakdown inline
     let kinds_str: Vec<String> = kind_counts
