@@ -469,12 +469,9 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let file_id = db.insert_file("src/a.rs", "hash1").unwrap();
 
-        let caller_id =
-            insert_symbol_with_kind(&db, file_id, "caller_fn", "function", 1, 5);
-        let const_id =
-            insert_symbol_with_kind(&db, file_id, "MY_CONST", "const", 7, 7);
-        let fn_id =
-            insert_symbol_with_kind(&db, file_id, "real_fn", "function", 9, 12);
+        let caller_id = insert_symbol_with_kind(&db, file_id, "caller_fn", "function", 1, 5);
+        let const_id = insert_symbol_with_kind(&db, file_id, "MY_CONST", "const", 7, 7);
+        let fn_id = insert_symbol_with_kind(&db, file_id, "real_fn", "function", 9, 12);
 
         db.insert_symbol_ref(caller_id, const_id, "call", "high", None)
             .unwrap();
@@ -482,12 +479,8 @@ mod tests {
             .unwrap();
 
         let result =
-            handle_neighborhood(&db, "caller_fn", Some(1), Some("down"), None, false)
-                .unwrap();
-        assert!(
-            result.contains("real_fn"),
-            "should show function callees"
-        );
+            handle_neighborhood(&db, "caller_fn", Some(1), Some("down"), None, false).unwrap();
+        assert!(result.contains("real_fn"), "should show function callees");
         assert!(
             !result.contains("MY_CONST"),
             "should NOT show constant callees in call graph"

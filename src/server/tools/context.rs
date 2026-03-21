@@ -1363,10 +1363,7 @@ mod tests {
             .get_symbol_id("good_callee", "src/a.rs")
             .unwrap()
             .unwrap();
-        let bad_id = db
-            .get_symbol_id("bad_callee", "src/b.rs")
-            .unwrap()
-            .unwrap();
+        let bad_id = db.get_symbol_id("bad_callee", "src/b.rs").unwrap().unwrap();
 
         // High confidence ref
         db.insert_symbol_ref(caller_id, good_id, "call", "high", None)
@@ -1375,9 +1372,16 @@ mod tests {
         db.insert_symbol_ref(caller_id, bad_id, "call", "low", None)
             .unwrap();
 
-        let result =
-            handle_context(&db, "caller_fn", false, None, Some(&["callees"]), None, false)
-                .unwrap();
+        let result = handle_context(
+            &db,
+            "caller_fn",
+            false,
+            None,
+            Some(&["callees"]),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(
             result.contains("good_callee"),
             "should contain high-confidence callee, got:\n{result}"
@@ -1472,9 +1476,16 @@ mod tests {
         db.insert_symbol_ref(test_id, target_id, "call", "high", None)
             .unwrap();
 
-        let result =
-            handle_context(&db, "target_fn", false, None, Some(&["callers"]), None, false)
-                .unwrap();
+        let result = handle_context(
+            &db,
+            "target_fn",
+            false,
+            None,
+            Some(&["callers"]),
+            None,
+            false,
+        )
+        .unwrap();
         let prod_pos = result.find("prod_caller").unwrap();
         let test_pos = result.find("test_caller").unwrap();
         assert!(

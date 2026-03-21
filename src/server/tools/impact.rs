@@ -90,12 +90,8 @@ pub fn handle_impact(
                 t.name, t.file_path, t.line_start
             );
         }
-        // Include all test names in the cargo test suggestion
-        let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
-        let suggestion = super::format_cargo_test_suggestion(&test_names);
-        let _ = writeln!(output, "\nSuggested: `{suggestion}`");
-    } else if !all_tests.is_empty() {
-        // All tests already shown in impact — just add the suggestion
+    }
+    if !all_tests.is_empty() {
         let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
         let suggestion = super::format_cargo_test_suggestion(&test_names);
         let _ = writeln!(output, "\nSuggested: `{suggestion}`");

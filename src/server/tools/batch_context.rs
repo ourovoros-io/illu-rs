@@ -16,8 +16,7 @@ pub fn handle_batch_context(
         if i > 0 {
             output.push_str("\n---\n\n");
         }
-        let result =
-            context::handle_context(db, symbol, full_body, None, sections, None, false)?;
+        let result = context::handle_context(db, symbol, full_body, None, sections, None, false)?;
         output.push_str(&result);
     }
 
@@ -113,13 +112,8 @@ mod tests {
         let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
         store_symbols(&db, file_id, &[make_fn("helper", "src/lib.rs", 1)]).unwrap();
 
-        let result = handle_batch_context(
-            &db,
-            &["helper".to_string()],
-            false,
-            Some(&["callers"]),
-        )
-        .unwrap();
+        let result =
+            handle_batch_context(&db, &["helper".to_string()], false, Some(&["callers"])).unwrap();
         // Should NOT contain source section
         assert!(
             !result.contains("### Source"),
