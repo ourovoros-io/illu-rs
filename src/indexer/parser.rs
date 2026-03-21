@@ -1395,7 +1395,10 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
             && !noisy
             && !self.locals.contains(name)
             && self.ctx.known_symbols.contains(name)
-            && self.seen.insert(name.to_string())
+            && self.seen.insert(match &target_context {
+                Some(ctx) => format!("{ctx}::{name}"),
+                None => name.to_string(),
+            })
         {
             refs.push(SymbolRef {
                 source_name: self.fn_name.to_string(),
@@ -1423,7 +1426,10 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
     ) {
         if name != self.fn_name
             && self.ctx.known_symbols.contains(name)
-            && self.seen.insert(name.to_string())
+            && self.seen.insert(match &target_context {
+                Some(ctx) => format!("{ctx}::{name}"),
+                None => name.to_string(),
+            })
         {
             refs.push(SymbolRef {
                 source_name: self.fn_name.to_string(),
@@ -3633,6 +3639,36 @@ fn caller() {
         assert!(
             has_clear_ref,
             "qualified call Status::clear() should bypass noisy filter, got refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_seen_dedup_includes_context() {
+        // Two different Type::new() calls in the same function should both be captured
+        let source = r"
+pub struct Foo;
+impl Foo { pub fn new() -> Self { Self } }
+pub struct Bar;
+impl Bar { pub fn new() -> Self { Self } }
+fn caller() {
+    let _ = Foo::new();
+    let _ = Bar::new();
+}
+";
+        let known = ["Foo", "Bar", "new", "caller"]
+            .into_iter()
+            .map(String::from)
+            .collect::<std::collections::HashSet<_>>();
+        let crate_map = std::collections::HashMap::<String, String>::new();
+        let refs = extract_refs(source, "src/lib.rs", &known, &crate_map).unwrap();
+        let new_refs: Vec<_> = refs
+            .iter()
+            .filter(|r| r.source_name == "caller" && r.target_name == "new")
+            .collect();
+        assert_eq!(
+            new_refs.len(),
+            2,
+            "Both Foo::new() and Bar::new() should be captured, got: {new_refs:?}"
         );
     }
 }
