@@ -131,7 +131,39 @@ pub fn handle_diff_impact(
         }
     }
 
-    render_diff_output(db, &changed_symbols, changes_only, compact)
+    let stale_warning = check_staleness(db, repo_path);
+    render_diff_output(db, &changed_symbols, changes_only, compact, &stale_warning)
+}
+
+fn check_staleness(db: &Database, repo_path: &Path) -> String {
+    let repo_str = repo_path.to_string_lossy();
+    let indexed = db.get_commit_hash(&repo_str).ok().flatten();
+    let head = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    match (indexed.as_deref(), head.as_deref()) {
+        (Some(idx), Some(hd)) if idx != hd => {
+            let changed = std::process::Command::new("git")
+                .args(["diff", "--name-only", idx, hd, "--", "*.rs"])
+                .current_dir(repo_path)
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).lines().count());
+            let files_note = changed
+                .filter(|&n| n > 0)
+                .map_or(String::new(), |n| format!(", {n} .rs files changed"));
+            format!(
+                "> **Note:** Index is behind HEAD ({}{files_note}). \
+                 Newly added symbols may be missing from results.\n\n",
+                &hd[..7.min(hd.len())]
+            )
+        }
+        _ => String::new(),
+    }
 }
 
 fn render_diff_output(
@@ -139,8 +171,10 @@ fn render_diff_output(
     changed_symbols: &[(String, crate::db::StoredSymbol)],
     changes_only: bool,
     compact: bool,
+    stale_warning: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut output = String::new();
+    output.push_str(stale_warning);
 
     if changed_symbols.is_empty() {
         let _ = writeln!(output, "## Changed Symbols\n");
@@ -620,7 +654,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         )];
 
         // Full mode: downstream impact present
-        let full = render_diff_output(&db, &changed, false, false).unwrap();
+        let full = render_diff_output(&db, &changed, false, false, "").unwrap();
         assert!(
             full.contains("Downstream Impact"),
             "full mode should include downstream: {full}"
@@ -631,7 +665,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         );
 
         // Compact mode: no downstream, but tests still shown
-        let compact = render_diff_output(&db, &changed, false, true).unwrap();
+        let compact = render_diff_output(&db, &changed, false, true, "").unwrap();
         assert!(
             !compact.contains("Downstream Impact"),
             "compact should skip downstream: {compact}"
