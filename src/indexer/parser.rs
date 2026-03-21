@@ -224,7 +224,7 @@ fn extract_impl_block(
 ) {
     let type_name = extract_impl_type(node, source);
     let vis = get_visibility(node, source);
-    let sig = get_first_line(node, source);
+    let sig = get_signature(node, source);
     if let Some(ti) = extract_trait_impl_info(node, source, file_path) {
         trait_impls.push(ti);
     }
@@ -348,7 +348,7 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
     let name = find_child_by_kind(node, "identifier")?;
     let name_text = node_text(&name, source);
     let vis = get_visibility(node, source);
-    let sig = get_first_line(node, source);
+    let sig = get_signature(node, source);
     let (line_start, line_end) = line_range(node);
 
     Some(Symbol {
@@ -371,7 +371,7 @@ fn extract_function_signature(node: &Node, source: &str, file_path: &str) -> Opt
     let name = find_child_by_kind(node, "identifier")?;
     let name_text = node_text(&name, source);
     let vis = get_visibility(node, source);
-    let sig = get_first_line(node, source);
+    let sig = get_signature(node, source);
     let (line_start, line_end) = line_range(node);
 
     Some(Symbol {
@@ -469,7 +469,7 @@ fn extract_trait_details(node: &Node, source: &str) -> Option<String> {
     let mut cursor = list.walk();
     for child in list.children(&mut cursor) {
         if child.kind() == "function_signature_item" || child.kind() == "function_item" {
-            let sig = get_first_line(&child, source);
+            let sig = get_signature(&child, source);
             let sig = sig.strip_suffix(';').unwrap_or(&sig).to_string();
             methods.push(sig);
         }
@@ -490,7 +490,7 @@ fn extract_named_item(
         .or_else(|| find_child_by_kind(node, "identifier"))?;
     let name = node_text(&name_node, source);
     let vis = get_visibility(node, source);
-    let sig = get_first_line(node, source);
+    let sig = get_signature(node, source);
 
     let details = match kind {
         SymbolKind::Struct | SymbolKind::Union => extract_struct_details(node, source),
@@ -519,7 +519,7 @@ fn extract_named_item(
 fn extract_macro_def(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
     let name = find_child_by_kind(node, "identifier")?;
     let name_text = node_text(&name, source);
-    let sig = get_first_line(node, source);
+    let sig = get_signature(node, source);
     let (line_start, line_end) = line_range(node);
 
     Some(Symbol {
@@ -612,9 +612,11 @@ fn node_text(node: &Node, source: &str) -> String {
     source[node.byte_range()].to_string()
 }
 
-fn get_first_line(node: &Node, source: &str) -> String {
+fn get_signature(node: &Node, source: &str) -> String {
     let text = node_text(node, source);
-    text.lines().next().unwrap_or(&text).trim().to_string()
+    let sig_end = text.find('{').unwrap_or(text.len());
+    let raw_sig = text[..sig_end].trim();
+    raw_sig.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Resolved import path for a short name.
@@ -1617,7 +1619,7 @@ pub fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
     }
 
     #[test]
-    fn test_where_clause_not_in_signature() {
+    fn test_where_clause_in_signature() {
         let source = r"
 pub fn process<T>(items: Vec<T>) -> String
 where
@@ -1628,15 +1630,21 @@ where
 ";
         let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
         let sym = symbols.iter().find(|s| s.name == "process").unwrap();
-        // signature is first line only, so no `where`
         assert!(
-            !sym.signature.contains("where"),
-            "signature should not contain where clause: {}",
+            sym.signature.contains("where"),
+            "signature should contain where clause: {}",
             sym.signature
         );
-        // but body has it
-        let body = sym.body.as_deref().unwrap();
-        assert!(body.contains("where"), "body should contain where clause");
+        assert!(
+            sym.signature.contains("T: std::fmt::Display"),
+            "signature should contain trait bound: {}",
+            sym.signature
+        );
+        assert!(
+            !sym.signature.contains("String::new"),
+            "signature should not contain body: {}",
+            sym.signature
+        );
     }
 
     #[test]
@@ -2437,5 +2445,35 @@ pub union MyUnion {
         let f = symbols.iter().find(|s| s.name == "compute").unwrap();
         assert_eq!(f.kind, SymbolKind::Function);
         assert!(f.signature.contains("const fn"));
+    }
+
+    #[test]
+    fn test_multiline_signature_captured() {
+        let source = r"
+pub fn handle_query(
+    db: &Database,
+    query: &str,
+    scope: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    todo!()
+}
+";
+        let (symbols, _) = parse_rust_source(source, "test.rs").unwrap();
+        let func = symbols.iter().find(|s| s.name == "handle_query").unwrap();
+        assert!(
+            func.signature.contains("-> Result<String"),
+            "return type in sig: {}",
+            func.signature
+        );
+        assert!(
+            func.signature.contains("&Database"),
+            "param type in sig: {}",
+            func.signature
+        );
+        assert!(
+            !func.signature.contains("todo!"),
+            "body not in sig: {}",
+            func.signature
+        );
     }
 }
