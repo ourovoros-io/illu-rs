@@ -352,7 +352,7 @@ pub fn beta() -> i32 {
     )]);
 
     // Impact analysis on a circular chain must not hang or error
-    let result = impact::handle_impact(&db, "alpha", None, false).unwrap();
+    let result = impact::handle_impact(&db, "alpha", None, false, false).unwrap();
     assert!(
         result.contains("beta"),
         "should show direct dependent: {result}"
@@ -379,7 +379,7 @@ pub fn f() { g(); }
 pub fn g() {}
 ",
     );
-    let result = impact::handle_impact(&db, "g", None, false).unwrap();
+    let result = impact::handle_impact(&db, "g", None, false, false).unwrap();
 
     // Depth limit is 5, so 'a' (at depth 6) should NOT appear
     assert!(result.contains("**f**"), "depth 1 should appear");
@@ -428,7 +428,7 @@ pub fn builder() {
 }
 ",
     );
-    let result = impact::handle_impact(&db, "Config", None, false).unwrap();
+    let result = impact::handle_impact(&db, "Config", None, false, false).unwrap();
     // builder shadows Config with a local variable — should NOT
     // appear as a dependent of the Config struct
     assert!(
@@ -456,13 +456,13 @@ pub fn caller() -> i32 {
 ",
     );
     // new/default/clone are user-written constructors — tracked as refs
-    let result = impact::handle_impact(&db, "new", None, false).unwrap();
+    let result = impact::handle_impact(&db, "new", None, false, false).unwrap();
     assert!(
         result.contains("caller"),
         "new should be tracked as a ref target: {result}"
     );
     // fmt is still in the noisy list (derive/trait plumbing) — not tracked
-    let result = impact::handle_impact(&db, "fmt", None, false).unwrap();
+    let result = impact::handle_impact(&db, "fmt", None, false, false).unwrap();
     assert!(
         !result.contains("caller"),
         "fmt should still be filtered as noisy: {result}"
@@ -538,7 +538,7 @@ fn refresh_removes_deleted_file_refs() {
     index_repo(&db, &config).unwrap();
 
     // Verify extra_caller exists and references base
-    let result = impact::handle_impact(&db, "base", None, false).unwrap();
+    let result = impact::handle_impact(&db, "base", None, false, false).unwrap();
     assert!(
         result.contains("extra_caller"),
         "extra_caller should be dependent before delete"
@@ -553,7 +553,7 @@ fn refresh_removes_deleted_file_refs() {
     assert!(syms.is_empty(), "deleted file's symbols must be removed");
 
     // Impact on base should no longer mention extra_caller
-    let result = impact::handle_impact(&db, "base", None, false).unwrap();
+    let result = impact::handle_impact(&db, "base", None, false, false).unwrap();
     assert!(
         !result.contains("extra_caller"),
         "deleted file's refs must be cleaned up: {result}"
@@ -590,7 +590,7 @@ fn refresh_cleans_stale_refs() {
     index_repo(&db, &config).unwrap();
 
     // Verify the ref exists
-    let result = impact::handle_impact(&db, "target", None, false).unwrap();
+    let result = impact::handle_impact(&db, "target", None, false, false).unwrap();
     assert!(
         result.contains("caller"),
         "caller should depend on target before change: {result}"
@@ -605,7 +605,7 @@ fn refresh_cleans_stale_refs() {
     assert!(syms.is_empty(), "target must be gone after refresh");
 
     // No dependents for a symbol that no longer exists
-    let result = impact::handle_impact(&db, "target", None, false).unwrap();
+    let result = impact::handle_impact(&db, "target", None, false, false).unwrap();
     assert!(
         !result.contains("caller"),
         "stale ref from caller to target must be cleaned up: {result}"
@@ -645,7 +645,7 @@ pub fn use_config() -> AppConfig {
     .unwrap();
     let context_result =
         context::handle_context(&db, "AppConfig", false, None, None, None, false).unwrap();
-    let impact_result = impact::handle_impact(&db, "AppConfig", None, false).unwrap();
+    let impact_result = impact::handle_impact(&db, "AppConfig", None, false, false).unwrap();
 
     // All tools must reference the same file path
     assert!(
@@ -846,7 +846,7 @@ service = { path = "../service" }
         ],
     );
 
-    let result = impact::handle_impact(&db, "CoreType", None, false).unwrap();
+    let result = impact::handle_impact(&db, "CoreType", None, false, false).unwrap();
     // Should show affected crates in dependency order
     assert!(
         result.contains("Affected Crates"),
@@ -1439,7 +1439,7 @@ pub fn depth3() { depth2(); }
 ",
     );
 
-    let result = impact::handle_impact(&db, "root", None, false).unwrap();
+    let result = impact::handle_impact(&db, "root", None, false, false).unwrap();
     assert!(result.contains("depth1"), "depth1 at depth 1: {result}");
     assert!(result.contains("depth2"), "depth2 at depth 2: {result}");
     assert!(result.contains("depth3"), "depth3 at depth 3: {result}");
@@ -1643,7 +1643,7 @@ pub fn make_error() -> Error {
 ",
     );
 
-    let result = impact::handle_impact(&db, "Error", None, false).unwrap();
+    let result = impact::handle_impact(&db, "Error", None, false, false).unwrap();
     assert!(
         result.contains("make_error"),
         "make_error uses Error: {result}"
@@ -1751,7 +1751,7 @@ fn cross_module_use_creates_ref() {
         ),
     ]);
 
-    let result = impact::handle_impact(&db, "helper", None, false).unwrap();
+    let result = impact::handle_impact(&db, "helper", None, false, false).unwrap();
     assert!(
         result.contains("run"),
         "run should depend on helper via cross-module use: {result}"
@@ -1780,7 +1780,7 @@ fn cross_module_diamond_dependency() {
         ),
     ]);
 
-    let result = impact::handle_impact(&db, "foundation", None, false).unwrap();
+    let result = impact::handle_impact(&db, "foundation", None, false, false).unwrap();
     // Depth 1: both left_path and right_path depend directly on foundation
     assert!(
         result.contains("left_path"),
@@ -1808,7 +1808,7 @@ fn cross_module_type_reference() {
         ),
     ]);
 
-    let result = impact::handle_impact(&db, "Config", None, false).unwrap();
+    let result = impact::handle_impact(&db, "Config", None, false, false).unwrap();
     assert!(
         result.contains("start"),
         "start should depend on Config via type usage: {result}"
@@ -1999,7 +1999,7 @@ fn refresh_removes_deleted_reference() {
     index_repo(&db, &config).unwrap();
 
     // Verify caller depends on callee
-    let result = impact::handle_impact(&db, "callee", None, false).unwrap();
+    let result = impact::handle_impact(&db, "callee", None, false, false).unwrap();
     assert!(
         result.contains("caller"),
         "caller should depend on callee initially: {result}"
@@ -2013,7 +2013,7 @@ fn refresh_removes_deleted_reference() {
     .unwrap();
     refresh_index(&db, &config).unwrap();
 
-    let result = impact::handle_impact(&db, "callee", None, false).unwrap();
+    let result = impact::handle_impact(&db, "callee", None, false, false).unwrap();
     assert!(
         !result.contains("caller"),
         "caller must NOT depend on callee after removing the call: {result}"
@@ -2120,7 +2120,7 @@ pub fn top_fn() -> i32 { mid_fn() }
 ",
     );
 
-    let result = impact::handle_impact(&db, "leaf_fn", None, false).unwrap();
+    let result = impact::handle_impact(&db, "leaf_fn", None, false, false).unwrap();
 
     // Header
     assert!(

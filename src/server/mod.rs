@@ -112,6 +112,8 @@ struct ImpactParams {
     /// Summarize deep levels by file instead of listing every symbol (default: true).
     /// Set to false for full verbose output at all depths.
     summary: Option<bool>,
+    /// Exclude test functions from impact results (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -231,6 +233,8 @@ struct SymbolsAtParams {
 struct StatsParams {
     /// Filter to files under this path prefix (default: all)
     path: Option<String>,
+    /// Exclude test function references from "Most Referenced" counts (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -239,6 +243,8 @@ struct HotspotsParams {
     path: Option<String>,
     /// Max entries per section (default: 10)
     limit: Option<i64>,
+    /// Exclude test function references from "Most Referenced" counts (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -418,8 +424,15 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let summary = params.summary.unwrap_or(true);
-        let result = tools::impact::handle_impact(&db, &params.symbol_name, params.depth, summary)
-            .map_err(to_mcp_err)?;
+        let exclude_tests = params.exclude_tests.unwrap_or(false);
+        let result = tools::impact::handle_impact(
+            &db,
+            &params.symbol_name,
+            params.depth,
+            summary,
+            exclude_tests,
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -714,8 +727,13 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new("hotspots");
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::hotspots::handle_hotspots(&db, params.path.as_deref(), params.limit)
-            .map_err(to_mcp_err)?;
+        let result = tools::hotspots::handle_hotspots(
+            &db,
+            params.path.as_deref(),
+            params.limit,
+            params.exclude_tests.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -731,7 +749,12 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new("stats");
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::stats::handle_stats(&db, params.path.as_deref()).map_err(to_mcp_err)?;
+        let result = tools::stats::handle_stats(
+            &db,
+            params.path.as_deref(),
+            params.exclude_tests.unwrap_or(false),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

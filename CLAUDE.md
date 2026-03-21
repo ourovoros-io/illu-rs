@@ -133,6 +133,12 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Batch context sections** — `batch_context` accepts optional `sections` parameter (same values as `context`: `source`, `callers`, `callees`, `tested_by`, `traits`, `related`, `docs`). Reduces output verbosity when only specific sections are needed.
 - **Production-first callers** — `render_callers` sorts non-test callers before test callers using `CalleeInfo.is_test`. Blank line separator between production and test callers.
 - **Docs topic fallback summary** — When docs topic search fails (FTS + LIKE), the response includes a truncated (500 char) crate summary excerpt so the user gets useful context instead of a dead-end error.
+- **References dedup** — `handle_references` deduplicates call sites across multiple definition rows (e.g. enum + impl blocks) using `(name, file, line)` HashSet. Filters `Use` kind from type usage section. Separates production callers before test callers with blank line.
+- **Diff impact cross-seed dedup** — `render_downstream_impact` tracks `(name, file, depth)` across all seed symbols, skipping entries already shown by a previous seed. Eliminates duplicate downstream entries when multiple changed symbols share dependents.
+- **Impact exclude_tests** — `handle_impact` accepts `exclude_tests: bool`. When true, filters `is_test=true` entries from depth results (Related Tests section unaffected). `ImpactEntry` now includes `is_test: bool` from the CTE.
+- **Hotspots/stats exclude_tests** — Both accept `exclude_tests: bool`. When true, `get_most_referenced_symbols_filtered` excludes refs where the source symbol is a test function (`ss.is_test = 0`), showing only production-code reference counts.
+- **Impact summary thresholds** — `SUMMARY_DEPTH=2`, `SUMMARY_THRESHOLD=5` (was 3/10). Depths >= 2 with > 5 entries are summarized by file instead of listed individually.
+- **Docs case-insensitive LIKE** — `search_docs_content` uses `lower(d.content) LIKE lower(query)` for case-insensitive topic matching in the LIKE fallback path.
 
 ## Lint Configuration
 
@@ -146,17 +152,19 @@ Rust 2024 edition with strict clippy (see `Cargo.toml [lints.clippy]`):
 <!-- illu:start -->
 ## Code Intelligence (illu)
 
-This repo is indexed by illu. **Use illu tools as your first step** — before reading files, before grep, before guessing at code structure.
+This repo is indexed by illu (31 tools). **Use illu tools as your first step** — before reading files, before grep, before guessing at code structure.
 
 ### When to use illu
 
 - **Starting any task**: `illu query` the relevant symbols to understand what exists
 - **Before modifying a function/struct/trait**: `illu impact` to see what depends on it
 - **Debugging or tracing issues**: `illu context` to get the full definition and references
+- **Understanding call flow**: `illu neighborhood` or `illu callpath` to explore the call graph
+- **Before refactoring a module**: `illu boundary` to see what's public API vs internal
 - **Using an external crate**: `illu docs` to check how it's used in this project
 - **Before reading files**: query first — illu tells you exactly where things are
-- **Finding call paths**: `illu callpath` to trace how one symbol reaches another
-- **Dead code detection**: `illu unused` to find unreferenced symbols
+- **Finding which tests to run**: `illu test_impact` after changing a symbol
+- **Dead code detection**: `illu unused` or `illu orphaned` to find unreferenced symbols
 - **Index health**: `illu freshness` to check if the index is current
 
 ### Commands
@@ -165,23 +173,42 @@ This repo is indexed by illu. **Use illu tools as your first step** — before r
 |------------|----------|--------|
 | `illu query <term>` | `mcp__illu__query` | `query: "<term>"` |
 | `illu query <term> --scope <s>` | `mcp__illu__query` | `query: "<term>", scope: "<s>"` |
+| `illu query * --kind struct` | `mcp__illu__query` | `query: "*", kind: "struct"` |
+| `illu query * --sig "-> Result"` | `mcp__illu__query` | `query: "*", signature: "-> Result"` |
 | `illu context <symbol>` | `mcp__illu__context` | `symbol_name: "<symbol>"` |
 | `illu context Type::method` | `mcp__illu__context` | `symbol_name: "Type::method"` |
-| `illu context <symbol> --file <f>` | `mcp__illu__context` | `symbol_name: "<symbol>", file: "<f>"` |
+| `illu context <sym> --sections source,callers` | `mcp__illu__context` | `symbol_name: "<sym>", sections: ["source", "callers"]` |
+| `illu context <sym> --exclude-tests` | `mcp__illu__context` | `symbol_name: "<sym>", exclude_tests: true` |
+| `illu batch_context <sym1> <sym2>` | `mcp__illu__batch_context` | `symbols: ["<sym1>", "<sym2>"]` |
 | `illu impact <symbol>` | `mcp__illu__impact` | `symbol_name: "<symbol>"` |
 | `illu impact <symbol> --depth 1` | `mcp__illu__impact` | `symbol_name: "<symbol>", depth: 1` |
-| `illu docs <dep>` | `mcp__illu__docs` | `dependency: "<dep>"` |
-| `illu docs <dep> --topic <t>` | `mcp__illu__docs` | `dependency: "<dep>", topic: "<t>"` |
+| `illu diff_impact` | `mcp__illu__diff_impact` | *(unstaged changes)* |
+| `illu diff_impact main` | `mcp__illu__diff_impact` | `git_ref: "main"` |
+| `illu test_impact <symbol>` | `mcp__illu__test_impact` | `symbol_name: "<symbol>"` |
 | `illu callpath <from> <to>` | `mcp__illu__callpath` | `from: "<from>", to: "<to>"` |
-| `illu batch_context <sym1> <sym2>` | `mcp__illu__batch_context` | `symbols: ["<sym1>", "<sym2>"]` |
+| `illu neighborhood <symbol>` | `mcp__illu__neighborhood` | `symbol_name: "<symbol>"` |
+| `illu neighborhood <sym> --format tree` | `mcp__illu__neighborhood` | `symbol_name: "<sym>", format: "tree"` |
+| `illu references <symbol>` | `mcp__illu__references` | `symbol_name: "<symbol>"` |
+| `illu boundary src/server/` | `mcp__illu__boundary` | `path: "src/server/"` |
 | `illu unused` | `mcp__illu__unused` | |
 | `illu unused --path src/server/` | `mcp__illu__unused` | `path: "src/server/"` |
+| `illu orphaned` | `mcp__illu__orphaned` | |
+| `illu overview src/` | `mcp__illu__overview` | `path: "src/"` |
+| `illu stats` | `mcp__illu__stats` | |
+| `illu hotspots` | `mcp__illu__hotspots` | |
+| `illu implements --trait Display` | `mcp__illu__implements` | `trait_name: "Display"` |
+| `illu docs <dep>` | `mcp__illu__docs` | `dependency: "<dep>"` |
+| `illu docs <dep> --topic <t>` | `mcp__illu__docs` | `dependency: "<dep>", topic: "<t>"` |
 | `illu freshness` | `mcp__illu__freshness` | |
 | `illu crate_graph` | `mcp__illu__crate_graph` | |
+| `illu blame <symbol>` | `mcp__illu__blame` | `symbol_name: "<symbol>"` |
+| `illu history <symbol>` | `mcp__illu__history` | `symbol_name: "<symbol>"` |
 
 ### Workflow rules
 
 1. **Locate before you read**: `illu query` or `illu context` to find the right file:line, then Read only what you need
 2. **Impact before you change**: always run `illu impact` before modifying any public symbol
 3. **Chain tools**: `illu query` to find candidates → `illu context` for the one you need → `illu impact` before changing it
+4. **Save tokens**: use `sections: ["source", "callers"]` on context/batch_context to fetch only what you need
+5. **Production focus**: use `exclude_tests: true` on context/neighborhood/callpath to filter out test functions
 <!-- illu:end -->

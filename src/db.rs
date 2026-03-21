@@ -866,8 +866,8 @@ impl Database {
         max_depth: i64,
     ) -> SqlResult<Vec<ImpactEntry>> {
         let mut stmt = self.conn.prepare(
-            "WITH RECURSIVE deps(id, name, file_path, depth, via) AS (
-                SELECT s.id, s.name, f.path, 0, ''
+            "WITH RECURSIVE deps(id, name, file_path, depth, via, is_test) AS (
+                SELECT s.id, s.name, f.path, 0, '', s.is_test
                 FROM symbols s
                 JOIN files f ON f.id = s.file_id
                 WHERE s.name = ?1 AND (?3 IS NULL OR s.impl_type = ?3)
@@ -875,14 +875,15 @@ impl Database {
                 SELECT s2.id, s2.name, f2.path, deps.depth + 1,
                        CASE WHEN deps.via = '' THEN deps.name
                             ELSE deps.via || ' -> ' || deps.name
-                       END
+                       END,
+                       s2.is_test
                 FROM deps
                 JOIN symbol_refs sr ON sr.target_symbol_id = deps.id
                 JOIN symbols s2 ON s2.id = sr.source_symbol_id
                 JOIN files f2 ON f2.id = s2.file_id
                 WHERE deps.depth < ?2
             )
-            SELECT DISTINCT name, file_path, depth, via FROM deps
+            SELECT DISTINCT name, file_path, depth, via, is_test FROM deps
             WHERE depth > 0
             ORDER BY depth, name
             LIMIT 100",
@@ -895,6 +896,7 @@ impl Database {
                 file_path: row.get(1)?,
                 depth: row.get(2)?,
                 via: row.get(3)?,
+                is_test: row.get::<_, i64>(4)? != 0,
             });
         }
         Ok(results)
@@ -1229,12 +1231,12 @@ impl Database {
         if query.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let pattern = format!("%{}%", escape_like(query));
+        let pattern = format!("%{}%", escape_like(&query.to_lowercase()));
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version, d.module \
              FROM docs d \
              JOIN dependencies dep ON dep.id = d.dependency_id \
-             WHERE dep.name = ?1 AND d.content LIKE ?2 ESCAPE '\\' \
+             WHERE dep.name = ?1 AND lower(d.content) LIKE ?2 ESCAPE '\\' \
              LIMIT 10",
         )?;
         let mut results = Vec::new();
@@ -1764,20 +1766,37 @@ impl Database {
         path_prefix: &str,
         min_confidence: Option<&str>,
     ) -> SqlResult<Vec<SymbolRefCount>> {
+        self.get_most_referenced_symbols_filtered(limit, path_prefix, min_confidence, false)
+    }
+
+    pub fn get_most_referenced_symbols_filtered(
+        &self,
+        limit: i64,
+        path_prefix: &str,
+        min_confidence: Option<&str>,
+        exclude_test_sources: bool,
+    ) -> SqlResult<Vec<SymbolRefCount>> {
         let pattern = format!("{}%", escape_like(path_prefix));
-        let mut stmt = self.conn.prepare_cached(
+        let test_filter = if exclude_test_sources {
+            " AND ss.is_test = 0"
+        } else {
+            ""
+        };
+        let sql = format!(
             "SELECT ts.name, f.path, \
                     COUNT(DISTINCT sr.source_symbol_id) as ref_count, \
                     ts.impl_type \
              FROM symbol_refs sr \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE f.path LIKE ?1 ESCAPE '\\' \
-               AND (?3 IS NULL OR sr.confidence = ?3) \
+               AND (?3 IS NULL OR sr.confidence = ?3){test_filter} \
              GROUP BY ts.id \
              ORDER BY ref_count DESC \
              LIMIT ?2",
-        )?;
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
         while let Some(row) = rows.next()? {
@@ -1976,6 +1995,7 @@ pub struct ImpactEntry {
     pub file_path: String,
     pub depth: i64,
     pub via: String,
+    pub is_test: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

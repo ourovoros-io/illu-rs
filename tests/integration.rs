@@ -141,7 +141,7 @@ fn test_context_tool() {
 #[test]
 fn test_impact_tool() {
     let (_dir, db) = setup_indexed_db();
-    let result = impact::handle_impact(&db, "Config", None, false).unwrap();
+    let result = impact::handle_impact(&db, "Config", None, false, false).unwrap();
     assert!(
         result.contains("Impact Analysis"),
         "impact should show header"
@@ -300,7 +300,7 @@ fn test_workspace_query_across_crates() {
 #[test]
 fn test_workspace_impact_crate_summary() {
     let (_dir, db) = setup_workspace_db();
-    let result = impact::handle_impact(&db, "SharedConfig", None, false).unwrap();
+    let result = impact::handle_impact(&db, "SharedConfig", None, false, false).unwrap();
     assert!(
         result.contains("Affected Crates"),
         "impact should show crate-level summary"

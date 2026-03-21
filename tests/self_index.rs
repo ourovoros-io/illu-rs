@@ -171,7 +171,7 @@ fn self_impact_database_is_widely_used() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = impact::handle_impact(&db, "Database", None, false).unwrap();
+    let result = impact::handle_impact(&db, "Database", None, false, false).unwrap();
     let file_count = result.matches("src/").count();
     assert!(
         file_count >= 3,
@@ -184,7 +184,7 @@ fn self_impact_symbol_struct_has_dependents() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = impact::handle_impact(&db, "Symbol", None, false).unwrap();
+    let result = impact::handle_impact(&db, "Symbol", None, false, false).unwrap();
     assert!(
         result.contains("store") || result.contains("parser"),
         "Symbol should have dependents in store or parser: {result}"
@@ -306,7 +306,7 @@ fn tool_queries_complete_under_100ms() {
     );
 
     let start = Instant::now();
-    let _ = impact::handle_impact(&db, "Database", None, false).unwrap();
+    let _ = impact::handle_impact(&db, "Database", None, false, false).unwrap();
     let impact_time = start.elapsed();
     assert!(
         impact_time.as_millis() < 100,

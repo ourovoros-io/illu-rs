@@ -6,6 +6,7 @@ pub fn handle_impact(
     symbol_name: &str,
     max_depth: Option<i64>,
     summary: bool,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
@@ -43,10 +44,15 @@ pub fn handle_impact(
         }
     }
 
-    let dependents = db.impact_dependents_with_depth(base_name, base_impl, depth)?;
+    let all_dependents = db.impact_dependents_with_depth(base_name, base_impl, depth)?;
+    let dependents: Vec<_> = if exclude_tests {
+        all_dependents.iter().filter(|d| !d.is_test).collect()
+    } else {
+        all_dependents.iter().collect()
+    };
 
     let mut current_depth: i64 = -1;
-    let mut depth_buf: Vec<&crate::db::ImpactEntry> = Vec::new();
+    let mut depth_buf: Vec<&&crate::db::ImpactEntry> = Vec::new();
     let mut seen_in_impact: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
     for dep in &dependents {
@@ -103,11 +109,11 @@ pub fn handle_impact(
 fn render_depth_entries(
     output: &mut String,
     depth: i64,
-    entries: &[&crate::db::ImpactEntry],
+    entries: &[&&crate::db::ImpactEntry],
     summary: bool,
 ) {
-    const SUMMARY_DEPTH: i64 = 3;
-    const SUMMARY_THRESHOLD: usize = 10;
+    const SUMMARY_DEPTH: i64 = 2;
+    const SUMMARY_THRESHOLD: usize = 5;
 
     let should_summarize = summary && depth >= SUMMARY_DEPTH && entries.len() > SUMMARY_THRESHOLD;
 
@@ -159,7 +165,7 @@ mod tests {
     #[test]
     fn test_impact_no_symbol() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_impact(&db, "nonexistent", None, false).unwrap();
+        let result = handle_impact(&db, "nonexistent", None, false, false).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
@@ -187,7 +193,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_impact(&db, "lonely_fn", None, false).unwrap();
+        let result = handle_impact(&db, "lonely_fn", None, false, false).unwrap();
         assert!(result.contains("Impact Analysis"));
         assert!(result.contains("No dependents found"));
     }
@@ -241,7 +247,7 @@ mod tests {
         db.insert_symbol_ref(caller_id, base_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_impact(&db, "base_fn", None, false).unwrap();
+        let result = handle_impact(&db, "base_fn", None, false, false).unwrap();
         assert!(result.contains("caller_fn"));
     }
 
@@ -307,7 +313,7 @@ mod tests {
         db.insert_symbol_ref(top_id, mid_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_impact(&db, "base_fn", None, false).unwrap();
+        let result = handle_impact(&db, "base_fn", None, false, false).unwrap();
         assert!(result.contains("mid_fn"), "should show direct dependent");
         assert!(
             result.contains("top_fn"),
@@ -401,7 +407,7 @@ mod tests {
         db.insert_symbol_ref(test_zero_id, tax_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_impact(&db, "calculate_tax", None, false).unwrap();
+        let result = handle_impact(&db, "calculate_tax", None, false, false).unwrap();
         // Tests that directly call calculate_tax appear in depth entries
         assert!(
             result.contains("test_tax_basic"),
@@ -497,7 +503,7 @@ mod tests {
         db.insert_symbol_ref(test_id, wrapper_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_impact(&db, "inner_fn", None, false).unwrap();
+        let result = handle_impact(&db, "inner_fn", None, false, false).unwrap();
         assert!(
             result.contains("test_via_wrapper"),
             "should find transitive test"
@@ -528,7 +534,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_impact(&db, "untested_fn", None, false).unwrap();
+        let result = handle_impact(&db, "untested_fn", None, false, false).unwrap();
         assert!(
             !result.contains("Related Tests"),
             "should not show tests section when none exist"
@@ -601,7 +607,7 @@ mod tests {
         db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref", "high", None)
             .unwrap();
 
-        let result = handle_impact(&db, "SharedType", None, false).unwrap();
+        let result = handle_impact(&db, "SharedType", None, false, false).unwrap();
         assert!(
             result.contains("Affected Crates"),
             "should have crate summary"
@@ -658,7 +664,7 @@ mod tests {
         db.insert_symbol_ref(caller_id, open_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_impact(&db, "Database::open", None, false).unwrap();
+        let result = handle_impact(&db, "Database::open", None, false, false).unwrap();
         assert!(
             result.contains("caller_fn"),
             "impact should find callers for Type::method syntax, got: {result}"
@@ -713,7 +719,7 @@ mod tests {
         db.insert_symbol_ref(test_id, open_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_impact(&db, "Database::open", None, false).unwrap();
+        let result = handle_impact(&db, "Database::open", None, false, false).unwrap();
         // test_open directly calls open → appears in depth entries
         assert!(
             result.contains("test_open"),
@@ -788,7 +794,7 @@ mod tests {
             .unwrap();
 
         // depth=1: only direct callers
-        let result = handle_impact(&db, "base", Some(1), false).unwrap();
+        let result = handle_impact(&db, "base", Some(1), false, false).unwrap();
         assert!(result.contains("mid"), "should show direct caller");
         assert!(
             !result.contains("top"),
@@ -796,11 +802,102 @@ mod tests {
         );
 
         // default depth: shows both
-        let result = handle_impact(&db, "base", None, false).unwrap();
+        let result = handle_impact(&db, "base", None, false, false).unwrap();
         assert!(result.contains("mid"));
         assert!(
             result.contains("top"),
             "should show transitive caller at default depth"
+        );
+    }
+
+    #[test]
+    fn test_impact_exclude_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "core_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn core_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "prod_caller".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 10,
+                    signature: "pub fn prod_caller()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "test_core".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 18,
+                    signature: "fn test_core()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let core_id = sym_id(&db, "core_fn", "src/lib.rs");
+        let prod_id = sym_id(&db, "prod_caller", "src/lib.rs");
+        let test_id = sym_id(&db, "test_core", "src/lib.rs");
+        db.insert_symbol_ref(prod_id, core_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(test_id, core_id, "call", "high", None)
+            .unwrap();
+
+        // Without exclude_tests: both callers appear
+        let result = handle_impact(&db, "core_fn", None, false, false).unwrap();
+        assert!(result.contains("prod_caller"));
+        assert!(result.contains("test_core"));
+
+        // With exclude_tests: test_core excluded from depth entries
+        // but still appears in Related Tests section
+        let result = handle_impact(&db, "core_fn", None, false, true).unwrap();
+        assert!(
+            result.contains("prod_caller"),
+            "production caller should still appear: {result}"
+        );
+        // test_core should NOT appear in the Depth section
+        let depth_section = result.split("### Related Tests").next().unwrap_or(&result);
+        assert!(
+            !depth_section.contains("test_core"),
+            "test caller should be excluded from depth entries: {result}"
+        );
+        // But test_core should still appear in Related Tests
+        assert!(
+            result.contains("Related Tests"),
+            "Related Tests section should still be present: {result}"
+        );
+        assert!(
+            result.contains("cargo test"),
+            "cargo test suggestion should still appear: {result}"
         );
     }
 }

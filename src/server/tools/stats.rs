@@ -6,6 +6,7 @@ use std::fmt::Write;
 pub fn handle_stats(
     db: &Database,
     path: Option<&str>,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let prefix = path.unwrap_or("");
     let mut output = String::new();
@@ -88,7 +89,8 @@ pub fn handle_stats(
     let _ = writeln!(output);
 
     // Most referenced
-    let most_ref = db.get_most_referenced_symbols(5, prefix, Some("high"))?;
+    let most_ref =
+        db.get_most_referenced_symbols_filtered(5, prefix, Some("high"), exclude_tests)?;
     if !most_ref.is_empty() {
         let _ = writeln!(output, "### Most Referenced\n");
         for (name, file, count, impl_type) in &most_ref {
@@ -179,7 +181,7 @@ mod tests {
         db.insert_symbol_ref(test_id, foo_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_stats(&db, None).unwrap();
+        let result = handle_stats(&db, None, false).unwrap();
 
         assert!(result.contains("## Codebase Stats"));
         assert!(result.contains("### Overview"));
@@ -193,7 +195,7 @@ mod tests {
     #[test]
     fn test_stats_empty() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_stats(&db, None).unwrap();
+        let result = handle_stats(&db, None, false).unwrap();
 
         assert!(result.contains("## Codebase Stats"));
         assert!(result.contains("**Files:** 0"));
@@ -235,7 +237,7 @@ mod tests {
         db.insert_symbol_ref(c3, noise_id, "call", "low", None)
             .unwrap();
 
-        let result = handle_stats(&db, None).unwrap();
+        let result = handle_stats(&db, None, false).unwrap();
         assert!(
             result.contains("real_fn"),
             "high-confidence refs should appear in most referenced"
@@ -273,7 +275,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_stats(&db, Some("src/server/")).unwrap();
+        let result = handle_stats(&db, Some("src/server/"), false).unwrap();
 
         assert!(result.contains(": src/server/"));
         assert!(result.contains("**Files:** 1"));
@@ -318,7 +320,7 @@ mod tests {
         ];
         store_symbols(&db, f, &symbols).unwrap();
 
-        let result = handle_stats(&db, None).unwrap();
+        let result = handle_stats(&db, None, false).unwrap();
         assert!(
             result.contains("type_aliases"),
             "should say 'type_aliases' not 'type_aliass': {result}"
