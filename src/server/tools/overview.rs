@@ -1,4 +1,5 @@
 use crate::db::Database;
+use crate::indexer::parser::SymbolKind;
 use std::fmt::Write;
 
 pub fn handle_overview(
@@ -26,7 +27,7 @@ pub fn handle_overview(
 
     for sym in &symbols {
         // Variants are shown in their parent enum's details
-        if sym.kind == crate::indexer::parser::SymbolKind::EnumVariant {
+        if sym.kind == SymbolKind::EnumVariant {
             continue;
         }
         if let Some(max) = max_symbols
@@ -56,6 +57,23 @@ pub fn handle_overview(
         }
 
         let _ = writeln!(output);
+
+        if sym.kind == SymbolKind::Function
+            && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path)
+        {
+            let same_file_calls: Vec<&str> = callees
+                .iter()
+                .filter(|c| c.file_path == sym.file_path && c.ref_kind == "call")
+                .map(|c| c.name.as_str())
+                .collect();
+            if !same_file_calls.is_empty() {
+                let _ = writeln!(
+                    output,
+                    "    calls: {}",
+                    same_file_calls.join(", ")
+                );
+            }
+        }
     }
 
     let truncated = max_symbols.is_some_and(|max| shown >= max && symbols.len() > shown);
@@ -266,5 +284,82 @@ mod tests {
         let result = handle_overview(&db, "src/", false, Some(3)).unwrap();
         assert_eq!(result.matches("**fn_").count(), 3);
         assert!(result.contains("limited to 3"));
+    }
+
+    #[test]
+    fn test_overview_intra_file_calls() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "h1").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "orchestrate".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 10,
+                    signature: "pub fn orchestrate()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "helper_a".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 12,
+                    line_end: 20,
+                    signature: "fn helper_a()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "helper_b".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 22,
+                    line_end: 30,
+                    signature: "fn helper_b()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // Create call refs: orchestrate -> helper_a, orchestrate -> helper_b
+        let src_id = db.get_symbol_id("orchestrate", "src/lib.rs").unwrap().unwrap();
+        let a_id = db.get_symbol_id("helper_a", "src/lib.rs").unwrap().unwrap();
+        let b_id = db.get_symbol_id("helper_b", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(src_id, a_id, "call", "high").unwrap();
+        db.insert_symbol_ref(src_id, b_id, "call", "high").unwrap();
+
+        let result = handle_overview(&db, "src/", true, None).unwrap();
+        assert!(
+            result.contains("calls: helper_a, helper_b")
+                || result.contains("calls: helper_b, helper_a"),
+            "should show intra-file callees, got: {result}"
+        );
+        // helper_a has no callees, so no "calls:" line for it
+        let lines: Vec<&str> = result.lines().collect();
+        let helper_a_idx = lines.iter().position(|l| l.contains("**helper_a**")).unwrap();
+        let next_line = lines.get(helper_a_idx + 1).unwrap_or(&"");
+        assert!(
+            !next_line.starts_with("    calls:"),
+            "helper_a should not have a calls line"
+        );
     }
 }
