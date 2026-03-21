@@ -432,16 +432,6 @@ impl Database {
         )
     }
 
-    /// Completely reset the index, including all cached documentation.
-    pub fn clear_all(&self) -> SqlResult<()> {
-        self.clear_code_index()?;
-        self.conn.execute_batch(
-            "INSERT INTO docs_fts(docs_fts) VALUES('delete-all');
-             DELETE FROM docs;
-             DELETE FROM dependencies;",
-        )
-    }
-
     pub fn set_metadata(&self, repo_path: &str, commit_hash: &str) -> SqlResult<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO metadata (repo_path, commit_hash)
@@ -1653,41 +1643,6 @@ impl Database {
                 r.target_context.as_deref(),
             );
             if let (Some((sid, _)), Some((tid, confidence))) = (source_id, target_id) {
-                self.insert_symbol_ref(sid, tid, &r.kind.to_string(), confidence, r.ref_line)?;
-                count += 1;
-            }
-        }
-        Ok(count)
-    }
-
-    /// Insert symbol references from parsed refs, looking up IDs by name.
-    /// Caller should wrap in a transaction for performance.
-    pub fn store_symbol_refs(&self, refs: &[crate::indexer::parser::SymbolRef]) -> SqlResult<u64> {
-        let mut count = 0;
-        for r in refs {
-            let source_id = self.get_symbol_id(&r.source_name, &r.source_file)?;
-            let (target_id, confidence) = if let Some(ctx) = &r.target_context {
-                if let Some(id) = self.get_symbol_id_in_impl(&r.target_name, ctx)? {
-                    (Some(id), "high")
-                } else if let Some(tf) = &r.target_file {
-                    if let Some(id) = self.get_symbol_id(&r.target_name, tf)? {
-                        (Some(id), "high")
-                    } else {
-                        (self.get_symbol_id_by_name(&r.target_name)?, "low")
-                    }
-                } else {
-                    (self.get_symbol_id_by_name(&r.target_name)?, "low")
-                }
-            } else if let Some(target_file) = &r.target_file {
-                if let Some(id) = self.get_symbol_id(&r.target_name, target_file)? {
-                    (Some(id), "high")
-                } else {
-                    (self.get_symbol_id_by_name(&r.target_name)?, "low")
-                }
-            } else {
-                (self.get_symbol_id_by_name(&r.target_name)?, "low")
-            };
-            if let (Some(sid), Some(tid)) = (source_id, target_id) {
                 self.insert_symbol_ref(sid, tid, &r.kind.to_string(), confidence, r.ref_line)?;
                 count += 1;
             }

@@ -1286,8 +1286,14 @@ fn cargo_doc_parse_includes_all_item_kinds() {
         "format_version": 39
     });
 
-    let result =
-        illu_rs::indexer::cargo_doc::parse_rustdoc_json_public(&json.to_string(), "mylib").unwrap();
+    let modules =
+        illu_rs::indexer::cargo_doc::parse_rustdoc_json_modules(&json.to_string(), "mylib")
+            .unwrap();
+    let summary = modules
+        .iter()
+        .find(|m| m.module.is_empty())
+        .unwrap();
+    let result = &summary.content;
 
     assert!(result.contains("# mylib 2.0.0"), "header: {result}");
     assert!(result.contains("My library."), "crate docs: {result}");
