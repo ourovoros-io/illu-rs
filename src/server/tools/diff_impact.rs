@@ -311,13 +311,8 @@ fn render_test_coverage(
 
     if !all_tests.is_empty() {
         let _ = writeln!(output, "\n### Related Tests\n");
-        for t in &all_tests {
-            let _ = writeln!(
-                output,
-                "- **{}** ({}:{})",
-                t.name, t.file_path, t.line_start
-            );
-        }
+        let test_refs: Vec<&crate::db::TestEntry> = all_tests.iter().collect();
+        super::render_test_list(output, &test_refs);
         let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
         let suggestion = super::format_cargo_test_suggestion(&test_names);
         let _ = writeln!(output, "\nSuggested: `{suggestion}`");

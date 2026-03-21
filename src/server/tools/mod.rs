@@ -37,7 +37,7 @@ pub mod unused;
 
 pub(crate) use crate::truncate_at as truncate_snippet;
 
-use crate::db::{Database, StoredSymbol};
+use crate::db::{Database, StoredSymbol, TestEntry};
 
 /// Resolve a symbol name supporting `Type::method` syntax.
 /// Falls back to plain `search_symbols` if `::` lookup yields nothing.
@@ -128,6 +128,8 @@ pub(crate) const NOISY_CALLEES: &[&str] = &[
 ];
 
 const MAX_CARGO_TEST_NAMES: usize = 20;
+const TEST_LIST_GROUP_THRESHOLD: usize = 20;
+const TEST_LIST_SUMMARY_THRESHOLD: usize = 50;
 
 pub(crate) fn format_cargo_test_suggestion(test_names: &[&str]) -> String {
     if test_names.len() <= MAX_CARGO_TEST_NAMES {
@@ -140,6 +142,65 @@ pub(crate) fn format_cargo_test_suggestion(test_names: &[&str]) -> String {
     }
 }
 
+/// Render a test list with smart tiering to control output size.
+///
+/// - ≤20: list each test individually
+/// - 21–50: group by file, show individual names
+/// - >50: group by file with counts only
+pub(crate) fn render_test_list(output: &mut String, tests: &[&TestEntry]) {
+    use std::fmt::Write;
+
+    let count = tests.len();
+    if count == 0 {
+        return;
+    }
+
+    if count <= TEST_LIST_GROUP_THRESHOLD {
+        for t in tests {
+            let _ = writeln!(
+                output,
+                "- **{}** ({}:{})",
+                t.name, t.file_path, t.line_start
+            );
+        }
+        return;
+    }
+
+    // Group tests by file
+    let mut by_file: std::collections::BTreeMap<&str, Vec<&TestEntry>> =
+        std::collections::BTreeMap::new();
+    for t in tests {
+        by_file.entry(&t.file_path).or_default().push(t);
+    }
+
+    if count <= TEST_LIST_SUMMARY_THRESHOLD {
+        for (file, file_tests) in &by_file {
+            let _ = writeln!(output, "**{file}** ({} tests)", file_tests.len());
+            for t in file_tests {
+                let _ = writeln!(output, "- {} (line {})", t.name, t.line_start);
+            }
+            output.push('\n');
+        }
+    } else {
+        let _ = writeln!(
+            output,
+            "{count} tests across {} files:\n",
+            by_file.len()
+        );
+        for (file, file_tests) in &by_file {
+            let _ = writeln!(
+                output,
+                "- **{file}** — {} tests",
+                file_tests.len()
+            );
+        }
+        let _ = writeln!(
+            output,
+            "\n*Use `test_impact` with `depth: 1` for a focused list.*"
+        );
+    }
+}
+
 /// Check if a symbol is an entry point (main, #[test]) that should
 /// be excluded from unused/untested reports.
 pub(crate) fn is_entry_point(sym: &StoredSymbol) -> bool {
@@ -149,4 +210,72 @@ pub(crate) fn is_entry_point(sym: &StoredSymbol) -> bool {
     sym.attributes
         .as_deref()
         .is_some_and(|a| a.contains("test"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test(name: &str, file: &str, line: i64) -> TestEntry {
+        TestEntry {
+            name: name.to_string(),
+            file_path: file.to_string(),
+            line_start: line,
+        }
+    }
+
+    fn make_tests(count: usize) -> Vec<TestEntry> {
+        let files = ["src/db.rs", "src/server.rs", "tests/integration.rs"];
+        let mut tests = Vec::new();
+        for i in 0..count {
+            let file = files[i % files.len()];
+            let line = i64::try_from(i).unwrap_or(0) * 10 + 1;
+            tests.push(make_test(&format!("test_{i}"), file, line));
+        }
+        tests
+    }
+
+    #[test]
+    fn test_render_test_list_small() {
+        let entries = make_tests(5);
+        let refs: Vec<&TestEntry> = entries.iter().collect();
+        let mut output = String::new();
+        render_test_list(&mut output, &refs);
+        // Individual listing, each with bold name and file:line
+        assert_eq!(output.matches("- **test_").count(), 5);
+        assert!(output.contains("src/db.rs:"));
+    }
+
+    #[test]
+    fn test_render_test_list_medium() {
+        let entries = make_tests(30);
+        let refs: Vec<&TestEntry> = entries.iter().collect();
+        let mut output = String::new();
+        render_test_list(&mut output, &refs);
+        // Grouped by file, individual names still shown
+        assert!(output.contains("tests)"));
+        assert!(output.contains("test_0"));
+        assert!(output.contains("test_29"));
+    }
+
+    #[test]
+    fn test_render_test_list_large() {
+        let entries = make_tests(100);
+        let refs: Vec<&TestEntry> = entries.iter().collect();
+        let mut output = String::new();
+        render_test_list(&mut output, &refs);
+        // Summary only: file counts, no individual names
+        assert!(output.contains("100 tests across 3 files"));
+        assert!(output.contains("tests"));
+        // Individual test names should NOT appear
+        assert!(!output.contains("test_0 ("));
+        assert!(output.contains("depth: 1"));
+    }
+
+    #[test]
+    fn test_render_test_list_empty() {
+        let mut output = String::new();
+        render_test_list(&mut output, &[]);
+        assert!(output.is_empty());
+    }
 }

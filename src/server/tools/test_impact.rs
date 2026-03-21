@@ -25,12 +25,9 @@ pub fn handle_test_impact(
             db.get_related_tests_with_depth(&sym.name, sym.impl_type.as_deref(), max_depth)?;
         if !tests.is_empty() {
             let _ = writeln!(output, "### Tests for `{qname}`\n");
+            let test_refs: Vec<&crate::db::TestEntry> = tests.iter().collect();
+            super::render_test_list(&mut output, &test_refs);
             for t in &tests {
-                let _ = writeln!(
-                    output,
-                    "- **{}** ({}:{})",
-                    t.name, t.file_path, t.line_start
-                );
                 if !all_tests
                     .iter()
                     .any(|at: &crate::db::TestEntry| at.name == t.name)
