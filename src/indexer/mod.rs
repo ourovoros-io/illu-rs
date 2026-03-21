@@ -1234,6 +1234,106 @@ pub fn run() {
     }
 
     #[test]
+    fn test_variable_method_resolution() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname = \"t\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join("src/lib.rs"),
+            r"
+pub struct Db;
+impl Db {
+    pub fn open() -> Self { Self }
+    pub fn query(&self) -> i32 { 42 }
+}
+pub fn run() -> i32 {
+    let db = Db::open();
+    db.query()
+}
+",
+        )
+        .unwrap();
+        std::fs::write(repo.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: repo.to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        let callees = db.get_callees("run", "src/lib.rs", false).unwrap();
+        let callee_names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
+
+        assert!(
+            callee_names.contains(&"open"),
+            "run should call Db::open, got: {callee_names:?}"
+        );
+        assert!(
+            callee_names.contains(&"query"),
+            "run should call db.query() via local type inference, got: {callee_names:?}"
+        );
+    }
+
+    #[test]
+    fn test_variable_method_cross_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname = \"t\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(repo.join("src/lib.rs"), "pub mod db;\n").unwrap();
+        std::fs::write(
+            repo.join("src/db.rs"),
+            r"
+pub struct Conn;
+impl Conn {
+    pub fn open() -> Self { Self }
+    pub fn execute(&self) -> i32 { 42 }
+}
+",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.join("src/main.rs"),
+            r"
+use t::db::Conn;
+fn run() -> i32 {
+    let c = Conn::open();
+    c.execute()
+}
+fn main() { run(); }
+",
+        )
+        .unwrap();
+
+        let db = Database::open_in_memory().unwrap();
+        let config = IndexConfig {
+            repo_path: repo.to_path_buf(),
+        };
+        index_repo(&db, &config).unwrap();
+
+        let callees = db.get_callees("run", "src/main.rs", false).unwrap();
+        let callee_names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
+
+        assert!(
+            callee_names.contains(&"open"),
+            "cross-file: run should call Conn::open, got: {callee_names:?}"
+        );
+        assert!(
+            callee_names.contains(&"execute"),
+            "cross-file: run should call c.execute() via local type inference, got: {callee_names:?}"
+        );
+    }
+
+    #[test]
     fn test_is_test_precise_matching() {
         let tmp = tempfile::tempdir().unwrap();
         let repo = tmp.path();

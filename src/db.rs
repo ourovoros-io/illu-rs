@@ -922,7 +922,16 @@ impl Database {
         symbol_name: &str,
         impl_type: Option<&str>,
     ) -> SqlResult<Vec<TestEntry>> {
-        let mut stmt = self.conn.prepare_cached(
+        self.get_related_tests_with_depth(symbol_name, impl_type, 5)
+    }
+
+    pub fn get_related_tests_with_depth(
+        &self,
+        symbol_name: &str,
+        impl_type: Option<&str>,
+        max_depth: i64,
+    ) -> SqlResult<Vec<TestEntry>> {
+        let mut stmt = self.conn.prepare(
             "WITH RECURSIVE callers(id, name, file_path, line_start, depth, is_test) AS (
                 SELECT s.id, s.name, f.path, s.line_start, 0, s.is_test
                 FROM symbols s
@@ -934,7 +943,7 @@ impl Database {
                 JOIN symbol_refs sr ON sr.target_symbol_id = callers.id
                 JOIN symbols s2 ON s2.id = sr.source_symbol_id
                 JOIN files f2 ON f2.id = s2.file_id
-                WHERE callers.depth < 5 AND sr.confidence = 'high'
+                WHERE callers.depth < ?3 AND sr.confidence = 'high'
             )
             SELECT DISTINCT name, file_path, line_start
             FROM callers
@@ -943,7 +952,7 @@ impl Database {
             ORDER BY file_path, name",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name, impl_type])?;
+        let mut rows = stmt.query(params![symbol_name, impl_type, max_depth])?;
         while let Some(row) = rows.next()? {
             results.push(TestEntry {
                 name: row.get(0)?,

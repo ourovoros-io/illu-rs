@@ -499,7 +499,7 @@ fn self_test_impact_database_shows_tests() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = test_impact::handle_test_impact(&db, "Database").unwrap();
+    let result = test_impact::handle_test_impact(&db, "Database", None).unwrap();
     // Database is widely tested
     assert!(result.contains("## Test Impact:"), "header: {result}");
 }

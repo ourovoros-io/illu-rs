@@ -305,6 +305,9 @@ struct DocCoverageParams {
 struct TestImpactParams {
     /// Symbol name to find test coverage for (supports `Type::method` syntax)
     symbol_name: String,
+    /// Max call graph depth to search for tests (default: 5).
+    /// Use 1 for direct test callers only, 2-3 for focused results.
+    depth: Option<i64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1036,8 +1039,8 @@ impl IlluServer {
         ));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::test_impact::handle_test_impact(&db, &params.symbol_name).map_err(to_mcp_err)?;
+        let result = tools::test_impact::handle_test_impact(&db, &params.symbol_name, params.depth)
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

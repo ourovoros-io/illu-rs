@@ -4,7 +4,9 @@ use std::fmt::Write;
 pub fn handle_test_impact(
     db: &Database,
     symbol_name: &str,
+    depth: Option<i64>,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    let max_depth = depth.unwrap_or(5);
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
         return Ok(format!(
@@ -19,7 +21,8 @@ pub fn handle_test_impact(
     let mut all_tests = Vec::new();
     for sym in &symbols {
         let qname = super::qualified_name(sym);
-        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
+        let tests =
+            db.get_related_tests_with_depth(&sym.name, sym.impl_type.as_deref(), max_depth)?;
         if !tests.is_empty() {
             let _ = writeln!(output, "### Tests for `{qname}`\n");
             for t in &tests {
@@ -116,7 +119,7 @@ mod tests {
     #[test]
     fn test_test_impact_found() {
         let db = setup_db();
-        let result = handle_test_impact(&db, "helper").unwrap();
+        let result = handle_test_impact(&db, "helper", None).unwrap();
         assert!(result.contains("test_helper"));
         assert!(result.contains("cargo test"));
     }
@@ -124,7 +127,7 @@ mod tests {
     #[test]
     fn test_test_impact_not_found() {
         let db = setup_db();
-        let result = handle_test_impact(&db, "nonexistent").unwrap();
+        let result = handle_test_impact(&db, "nonexistent", None).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
@@ -147,7 +150,7 @@ mod tests {
             impl_type: None,
         }];
         store_symbols(&db, file_id, &symbols).unwrap();
-        let result = handle_test_impact(&db, "lonely").unwrap();
+        let result = handle_test_impact(&db, "lonely", None).unwrap();
         assert!(result.contains("No tests found"));
     }
 }

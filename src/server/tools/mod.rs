@@ -73,6 +73,7 @@ pub(crate) fn qualified_name(sym: &StoredSymbol) -> String {
 }
 
 pub(crate) const NOISY_CALLEES: &[&str] = &[
+    // Constructors / conversions
     "new",
     "from",
     "into",
@@ -80,20 +81,50 @@ pub(crate) const NOISY_CALLEES: &[&str] = &[
     "clone",
     "build",
     "init",
+    // Formatting
     "fmt",
     "write",
     "writeln",
+    "display",
+    "format",
+    // Collection methods
     "push",
+    "pop",
+    "insert",
+    "remove",
+    "get",
+    "set",
+    "clear",
+    "contains",
+    "extend",
+    "with_capacity",
+    "capacity",
+    "retain",
+    // Iterator methods
+    "iter",
+    "into_iter",
+    "collect",
+    "map",
+    "filter",
+    // Size / emptiness
     "len",
     "is_empty",
+    // String conversions
     "to_string",
     "to_owned",
     "as_str",
     "as_ref",
-    "iter",
-    "collect",
-    "map",
-    "filter",
+    "as_mut",
+    // Error handling
+    "unwrap",
+    "expect",
+    "ok",
+    "err",
+    // Common accessors
+    "borrow",
+    "borrow_mut",
+    "deref",
+    "deref_mut",
 ];
 
 const MAX_CARGO_TEST_NAMES: usize = 20;
