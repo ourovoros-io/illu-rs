@@ -1,5 +1,4 @@
 use crate::db::Database;
-use crate::indexer::parser::SymbolKind;
 use std::fmt::Write;
 
 pub fn handle_type_usage(
@@ -35,12 +34,8 @@ pub fn handle_type_usage(
 
     // Find structs whose field list (details) mentions the type
     let prefix = path.unwrap_or("");
-    let all_symbols = db.get_symbols_by_path_prefix_filtered(prefix, true)?;
-    let field_matches: Vec<_> = all_symbols
-        .into_iter()
-        .filter(|s| s.kind == SymbolKind::Struct && s.name != type_name)
-        .filter(|s| s.details.as_deref().is_some_and(|d| d.contains(type_name)))
-        .collect();
+    let mut field_matches = db.search_symbols_by_details(type_name, prefix)?;
+    field_matches.retain(|s| s.name != type_name);
 
     let mut output = String::new();
     let _ = writeln!(output, "## Type Usage: `{type_name}`\n");
@@ -99,7 +94,7 @@ pub fn handle_type_usage(
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::{Symbol, Visibility};
+    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn setup_db() -> Database {

@@ -36,33 +36,28 @@ pub fn handle_hotspots(
         let _ = writeln!(output);
     }
 
-    // Largest functions (by line span)
-    let mut symbols = db.get_symbols_by_path_prefix_filtered(prefix, true)?;
-    symbols.retain(|s| s.kind == crate::indexer::parser::SymbolKind::Function);
-    symbols.sort_by(|a, b| {
-        let a_size = a.line_end - a.line_start;
-        let b_size = b.line_end - b.line_start;
-        b_size.cmp(&a_size)
-    });
-    let top_n = usize::try_from(max).unwrap_or(10);
-    symbols.truncate(top_n);
-    if !symbols.is_empty() {
+    // Largest functions (by line span) — targeted SQL query
+    let largest = db.get_largest_functions(max, prefix)?;
+    if !largest.is_empty() {
         let _ = writeln!(output, "### Largest Functions (by line count)\n");
-        for (i, sym) in symbols.iter().enumerate() {
-            let lines = sym.line_end - sym.line_start + 1;
-            let qname = super::qualified_name(sym);
+        for (i, func) in largest.iter().enumerate() {
+            let qname = if let Some(it) = &func.impl_type {
+                format!("{it}::{}", func.name)
+            } else {
+                func.name.clone()
+            };
             let _ = writeln!(
                 output,
                 "{}. **{qname}** ({}) — {} lines",
                 i + 1,
-                sym.file_path,
-                lines
+                func.file_path,
+                func.lines
             );
         }
         let _ = writeln!(output);
     }
 
-    if most_referenced.is_empty() && most_referencing.is_empty() && symbols.is_empty() {
+    if most_referenced.is_empty() && most_referencing.is_empty() && largest.is_empty() {
         let _ = writeln!(output, "No hotspots found.");
     }
 

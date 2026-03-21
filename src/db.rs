@@ -1682,6 +1682,82 @@ impl Database {
         }
         Ok(results)
     }
+
+    /// Search for structs whose `details` field contains the given text.
+    pub fn search_symbols_by_details(
+        &self,
+        query: &str,
+        path_prefix: &str,
+    ) -> SqlResult<Vec<StoredSymbol>> {
+        let pattern = format!("%{}%", escape_like(query));
+        let path_pattern = format!("{path_prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, s.kind, s.visibility, f.path, \
+                    s.line_start, s.line_end, s.signature, \
+                    s.doc_comment, s.body, s.details, s.attributes, s.impl_type \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.details LIKE ?1 ESCAPE '\\' \
+               AND s.kind = 'struct' \
+               AND f.path LIKE ?2 \
+             ORDER BY s.name \
+             LIMIT 50",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern, path_pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_stored_symbol(row)?);
+        }
+        Ok(results)
+    }
+
+    /// Count symbols grouped by kind, scoped to a path prefix.
+    pub fn count_symbols_by_kind(&self, path_prefix: &str) -> SqlResult<Vec<(String, i64)>> {
+        let pattern = format!("{path_prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT s.kind, COUNT(*) \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE f.path LIKE ?1 \
+             GROUP BY s.kind \
+             ORDER BY s.kind",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(results)
+    }
+
+    /// Get the largest functions by line count, scoped to a path prefix.
+    pub fn get_largest_functions(
+        &self,
+        limit: i64,
+        path_prefix: &str,
+    ) -> SqlResult<Vec<LargestFunction>> {
+        let pattern = format!("{path_prefix}%");
+        let mut stmt = self.conn.prepare(
+            "SELECT s.name, f.path, s.impl_type, \
+                    (s.line_end - s.line_start + 1) as lines \
+             FROM symbols s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.kind = 'function' AND f.path LIKE ?1 \
+             ORDER BY lines DESC \
+             LIMIT ?2",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![pattern, limit])?;
+        while let Some(row) = rows.next()? {
+            results.push(LargestFunction {
+                name: row.get(0)?,
+                file_path: row.get(1)?,
+                impl_type: row.get(2)?,
+                lines: row.get(3)?,
+            });
+        }
+        Ok(results)
+    }
 }
 
 pub struct SymbolIdMap {
@@ -1797,6 +1873,14 @@ pub struct StoredTraitImpl {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct LargestFunction {
+    pub name: String,
+    pub file_path: String,
+    pub impl_type: Option<String>,
+    pub lines: i64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct CalleeInfo {
     pub name: String,
     pub kind: String,
@@ -1809,6 +1893,8 @@ pub struct CalleeInfo {
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
+    use crate::indexer::parser::Symbol;
+    use crate::indexer::store::store_symbols;
 
     #[test]
     fn test_creates_schema() {
@@ -3072,5 +3158,165 @@ mod tests {
             )
             .unwrap();
         assert_eq!(version, Database::SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_search_symbols_by_details() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        let matching = Symbol {
+            name: "AppState".into(),
+            kind: SymbolKind::Struct,
+            visibility: Visibility::Public,
+            file_path: "src/lib.rs".into(),
+            line_start: 1,
+            line_end: 5,
+            signature: "pub struct AppState".into(),
+            doc_comment: None,
+            body: None,
+            details: Some("config: Config, name: String".into()),
+            attributes: None,
+            impl_type: None,
+        };
+        let non_matching = Symbol {
+            name: "Other".into(),
+            kind: SymbolKind::Struct,
+            visibility: Visibility::Public,
+            file_path: "src/lib.rs".into(),
+            line_start: 10,
+            line_end: 15,
+            signature: "pub struct Other".into(),
+            doc_comment: None,
+            body: None,
+            details: Some("count: usize".into()),
+            attributes: None,
+            impl_type: None,
+        };
+        store_symbols(&db, file_id, &[matching, non_matching]).unwrap();
+
+        let results = db.search_symbols_by_details("Config", "").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "AppState");
+
+        let empty = db.search_symbols_by_details("Nonexistent", "").unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_count_symbols_by_kind() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        let symbols = vec![
+            Symbol {
+                name: "foo".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn foo()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "bar".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 7,
+                line_end: 10,
+                signature: "pub fn bar()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "MyStruct".into(),
+                kind: SymbolKind::Struct,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 12,
+                line_end: 15,
+                signature: "pub struct MyStruct".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+        ];
+        store_symbols(&db, file_id, &symbols).unwrap();
+
+        let counts = db.count_symbols_by_kind("").unwrap();
+        let fn_count = counts.iter().find(|(k, _)| k == "function");
+        let struct_count = counts.iter().find(|(k, _)| k == "struct");
+        assert_eq!(fn_count.unwrap().1, 2);
+        assert_eq!(struct_count.unwrap().1, 1);
+    }
+
+    #[test]
+    fn test_get_largest_functions() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        let symbols = vec![
+            Symbol {
+                name: "small".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn small()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "large".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 10,
+                line_end: 110,
+                signature: "pub fn large()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+            Symbol {
+                name: "medium".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 120,
+                line_end: 150,
+                signature: "pub fn medium()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            },
+        ];
+        store_symbols(&db, file_id, &symbols).unwrap();
+
+        let largest = db.get_largest_functions(2, "").unwrap();
+        assert_eq!(largest.len(), 2);
+        assert_eq!(largest[0].name, "large");
+        assert_eq!(largest[0].lines, 101); // 110 - 10 + 1
+        assert_eq!(largest[1].name, "medium");
+        assert_eq!(largest[1].lines, 31); // 150 - 120 + 1
     }
 }
