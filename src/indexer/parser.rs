@@ -989,9 +989,17 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                         && ctx.known_symbols.contains(&name)
                         && seen.insert(name.clone())
                     {
-                        let target_file = ctx.import_map.get(&name).and_then(|info| {
-                            qualified_path_to_file_with_crates(&info.qualified_path, ctx.crate_map)
-                        });
+                        let target_file = ctx.import_map.get(&name)
+                            .and_then(|info| {
+                                qualified_path_to_file_with_crates(&info.qualified_path, ctx.crate_map)
+                            })
+                            .or_else(|| {
+                                if ctx.known_symbols.contains(&name) {
+                                    Some(ctx.file_path.to_string())
+                                } else {
+                                    None
+                                }
+                            });
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
                             source_file: ctx.file_path.to_string(),
@@ -1019,9 +1027,17 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                         && ctx.known_symbols.contains(&name)
                         && seen.insert(name.clone())
                     {
-                        let target_file = ctx.import_map.get(&name).and_then(|info| {
-                            qualified_path_to_file_with_crates(&info.qualified_path, ctx.crate_map)
-                        });
+                        let target_file = ctx.import_map.get(&name)
+                            .and_then(|info| {
+                                qualified_path_to_file_with_crates(&info.qualified_path, ctx.crate_map)
+                            })
+                            .or_else(|| {
+                                if ctx.known_symbols.contains(&name) {
+                                    Some(ctx.file_path.to_string())
+                                } else {
+                                    None
+                                }
+                            });
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
                             source_file: ctx.file_path.to_string(),
@@ -2325,7 +2341,7 @@ pub fn make() -> Config {
     }
 
     #[test]
-    fn test_refs_no_target_file_without_import() {
+    fn test_refs_same_file_target_file_without_import() {
         let source = r"
 pub struct Config { pub port: u16 }
 
@@ -2345,9 +2361,10 @@ pub fn make() -> Config {
         )
         .unwrap();
         let config_ref = refs.iter().find(|r| r.target_name == "Config").unwrap();
-        assert!(
-            config_ref.target_file.is_none(),
-            "should have no target_file without an import"
+        assert_eq!(
+            config_ref.target_file.as_deref(),
+            Some("src/lib.rs"),
+            "same-file symbol should have target_file set to source file"
         );
     }
 
@@ -2474,6 +2491,34 @@ pub fn handle_query(
             !func.signature.contains("todo!"),
             "body not in sig: {}",
             func.signature
+        );
+    }
+
+    #[test]
+    fn test_same_file_refs_have_target_file() {
+        let source = r"
+fn helper() -> i32 { 42 }
+
+pub fn caller() -> i32 {
+    helper()
+}
+";
+        let known_symbols: std::collections::HashSet<String> =
+            ["helper", "caller"].iter().map(|s| (*s).to_string()).collect();
+        let crate_map = std::collections::HashMap::new();
+        let refs = extract_refs(source, "src/lib.rs", &known_symbols, &crate_map).unwrap();
+        let caller_to_helper = refs
+            .iter()
+            .find(|r| r.source_name == "caller" && r.target_name == "helper");
+        assert!(
+            caller_to_helper.is_some(),
+            "should find ref from caller to helper"
+        );
+        let r = caller_to_helper.unwrap();
+        assert_eq!(
+            r.target_file.as_deref(),
+            Some("src/lib.rs"),
+            "same-file ref should have target_file set to source file"
         );
     }
 }
