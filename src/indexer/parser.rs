@@ -1388,8 +1388,11 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
         line: Option<i64>,
         refs: &mut Vec<SymbolRef>,
     ) {
+        // Qualified calls (with target_context) bypass the noisy filter —
+        // `Status::clear()` is unambiguous unlike a bare `clear()`.
+        let noisy = target_context.is_none() && is_noisy_symbol(name);
         if name != self.fn_name
-            && !is_noisy_symbol(name)
+            && !noisy
             && !self.locals.contains(name)
             && self.ctx.known_symbols.contains(name)
             && self.seen.insert(name.to_string())
@@ -3601,6 +3604,35 @@ fn caller() {
         assert!(
             new_refs.is_empty(),
             "Vec::new() should not create ref to 'new', found: {new_refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_qualified_call_bypasses_noisy_filter() {
+        // `clear` is in NOISY_SYMBOL_NAMES, but `Status::clear()` should still
+        // be captured because the type qualification makes it unambiguous.
+        let source = r"
+pub struct Status;
+impl Status {
+    pub fn clear(&self) {}
+}
+fn caller() {
+    let s = Status;
+    Status::clear(&s);
+}
+";
+        let known = ["Status", "clear", "caller"]
+            .into_iter()
+            .map(String::from)
+            .collect::<std::collections::HashSet<_>>();
+        let crate_map = std::collections::HashMap::<String, String>::new();
+        let refs = extract_refs(source, "src/status.rs", &known, &crate_map).unwrap();
+        let has_clear_ref = refs
+            .iter()
+            .any(|r| r.source_name == "caller" && r.target_name == "clear");
+        assert!(
+            has_clear_ref,
+            "qualified call Status::clear() should bypass noisy filter, got refs: {refs:?}"
         );
     }
 }
