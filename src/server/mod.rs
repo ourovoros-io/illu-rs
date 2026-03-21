@@ -243,6 +243,12 @@ struct SimilarParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct BlameParams {
+    /// Symbol name to blame (supports `Type::method` syntax)
+    symbol_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct BoundaryParams {
     /// Path prefix defining the module boundary (e.g. "src/server/tools/")
     path: String,
@@ -682,6 +688,25 @@ impl IlluServer {
     }
 
     #[tool(
+        name = "blame",
+        description = "Show git blame for a symbol: who last modified it, when, and the commit message. Summarizes authorship across the symbol's line range."
+    )]
+    async fn blame(
+        &self,
+        Parameters(params): Parameters<BlameParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: blame");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("blame \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let repo_path = &self.config.repo_path;
+        let result = tools::blame::handle_blame(&db, repo_path, &params.symbol_name)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "boundary",
         description = "Analyze module boundaries: which symbols are used by code outside the given path (public API) vs only used internally (safe to refactor)."
     )]
@@ -758,6 +783,7 @@ impl ServerHandler for IlluServer {
                  'stats' for codebase statistics and health metrics, \
                  'rename_plan' for rename impact preview, \
                  'similar' for finding structurally similar symbols, \
+                 'blame' for git blame on symbols, \
                  'boundary' for module API boundary analysis, \
                  'health' for index quality diagnosis, \
                  'crate_graph' for workspace dependency visualization."

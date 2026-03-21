@@ -1,4 +1,5 @@
 pub mod batch_context;
+pub mod blame;
 pub mod boundary;
 pub mod callpath;
 pub mod context;
