@@ -1445,7 +1445,7 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              JOIN files sf ON sf.id = ss.file_id \
-             WHERE ss.name = ?1 AND sf.path = ?2 AND ts.is_test = 0"
+             WHERE ss.name = ?1 AND sf.path = ?2 AND sr.confidence = 'high' AND ts.is_test = 0"
         } else {
             "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type, \
              sr.ref_line \
@@ -1454,7 +1454,7 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              JOIN files sf ON sf.id = ss.file_id \
-             WHERE ss.name = ?1 AND sf.path = ?2"
+             WHERE ss.name = ?1 AND sf.path = ?2 AND sr.confidence = 'high'"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();

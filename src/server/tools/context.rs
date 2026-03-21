@@ -214,6 +214,8 @@ fn render_callers(
     callers_path: Option<&str>,
     exclude_tests: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    const MAX_CALLERS: usize = 30;
+
     let mut callers = db.get_callers(&sym.name, &sym.file_path, exclude_tests)?;
     if let Some(p) = callers_path {
         callers.retain(|c| c.file_path.starts_with(p));
@@ -222,11 +224,19 @@ fn render_callers(
         return Ok(());
     }
 
+    let total = callers.len();
     let _ = writeln!(output, "### Called By\n");
-    for c in &callers {
+    for c in callers.iter().take(MAX_CALLERS) {
         let display = qualified_callee_name(c);
         let line = c.ref_line.unwrap_or(c.line_start);
         let _ = writeln!(output, "- {} ({}:{})", display, c.file_path, line);
+    }
+    if total > MAX_CALLERS {
+        let _ = writeln!(
+            output,
+            "\n*({} more — use `references` for the full list)*",
+            total - MAX_CALLERS
+        );
     }
     let _ = writeln!(output);
 
@@ -1278,6 +1288,100 @@ mod tests {
         assert!(
             !result.contains("src/lib.rs:10"),
             "callers should NOT show definition line (10), got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_context_callees_exclude_low_confidence() {
+        let db = Database::open_in_memory().unwrap();
+        let fid_a = db.insert_file("src/a.rs", "hash_a").unwrap();
+        let fid_b = db.insert_file("src/b.rs", "hash_b").unwrap();
+        store_symbols(
+            &db,
+            fid_a,
+            &[
+                Symbol {
+                    name: "caller_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/a.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn caller_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "good_callee".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/a.rs".into(),
+                    line_start: 7,
+                    line_end: 10,
+                    signature: "pub fn good_callee()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+        store_symbols(
+            &db,
+            fid_b,
+            &[Symbol {
+                name: "bad_callee".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/b.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn bad_callee()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: Some("Unrelated".into()),
+            }],
+        )
+        .unwrap();
+
+        let caller_id = db.get_symbol_id("caller_fn", "src/a.rs").unwrap().unwrap();
+        let good_id = db
+            .get_symbol_id("good_callee", "src/a.rs")
+            .unwrap()
+            .unwrap();
+        let bad_id = db
+            .get_symbol_id("bad_callee", "src/b.rs")
+            .unwrap()
+            .unwrap();
+
+        // High confidence ref
+        db.insert_symbol_ref(caller_id, good_id, "call", "high", None)
+            .unwrap();
+        // Low confidence ref (name-only fallback)
+        db.insert_symbol_ref(caller_id, bad_id, "call", "low", None)
+            .unwrap();
+
+        let result =
+            handle_context(&db, "caller_fn", false, None, Some(&["callees"]), None, false)
+                .unwrap();
+        assert!(
+            result.contains("good_callee"),
+            "should contain high-confidence callee, got:\n{result}"
+        );
+        assert!(
+            !result.contains("bad_callee"),
+            "should NOT contain low-confidence callee, got:\n{result}"
+        );
+        assert!(
+            !result.contains("Unrelated"),
+            "should NOT show impl_type of low-confidence callee, got:\n{result}"
         );
     }
 }
