@@ -684,6 +684,8 @@ pub struct SymbolRef {
     pub target_file: Option<String>,
     /// Impl type context for `self.method()` calls
     pub target_context: Option<String>,
+    /// Line where the reference occurs in the source file (1-based)
+    pub ref_line: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1066,6 +1068,7 @@ fn collect_derive_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                     kind: RefKind::TypeRef,
                     target_file: resolve_target_file(derive_name, ctx),
                     target_context: None,
+                    ref_line: i64::try_from(node.start_position().row + 1).ok(),
                 });
             }
         }
@@ -1353,6 +1356,7 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
         name: &str,
         kind: RefKind,
         target_context: Option<String>,
+        line: Option<i64>,
         refs: &mut Vec<SymbolRef>,
     ) {
         if name != self.fn_name
@@ -1368,6 +1372,7 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
                 kind,
                 target_file: resolve_target_file(name, self.ctx),
                 target_context,
+                ref_line: line,
             });
         }
     }
@@ -1401,7 +1406,8 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                     } else {
                         RefKind::Call
                     };
-                    col.try_add(&name, ref_kind, None, refs);
+                    let line = i64::try_from(child.start_position().row + 1).ok();
+                    col.try_add(&name, ref_kind, None, line, refs);
                 }
                 "field_identifier" => {
                     let name = node_text(&child, ctx.source);
@@ -1419,7 +1425,8 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                             _ => None,
                         }
                     });
-                    col.try_add(&name, RefKind::Call, target_context, refs);
+                    let line = i64::try_from(child.start_position().row + 1).ok();
+                    col.try_add(&name, RefKind::Call, target_context, line, refs);
                 }
                 "macro_invocation" => {
                     let mut macro_stack = vec![child];
@@ -1434,7 +1441,8 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                                 } else {
                                     RefKind::Call
                                 };
-                                col.try_add(&name, ref_kind, None, refs);
+                                let line = i64::try_from(mchild.start_position().row + 1).ok();
+                                col.try_add(&name, ref_kind, None, line, refs);
                             } else {
                                 macro_stack.push(mchild);
                             }

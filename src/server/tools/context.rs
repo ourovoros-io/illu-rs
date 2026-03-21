@@ -223,7 +223,8 @@ fn render_callers(
     let _ = writeln!(output, "### Called By\n");
     for c in &callers {
         let display = qualified_callee_name(c);
-        let _ = writeln!(output, "- {} ({}:{})", display, c.file_path, c.line_start);
+        let line = c.ref_line.unwrap_or(c.line_start);
+        let _ = writeln!(output, "- {} ({}:{})", display, c.file_path, line);
     }
     let _ = writeln!(output);
 
@@ -539,7 +540,7 @@ mod tests {
             .get_symbol_id("callee_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, callee_id, "call", "high")
+        db.insert_symbol_ref(caller_id, callee_id, "call", "high", None)
             .unwrap();
 
         let result = handle_context(&db, "caller_fn", false, None, None, None).unwrap();
@@ -628,7 +629,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let caller_id = db.get_symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(caller_id, target_id, "call", "high")
+        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
             .unwrap();
 
         let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
@@ -769,7 +770,7 @@ mod tests {
 
         let my_fn_id = db.get_symbol_id("my_fn", "src/lib.rs").unwrap().unwrap();
         let helper_id = db.get_symbol_id("helper", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(my_fn_id, helper_id, "call", "high")
+        db.insert_symbol_ref(my_fn_id, helper_id, "call", "high", None)
             .unwrap();
 
         let sections: &[&str] = &["source"];
@@ -820,7 +821,7 @@ mod tests {
 
         let invoker_id = db.get_symbol_id("invoker", "src/lib.rs").unwrap().unwrap();
         let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(invoker_id, target_id, "call", "high")
+        db.insert_symbol_ref(invoker_id, target_id, "call", "high", None)
             .unwrap();
 
         let sections: &[&str] = &["callers"];
@@ -871,7 +872,7 @@ mod tests {
 
         let all_fn_id = db.get_symbol_id("all_fn", "src/lib.rs").unwrap().unwrap();
         let dep_id = db.get_symbol_id("dep", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(all_fn_id, dep_id, "call", "high")
+        db.insert_symbol_ref(all_fn_id, dep_id, "call", "high", None)
             .unwrap();
 
         let result = handle_context(&db, "all_fn", false, None, None, None).unwrap();
@@ -951,9 +952,9 @@ mod tests {
             .get_symbol_id("test_caller", "tests/test.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(src_id, target_id, "call", "high")
+        db.insert_symbol_ref(src_id, target_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call", "high")
+        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
             .unwrap();
 
         // Without callers_path: both callers shown
@@ -1195,6 +1196,70 @@ mod tests {
         assert!(
             !result.contains("open_or_index"),
             "should NOT return fuzzy matches when exact match exists"
+        );
+    }
+
+    #[test]
+    fn test_callers_show_ref_line_not_definition_line() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "caller_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 10,
+                    line_end: 50,
+                    signature: "pub fn caller_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "target_fn".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 60,
+                    line_end: 70,
+                    signature: "pub fn target_fn()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let caller_id = db
+            .get_symbol_id("caller_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        let target_id = db
+            .get_symbol_id("target_fn", "src/lib.rs")
+            .unwrap()
+            .unwrap();
+        // ref_line 42 = the line where caller_fn actually calls target_fn
+        db.insert_symbol_ref(caller_id, target_id, "call", "high", Some(42))
+            .unwrap();
+
+        let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
+        // Should show ref_line (42), not caller's definition line (10)
+        assert!(
+            result.contains("src/lib.rs:42"),
+            "callers should show call-site line (42), got:\n{result}"
+        );
+        assert!(
+            !result.contains("src/lib.rs:10"),
+            "callers should NOT show definition line (10), got:\n{result}"
         );
     }
 }

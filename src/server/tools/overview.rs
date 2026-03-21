@@ -389,8 +389,8 @@ mod tests {
             .unwrap();
         let a_id = db.get_symbol_id("helper_a", "src/lib.rs").unwrap().unwrap();
         let b_id = db.get_symbol_id("helper_b", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(src_id, a_id, "call", "high").unwrap();
-        db.insert_symbol_ref(src_id, b_id, "call", "high").unwrap();
+        db.insert_symbol_ref(src_id, a_id, "call", "high", None).unwrap();
+        db.insert_symbol_ref(src_id, b_id, "call", "high", None).unwrap();
 
         let result = handle_overview(&db, "src/", true, None).unwrap();
         assert!(

@@ -116,13 +116,13 @@ mod tests {
         let baz_id = sym_id(&db, "baz");
 
         // High-confidence refs
-        db.insert_symbol_ref(bar_id, foo_id, "call", "high")
+        db.insert_symbol_ref(bar_id, foo_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(baz_id, foo_id, "call", "high")
+        db.insert_symbol_ref(baz_id, foo_id, "call", "high", None)
             .unwrap();
 
         // Low-confidence ref
-        db.insert_symbol_ref(baz_id, bar_id, "call", "low").unwrap();
+        db.insert_symbol_ref(baz_id, bar_id, "call", "low", None).unwrap();
 
         let result = handle_health(&db).unwrap();
 

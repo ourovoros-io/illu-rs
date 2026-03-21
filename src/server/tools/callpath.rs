@@ -256,10 +256,10 @@ mod tests {
         let d_id = insert_symbol(&db, file_id, "d");
 
         // Diamond: a -> b -> d, a -> c -> d
-        db.insert_symbol_ref(a_id, b_id, "call", "high").unwrap();
-        db.insert_symbol_ref(a_id, c_id, "call", "high").unwrap();
-        db.insert_symbol_ref(b_id, d_id, "call", "high").unwrap();
-        db.insert_symbol_ref(c_id, d_id, "call", "high").unwrap();
+        db.insert_symbol_ref(a_id, b_id, "call", "high", None).unwrap();
+        db.insert_symbol_ref(a_id, c_id, "call", "high", None).unwrap();
+        db.insert_symbol_ref(b_id, d_id, "call", "high", None).unwrap();
+        db.insert_symbol_ref(c_id, d_id, "call", "high", None).unwrap();
 
         db
     }

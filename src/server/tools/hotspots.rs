@@ -120,16 +120,16 @@ mod tests {
         let complex_id = sym_id(&db, "complex");
 
         // caller_a -> hub, caller_b -> hub (hub has 2 incoming)
-        db.insert_symbol_ref(caller_a_id, hub_id, "call", "high")
+        db.insert_symbol_ref(caller_a_id, hub_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(caller_b_id, hub_id, "call", "high")
+        db.insert_symbol_ref(caller_b_id, hub_id, "call", "high", None)
             .unwrap();
         // complex -> hub, caller_a, caller_b (3 outgoing)
-        db.insert_symbol_ref(complex_id, hub_id, "call", "high")
+        db.insert_symbol_ref(complex_id, hub_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(complex_id, caller_a_id, "call", "high")
+        db.insert_symbol_ref(complex_id, caller_a_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(complex_id, caller_b_id, "call", "high")
+        db.insert_symbol_ref(complex_id, caller_b_id, "call", "high", None)
             .unwrap();
 
         db
@@ -180,7 +180,7 @@ mod tests {
 
         let lib_id = sym_id(&db, "lib_fn");
         let server_id = sym_id(&db, "server_fn");
-        db.insert_symbol_ref(lib_id, server_id, "call", "high")
+        db.insert_symbol_ref(lib_id, server_id, "call", "high", None)
             .unwrap();
 
         let result = handle_hotspots(&db, Some("src/server/"), None).unwrap();

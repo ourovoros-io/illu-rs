@@ -230,7 +230,7 @@ mod tests {
             .get_symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, base_id, "call", "high")
+        db.insert_symbol_ref(caller_id, base_id, "call", "high", None)
             .unwrap();
 
         let result = handle_impact(&db, "base_fn", None, false).unwrap();
@@ -294,9 +294,9 @@ mod tests {
         let base_id = db.get_symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
         let mid_id = db.get_symbol_id("mid_fn", "src/lib.rs").unwrap().unwrap();
         let top_id = db.get_symbol_id("top_fn", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(mid_id, base_id, "call", "high")
+        db.insert_symbol_ref(mid_id, base_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(top_id, mid_id, "call", "high")
+        db.insert_symbol_ref(top_id, mid_id, "call", "high", None)
             .unwrap();
 
         let result = handle_impact(&db, "base_fn", None, false).unwrap();
@@ -388,9 +388,9 @@ mod tests {
         let tax_id = sym_id(&db, "calculate_tax", "src/lib.rs");
         let test_basic_id = sym_id(&db, "test_tax_basic", "tests/calc.rs");
         let test_zero_id = sym_id(&db, "test_tax_zero", "tests/calc.rs");
-        db.insert_symbol_ref(test_basic_id, tax_id, "call", "high")
+        db.insert_symbol_ref(test_basic_id, tax_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(test_zero_id, tax_id, "call", "high")
+        db.insert_symbol_ref(test_zero_id, tax_id, "call", "high", None)
             .unwrap();
 
         let result = handle_impact(&db, "calculate_tax", None, false).unwrap();
@@ -474,9 +474,9 @@ mod tests {
             .get_symbol_id("test_via_wrapper", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(wrapper_id, inner_id, "call", "high")
+        db.insert_symbol_ref(wrapper_id, inner_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(test_id, wrapper_id, "call", "high")
+        db.insert_symbol_ref(test_id, wrapper_id, "call", "high", None)
             .unwrap();
 
         let result = handle_impact(&db, "inner_fn", None, false).unwrap();
@@ -580,7 +580,7 @@ mod tests {
             .get_symbol_id("use_it", "app/src/main.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref", "high")
+        db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref", "high", None)
             .unwrap();
 
         let result = handle_impact(&db, "SharedType", None, false).unwrap();
@@ -637,7 +637,7 @@ mod tests {
             .get_symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, open_id, "call", "high")
+        db.insert_symbol_ref(caller_id, open_id, "call", "high", None)
             .unwrap();
 
         let result = handle_impact(&db, "Database::open", None, false).unwrap();
@@ -692,7 +692,7 @@ mod tests {
             .get_symbol_id("test_open", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(test_id, open_id, "call", "high")
+        db.insert_symbol_ref(test_id, open_id, "call", "high", None)
             .unwrap();
 
         let result = handle_impact(&db, "Database::open", None, false).unwrap();
@@ -760,9 +760,9 @@ mod tests {
         let base_id = db.get_symbol_id("base", "src/lib.rs").unwrap().unwrap();
         let mid_id = db.get_symbol_id("mid", "src/lib.rs").unwrap().unwrap();
         let top_id = db.get_symbol_id("top", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(mid_id, base_id, "call", "high")
+        db.insert_symbol_ref(mid_id, base_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(top_id, mid_id, "call", "high")
+        db.insert_symbol_ref(top_id, mid_id, "call", "high", None)
             .unwrap();
 
         // depth=1: only direct callers

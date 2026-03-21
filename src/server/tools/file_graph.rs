@@ -70,7 +70,7 @@ mod tests {
             .unwrap();
         let tgt_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(src_id, tgt_id, "call", "high")
+        db.insert_symbol_ref(src_id, tgt_id, "call", "high", None)
             .unwrap();
         db
     }
@@ -121,7 +121,7 @@ mod tests {
             .unwrap();
         let s2 = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(s1, s2, "call", "high").unwrap();
+        db.insert_symbol_ref(s1, s2, "call", "high", None).unwrap();
 
         let result = handle_file_graph(&db, "src/").unwrap();
         assert!(result.contains("No file dependencies found"));

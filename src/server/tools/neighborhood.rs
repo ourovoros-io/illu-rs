@@ -260,10 +260,10 @@ mod tests {
         let beta_id = insert_symbol(&db, file_id, "beta");
 
         // alpha -> center
-        db.insert_symbol_ref(alpha_id, center_id, "call", "high")
+        db.insert_symbol_ref(alpha_id, center_id, "call", "high", None)
             .unwrap();
         // center -> beta
-        db.insert_symbol_ref(center_id, beta_id, "call", "high")
+        db.insert_symbol_ref(center_id, beta_id, "call", "high", None)
             .unwrap();
 
         db
@@ -354,11 +354,11 @@ mod tests {
         let grandchild_id = insert_symbol(&db, file_id, "grandchild");
 
         // root -> child_a, root -> child_b, child_a -> grandchild
-        db.insert_symbol_ref(root_id, child_a_id, "call", "high")
+        db.insert_symbol_ref(root_id, child_a_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(root_id, child_b_id, "call", "high")
+        db.insert_symbol_ref(root_id, child_b_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(child_a_id, grandchild_id, "call", "high")
+        db.insert_symbol_ref(child_a_id, grandchild_id, "call", "high", None)
             .unwrap();
 
         let result = handle_neighborhood(&db, "root", Some(2), Some("down"), Some("tree")).unwrap();

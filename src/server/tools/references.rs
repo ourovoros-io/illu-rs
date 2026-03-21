@@ -35,7 +35,8 @@ pub fn handle_references(
         let callers = db.get_callers(&sym.name, &sym.file_path)?;
         for c in &callers {
             if path.is_none() || c.file_path.starts_with(path.unwrap_or("")) {
-                let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
+                let line = c.ref_line.unwrap_or(c.line_start);
+                let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, line);
                 call_count += 1;
             }
         }

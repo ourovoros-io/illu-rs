@@ -221,9 +221,9 @@ mod tests {
         let caller_a_id = db.get_symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
         let caller_b_id = db.get_symbol_id("caller_b", "src/lib.rs").unwrap().unwrap();
 
-        db.insert_symbol_ref(caller_a_id, target_id, "call", "high")
+        db.insert_symbol_ref(caller_a_id, target_id, "call", "high", None)
             .unwrap();
-        db.insert_symbol_ref(caller_b_id, target_id, "call", "high")
+        db.insert_symbol_ref(caller_b_id, target_id, "call", "high", None)
             .unwrap();
 
         let result = handle_rename_plan(&db, "do_work").unwrap();
