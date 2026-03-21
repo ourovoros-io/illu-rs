@@ -1,4 +1,6 @@
 pub mod batch_context;
+pub mod blame;
+pub mod boundary;
 pub mod callpath;
 pub mod context;
 pub mod crate_graph;
@@ -6,6 +8,7 @@ pub mod diff_impact;
 pub mod docs;
 pub mod file_graph;
 pub mod freshness;
+pub mod health;
 pub mod hotspots;
 pub mod impact;
 pub mod implements;

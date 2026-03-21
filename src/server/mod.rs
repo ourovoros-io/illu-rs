@@ -194,6 +194,10 @@ struct NeighborhoodParams {
     symbol_name: String,
     /// Max hops in each direction (default: 2)
     depth: Option<i64>,
+    /// Direction: "both" (default), "down" (callees only), "up" (callers only)
+    direction: Option<String>,
+    /// Format: "list" (default flat), "tree" (hierarchical indented)
+    format: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -237,6 +241,21 @@ struct SimilarParams {
     /// Filter to files under this path prefix
     path: Option<String>,
 }
+
+#[derive(Deserialize, JsonSchema)]
+struct BlameParams {
+    /// Symbol name to blame (supports `Type::method` syntax)
+    symbol_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct BoundaryParams {
+    /// Path prefix defining the module boundary (e.g. "src/server/tools/")
+    path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct HealthParams {}
 
 #[derive(Deserialize, JsonSchema)]
 struct CrateGraphParams {}
@@ -530,9 +549,14 @@ impl IlluServer {
             crate::status::StatusGuard::new(&format!("neighborhood ▸ {}", params.symbol_name));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::neighborhood::handle_neighborhood(&db, &params.symbol_name, params.depth)
-                .map_err(to_mcp_err)?;
+        let result = tools::neighborhood::handle_neighborhood(
+            &db,
+            &params.symbol_name,
+            params.depth,
+            params.direction.as_deref(),
+            params.format.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -633,12 +657,14 @@ impl IlluServer {
         Parameters(params): Parameters<RenamePlanParams>,
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(symbol = %params.symbol_name, "Tool call: rename_plan");
-        let _guard =
-            crate::status::StatusGuard::new(&format!("rename_plan \u{25b8} {}", params.symbol_name));
+        let _guard = crate::status::StatusGuard::new(&format!(
+            "rename_plan \u{25b8} {}",
+            params.symbol_name
+        ));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result = tools::rename_plan::handle_rename_plan(&db, &params.symbol_name)
-            .map_err(to_mcp_err)?;
+        let result =
+            tools::rename_plan::handle_rename_plan(&db, &params.symbol_name).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -658,6 +684,58 @@ impl IlluServer {
         let result =
             tools::similar::handle_similar(&db, &params.symbol_name, params.path.as_deref())
                 .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "blame",
+        description = "Show git blame for a symbol: who last modified it, when, and the commit message. Summarizes authorship across the symbol's line range."
+    )]
+    async fn blame(
+        &self,
+        Parameters(params): Parameters<BlameParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(symbol = %params.symbol_name, "Tool call: blame");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("blame \u{25b8} {}", params.symbol_name));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let repo_path = &self.config.repo_path;
+        let result = tools::blame::handle_blame(&db, repo_path, &params.symbol_name)
+            .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "boundary",
+        description = "Analyze module boundaries: which symbols are used by code outside the given path (public API) vs only used internally (safe to refactor)."
+    )]
+    async fn boundary(
+        &self,
+        Parameters(params): Parameters<BoundaryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(path = %params.path, "Tool call: boundary");
+        let _guard = crate::status::StatusGuard::new(&format!("boundary \u{25b8} {}", params.path));
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result =
+            tools::boundary::handle_boundary(&db, &params.path).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "health",
+        description = "Report index quality: ref confidence distribution, signature completeness, noise sources, and coverage metrics."
+    )]
+    async fn health(
+        &self,
+        Parameters(_params): Parameters<HealthParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Tool call: health");
+        let _guard = crate::status::StatusGuard::new("health");
+        self.refresh()?;
+        let db = self.lock_db()?;
+        let result = tools::health::handle_health(&db).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -705,6 +783,9 @@ impl ServerHandler for IlluServer {
                  'stats' for codebase statistics and health metrics, \
                  'rename_plan' for rename impact preview, \
                  'similar' for finding structurally similar symbols, \
+                 'blame' for git blame on symbols, \
+                 'boundary' for module API boundary analysis, \
+                 'health' for index quality diagnosis, \
                  'crate_graph' for workspace dependency visualization."
                     .into(),
             ),

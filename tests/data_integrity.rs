@@ -288,7 +288,7 @@ use std::collections::HashMap;
 }
 
 #[test]
-fn signature_is_first_line_only() {
+fn signature_captures_full_multiline() {
     let (_dir, db) = index_source(
         r"
 pub fn multi_line(
@@ -303,16 +303,30 @@ pub fn multi_line(
     let syms = db.search_symbols("multi_line").unwrap();
     let sym = syms.iter().find(|s| s.name == "multi_line").unwrap();
 
-    // Signature is only the first line — parameters on continuation
-    // lines are in the body, not the signature
     assert!(
         !sym.signature.contains('\n'),
-        "signature must be a single line: {}",
+        "signature must be a single line (whitespace collapsed): {}",
         sym.signature
     );
     assert!(
         sym.signature.contains("multi_line"),
-        "signature must contain function name"
+        "signature must contain function name: {}",
+        sym.signature
+    );
+    assert!(
+        sym.signature.contains("-> Result<String"),
+        "signature must contain return type: {}",
+        sym.signature
+    );
+    assert!(
+        sym.signature.contains("first: String"),
+        "signature must contain parameter types: {}",
+        sym.signature
+    );
+    assert!(
+        !sym.signature.contains("Ok(first)"),
+        "signature must not contain body: {}",
+        sym.signature
     );
 }
 

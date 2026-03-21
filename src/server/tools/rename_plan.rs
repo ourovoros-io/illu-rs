@@ -12,9 +12,7 @@ pub fn handle_rename_plan(
         return Ok(format!("Symbol '{symbol_name}' not found."));
     }
 
-    let base_name = symbol_name
-        .split_once("::")
-        .map_or(symbol_name, |(_, m)| m);
+    let base_name = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);
 
     let mut output = String::new();
     let _ = writeln!(output, "## Rename Plan: `{symbol_name}`\n");
@@ -83,10 +81,7 @@ fn write_signature_usage(
     base_name: &str,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let sig_matches = db.search_symbols_by_signature(base_name)?;
-    let filtered: Vec<_> = sig_matches
-        .iter()
-        .filter(|s| s.name != base_name)
-        .collect();
+    let filtered: Vec<_> = sig_matches.iter().filter(|s| s.name != base_name).collect();
     if !filtered.is_empty() {
         let _ = writeln!(
             output,
@@ -115,11 +110,7 @@ fn write_field_usage(
     let matches: Vec<_> = all
         .iter()
         .filter(|s| s.kind == SymbolKind::Struct && s.name != base_name)
-        .filter(|s| {
-            s.details
-                .as_deref()
-                .is_some_and(|d| d.contains(base_name))
-        })
+        .filter(|s| s.details.as_deref().is_some_and(|d| d.contains(base_name)))
         .collect();
     if !matches.is_empty() {
         let _ = writeln!(output, "### Struct Fields ({} structs)\n", matches.len());
@@ -163,10 +154,7 @@ fn write_doc_mentions(
     base_name: &str,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let mentions = db.search_symbols_by_doc_comment(base_name)?;
-    let filtered: Vec<_> = mentions
-        .iter()
-        .filter(|s| s.name != base_name)
-        .collect();
+    let filtered: Vec<_> = mentions.iter().filter(|s| s.name != base_name).collect();
     if !filtered.is_empty() {
         let _ = writeln!(
             output,
@@ -175,7 +163,11 @@ fn write_doc_mentions(
         );
         for sym in &filtered {
             let qname = super::qualified_name(sym);
-            let _ = writeln!(output, "- **{qname}** ({}:{})", sym.file_path, sym.line_start);
+            let _ = writeln!(
+                output,
+                "- **{qname}** ({}:{})",
+                sym.file_path, sym.line_start
+            );
         }
         let _ = writeln!(output);
     }
@@ -231,17 +223,13 @@ mod tests {
         store_symbols(&db, file_id, &[target, caller1, caller2]).unwrap();
 
         let target_id = db.get_symbol_id("do_work", "src/lib.rs").unwrap().unwrap();
-        let caller_a_id = db
-            .get_symbol_id("caller_a", "src/lib.rs")
-            .unwrap()
-            .unwrap();
-        let caller_b_id = db
-            .get_symbol_id("caller_b", "src/lib.rs")
-            .unwrap()
-            .unwrap();
+        let caller_a_id = db.get_symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
+        let caller_b_id = db.get_symbol_id("caller_b", "src/lib.rs").unwrap().unwrap();
 
-        db.insert_symbol_ref(caller_a_id, target_id, "call").unwrap();
-        db.insert_symbol_ref(caller_b_id, target_id, "call").unwrap();
+        db.insert_symbol_ref(caller_a_id, target_id, "call", "high")
+            .unwrap();
+        db.insert_symbol_ref(caller_b_id, target_id, "call", "high")
+            .unwrap();
 
         let result = handle_rename_plan(&db, "do_work").unwrap();
 

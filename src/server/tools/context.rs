@@ -212,7 +212,7 @@ fn render_callers(
 
     let _ = writeln!(output, "### Called By\n");
     for c in &callers {
-        let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+        let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
     }
     let _ = writeln!(output);
 
@@ -242,7 +242,7 @@ fn render_callees(
     if !calls.is_empty() {
         let _ = writeln!(output, "**Calls:**");
         for c in &calls {
-            let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+            let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
         }
         let _ = writeln!(output);
     }
@@ -250,7 +250,7 @@ fn render_callees(
     if !type_refs.is_empty() {
         let _ = writeln!(output, "**Uses types:**");
         for c in &type_refs {
-            let _ = writeln!(output, "- {} ({})", c.name, c.file_path);
+            let _ = writeln!(output, "- {} ({}:{})", c.name, c.file_path, c.line_start);
         }
         let _ = writeln!(output);
     }
@@ -517,7 +517,8 @@ mod tests {
             .get_symbol_id("callee_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, callee_id, "call").unwrap();
+        db.insert_symbol_ref(caller_id, callee_id, "call", "high")
+            .unwrap();
 
         let result = handle_context(&db, "caller_fn", false, None, None, None).unwrap();
         assert!(result.contains("### Callees"));
@@ -605,7 +606,8 @@ mod tests {
             .unwrap()
             .unwrap();
         let caller_id = db.get_symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
+        db.insert_symbol_ref(caller_id, target_id, "call", "high")
+            .unwrap();
 
         let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
         assert!(
@@ -745,7 +747,8 @@ mod tests {
 
         let my_fn_id = db.get_symbol_id("my_fn", "src/lib.rs").unwrap().unwrap();
         let helper_id = db.get_symbol_id("helper", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(my_fn_id, helper_id, "call").unwrap();
+        db.insert_symbol_ref(my_fn_id, helper_id, "call", "high")
+            .unwrap();
 
         let sections: &[&str] = &["source"];
         let result = handle_context(&db, "my_fn", false, None, Some(sections), None).unwrap();
@@ -795,7 +798,8 @@ mod tests {
 
         let invoker_id = db.get_symbol_id("invoker", "src/lib.rs").unwrap().unwrap();
         let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(invoker_id, target_id, "call").unwrap();
+        db.insert_symbol_ref(invoker_id, target_id, "call", "high")
+            .unwrap();
 
         let sections: &[&str] = &["callers"];
         let result = handle_context(&db, "target", false, None, Some(sections), None).unwrap();
@@ -845,7 +849,8 @@ mod tests {
 
         let all_fn_id = db.get_symbol_id("all_fn", "src/lib.rs").unwrap().unwrap();
         let dep_id = db.get_symbol_id("dep", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(all_fn_id, dep_id, "call").unwrap();
+        db.insert_symbol_ref(all_fn_id, dep_id, "call", "high")
+            .unwrap();
 
         let result = handle_context(&db, "all_fn", false, None, None, None).unwrap();
         assert!(result.contains("### Source"), "source present");
@@ -924,8 +929,10 @@ mod tests {
             .get_symbol_id("test_caller", "tests/test.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(src_id, target_id, "call").unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call").unwrap();
+        db.insert_symbol_ref(src_id, target_id, "call", "high")
+            .unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call", "high")
+            .unwrap();
 
         // Without callers_path: both callers shown
         let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
@@ -986,10 +993,7 @@ mod tests {
             result.contains("### Related (impl MyType)"),
             "should show related section with impl label"
         );
-        assert!(
-            result.contains("method_b"),
-            "should list sibling method"
-        );
+        assert!(result.contains("method_b"), "should list sibling method");
     }
 
     #[test]
@@ -1037,10 +1041,7 @@ mod tests {
             result.contains("### Related (same file)"),
             "should show related section with file label"
         );
-        assert!(
-            result.contains("func_two"),
-            "should list sibling function"
-        );
+        assert!(result.contains("func_two"), "should list sibling function");
     }
 
     #[test]

@@ -366,7 +366,8 @@ diff --git a/src/lib.rs b/src/lib.rs
             .get_symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, target_id, "call").unwrap();
+        db.insert_symbol_ref(caller_id, target_id, "call", "high")
+            .unwrap();
 
         // Simulate: lines 12-15 changed in src/lib.rs — overlaps target_fn
         let symbols = db.get_symbols_at_lines("src/lib.rs", &[(12, 15)]).unwrap();
@@ -427,7 +428,8 @@ diff --git a/src/lib.rs b/src/lib.rs
             .get_symbol_id("test_target", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call").unwrap();
+        db.insert_symbol_ref(test_id, target_id, "call", "high")
+            .unwrap();
 
         // Verify get_related_tests finds the test
         let tests = db.get_related_tests("target_fn").unwrap();

@@ -263,6 +263,7 @@ fn format_body_search(
     }
     if !symbols.is_empty() {
         output.push_str("## Symbols matching body content\n\n");
+        let query_lower = query.to_lowercase();
         for sym in &symbols {
             let qname = super::qualified_name(sym);
             let _ = writeln!(
@@ -270,6 +271,17 @@ fn format_body_search(
                 "- **{qname}** ({}) at {}:{}-{}\n  `{}`",
                 sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
             );
+            if let Some(body) = &sym.body {
+                for line in body.lines() {
+                    if line.to_lowercase().contains(&query_lower) {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() {
+                            let _ = writeln!(output, "  > `{trimmed}`");
+                            break;
+                        }
+                    }
+                }
+            }
         }
         output.push('\n');
     }
@@ -791,6 +803,14 @@ mod tests {
             "should not find unrelated symbol"
         );
         assert!(result.contains("Symbols matching body content"));
+        assert!(
+            result.contains("> `"),
+            "should show body snippet for matching line"
+        );
+        assert!(
+            result.contains("tokio::spawn"),
+            "snippet should contain the matched term"
+        );
 
         let result = handle_query(
             &db,

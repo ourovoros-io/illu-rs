@@ -132,8 +132,13 @@ fn render_depth_entries(
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
+    use crate::db::SymbolId;
     use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
+
+    fn sym_id(db: &Database, name: &str, file: &str) -> SymbolId {
+        db.get_symbol_id(name, file).unwrap().unwrap()
+    }
 
     #[test]
     fn test_impact_no_symbol() {
@@ -217,7 +222,8 @@ mod tests {
             .get_symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, base_id, "call").unwrap();
+        db.insert_symbol_ref(caller_id, base_id, "call", "high")
+            .unwrap();
 
         let result = handle_impact(&db, "base_fn", None, false).unwrap();
         assert!(result.contains("caller_fn"));
@@ -280,8 +286,10 @@ mod tests {
         let base_id = db.get_symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
         let mid_id = db.get_symbol_id("mid_fn", "src/lib.rs").unwrap().unwrap();
         let top_id = db.get_symbol_id("top_fn", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(mid_id, base_id, "call").unwrap();
-        db.insert_symbol_ref(top_id, mid_id, "call").unwrap();
+        db.insert_symbol_ref(mid_id, base_id, "call", "high")
+            .unwrap();
+        db.insert_symbol_ref(top_id, mid_id, "call", "high")
+            .unwrap();
 
         let result = handle_impact(&db, "base_fn", None, false).unwrap();
         assert!(result.contains("mid_fn"), "should show direct dependent");
@@ -369,20 +377,13 @@ mod tests {
         // test_tax_basic -> calculate_tax (direct)
         // test_tax_zero  -> calculate_tax (direct)
         // unrelated_fn does NOT call calculate_tax
-        let tax_id = db
-            .get_symbol_id("calculate_tax", "src/lib.rs")
-            .unwrap()
+        let tax_id = sym_id(&db, "calculate_tax", "src/lib.rs");
+        let test_basic_id = sym_id(&db, "test_tax_basic", "tests/calc.rs");
+        let test_zero_id = sym_id(&db, "test_tax_zero", "tests/calc.rs");
+        db.insert_symbol_ref(test_basic_id, tax_id, "call", "high")
             .unwrap();
-        let test_basic_id = db
-            .get_symbol_id("test_tax_basic", "tests/calc.rs")
-            .unwrap()
+        db.insert_symbol_ref(test_zero_id, tax_id, "call", "high")
             .unwrap();
-        let test_zero_id = db
-            .get_symbol_id("test_tax_zero", "tests/calc.rs")
-            .unwrap()
-            .unwrap();
-        db.insert_symbol_ref(test_basic_id, tax_id, "call").unwrap();
-        db.insert_symbol_ref(test_zero_id, tax_id, "call").unwrap();
 
         let result = handle_impact(&db, "calculate_tax", None, false).unwrap();
         assert!(
@@ -465,8 +466,10 @@ mod tests {
             .get_symbol_id("test_via_wrapper", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(wrapper_id, inner_id, "call").unwrap();
-        db.insert_symbol_ref(test_id, wrapper_id, "call").unwrap();
+        db.insert_symbol_ref(wrapper_id, inner_id, "call", "high")
+            .unwrap();
+        db.insert_symbol_ref(test_id, wrapper_id, "call", "high")
+            .unwrap();
 
         let result = handle_impact(&db, "inner_fn", None, false).unwrap();
         assert!(
@@ -569,7 +572,7 @@ mod tests {
             .get_symbol_id("use_it", "app/src/main.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref")
+        db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref", "high")
             .unwrap();
 
         let result = handle_impact(&db, "SharedType", None, false).unwrap();
@@ -638,8 +641,10 @@ mod tests {
         let base_id = db.get_symbol_id("base", "src/lib.rs").unwrap().unwrap();
         let mid_id = db.get_symbol_id("mid", "src/lib.rs").unwrap().unwrap();
         let top_id = db.get_symbol_id("top", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(mid_id, base_id, "call").unwrap();
-        db.insert_symbol_ref(top_id, mid_id, "call").unwrap();
+        db.insert_symbol_ref(mid_id, base_id, "call", "high")
+            .unwrap();
+        db.insert_symbol_ref(top_id, mid_id, "call", "high")
+            .unwrap();
 
         // depth=1: only direct callers
         let result = handle_impact(&db, "base", Some(1), false).unwrap();
