@@ -224,13 +224,48 @@ impl Database {
 
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
                 content, content=docs, content_rowid=id
+            );
+
+            CREATE TABLE IF NOT EXISTS schema_info (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );",
         )?;
         self.create_indexes()?;
         self.migrate_fts_schema()?;
         self.migrate_docs_module_column()?;
         self.migrate_symbols_impl_type_column()?;
-        self.migrate_symbol_refs_confidence_column()
+        self.migrate_symbol_refs_confidence_column()?;
+        self.check_schema_version()
+    }
+
+    /// Bump to force full re-index after parser/schema changes.
+    const SCHEMA_VERSION: &str = "2";
+
+    fn check_schema_version(&self) -> SqlResult<()> {
+        let current: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM schema_info WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if current.as_deref() != Some(Self::SCHEMA_VERSION) {
+            tracing::info!(
+                old = ?current,
+                new = Self::SCHEMA_VERSION,
+                "Schema version changed, clearing code index for full re-index"
+            );
+            self.clear_code_index()?;
+            self.conn.execute(
+                "INSERT OR REPLACE INTO schema_info (key, value) \
+                 VALUES ('schema_version', ?1)",
+                params![Self::SCHEMA_VERSION],
+            )?;
+        }
+        Ok(())
     }
 
     fn create_indexes(&self) -> SqlResult<()> {
@@ -2998,5 +3033,44 @@ mod tests {
         assert_eq!(results[0].2, 2);
         assert_eq!(results[1].0, "a");
         assert_eq!(results[1].2, 1);
+    }
+
+    #[test]
+    fn test_schema_version_triggers_clear() {
+        let db = Database::open_in_memory().unwrap();
+        // Insert a file to simulate an indexed DB
+        let _file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        assert!(
+            db.file_count().unwrap() > 0,
+            "should have files before version bump"
+        );
+
+        // Simulate a stale version so next migrate detects a mismatch
+        db.conn
+            .execute(
+                "INSERT OR REPLACE INTO schema_info (key, value) \
+                 VALUES ('schema_version', 'old')",
+                [],
+            )
+            .unwrap();
+
+        // Re-run migrate — should detect version mismatch and clear
+        db.migrate().unwrap();
+        assert_eq!(
+            db.file_count().unwrap(),
+            0,
+            "should be cleared after version bump"
+        );
+
+        // Verify schema version is now current
+        let version: String = db
+            .conn
+            .query_row(
+                "SELECT value FROM schema_info WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, Database::SCHEMA_VERSION);
     }
 }
