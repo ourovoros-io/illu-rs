@@ -164,6 +164,9 @@ struct BatchContextParams {
     symbols: Vec<String>,
     /// Return full untruncated source bodies (default: false)
     full_body: Option<bool>,
+    /// Select specific sections: `source`, `callers`, `callees`,
+    /// `tested_by`, `traits`, `related`, `docs`. Omit for all.
+    sections: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -557,8 +560,17 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let full_body = params.full_body.unwrap_or(false);
-        let result = tools::batch_context::handle_batch_context(&db, &params.symbols, full_body)
-            .map_err(to_mcp_err)?;
+        let sections: Option<Vec<&str>> = params
+            .sections
+            .as_ref()
+            .map(|v| v.iter().map(String::as_str).collect());
+        let result = tools::batch_context::handle_batch_context(
+            &db,
+            &params.symbols,
+            full_body,
+            sections.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
