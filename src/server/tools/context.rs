@@ -726,7 +726,8 @@ mod tests {
         assert!(result.contains("src/b.rs"));
 
         // With file filter: only one
-        let result = handle_context(&db, "Config", false, Some("src/a.rs"), None, None, false).unwrap();
+        let result =
+            handle_context(&db, "Config", false, Some("src/a.rs"), None, None, false).unwrap();
         assert!(result.contains("src/a.rs"));
         assert!(!result.contains("src/b.rs"));
     }
@@ -777,7 +778,8 @@ mod tests {
             .unwrap();
 
         let sections: &[&str] = &["source"];
-        let result = handle_context(&db, "my_fn", false, None, Some(sections), None, false).unwrap();
+        let result =
+            handle_context(&db, "my_fn", false, None, Some(sections), None, false).unwrap();
         assert!(result.contains("### Source"), "source section present");
         assert!(!result.contains("### Callees"), "callees section absent");
     }
@@ -828,7 +830,8 @@ mod tests {
             .unwrap();
 
         let sections: &[&str] = &["callers"];
-        let result = handle_context(&db, "target", false, None, Some(sections), None, false).unwrap();
+        let result =
+            handle_context(&db, "target", false, None, Some(sections), None, false).unwrap();
         assert!(result.contains("### Called By"), "callers section present");
         assert!(!result.contains("### Source"), "source section absent");
     }
@@ -966,7 +969,8 @@ mod tests {
         assert!(result.contains("test_caller"), "test caller present");
 
         // With callers_path="src/": only src caller
-        let result = handle_context(&db, "target_fn", false, None, None, Some("src/"), false).unwrap();
+        let result =
+            handle_context(&db, "target_fn", false, None, None, Some("src/"), false).unwrap();
         assert!(result.contains("src_caller"), "src caller present");
         assert!(
             !result.contains("test_caller"),
@@ -1014,7 +1018,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "MyType::method_a", false, None, None, None, false).unwrap();
+        let result =
+            handle_context(&db, "MyType::method_a", false, None, None, None, false).unwrap();
         assert!(
             result.contains("### Related (impl MyType)"),
             "should show related section with impl label"
@@ -1111,7 +1116,8 @@ mod tests {
         .unwrap();
 
         let sections: &[&str] = &["source"];
-        let result = handle_context(&db, "alpha", false, None, Some(sections), None, false).unwrap();
+        let result =
+            handle_context(&db, "alpha", false, None, Some(sections), None, false).unwrap();
         assert!(result.contains("### Source"), "source section present");
         assert!(
             !result.contains("### Related"),
@@ -1143,8 +1149,16 @@ mod tests {
         store_symbols(&db, file_id, &syms).unwrap();
 
         let sections: &[&str] = &["related"];
-        let result =
-            handle_context(&db, "BigType::method_0", false, None, Some(sections), None, false).unwrap();
+        let result = handle_context(
+            &db,
+            "BigType::method_0",
+            false,
+            None,
+            Some(sections),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(
             result.contains("4 more"),
             "should show overflow count when >10 related, got: {result}"
@@ -1194,7 +1208,8 @@ mod tests {
 
         // Only request source section to avoid "Related" siblings
         let sections: &[&str] = &["source", "callers", "callees"];
-        let result = handle_context(&db, "index_repo", false, None, Some(sections), None, false).unwrap();
+        let result =
+            handle_context(&db, "index_repo", false, None, Some(sections), None, false).unwrap();
         assert!(result.contains("index_repo"), "should find exact match");
         assert!(
             !result.contains("open_or_index"),

@@ -23,8 +23,12 @@ pub fn handle_history(
 
     if show_diff {
         return format_diff_history(
-            repo_path, &qname, &sym.file_path,
-            sym.line_start, sym.line_end, limit,
+            repo_path,
+            &qname,
+            &sym.file_path,
+            sym.line_start,
+            sym.line_end,
+            limit,
         );
     }
 
@@ -74,19 +78,14 @@ fn format_diff_history(
     line_end: i64,
     limit: i64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let raw = run_git_log_with_diff(
-        repo_path, file_path, line_start, line_end, limit,
-    )?;
+    let raw = run_git_log_with_diff(repo_path, file_path, line_start, line_end, limit)?;
 
     let commits = parse_diff_log_output(&raw);
     let total = commits.len();
 
     let mut output = String::new();
     let _ = writeln!(output, "## History (with diffs): {qname}\n");
-    let _ = writeln!(
-        output,
-        "- **File:** {file_path}:{line_start}-{line_end}"
-    );
+    let _ = writeln!(output, "- **File:** {file_path}:{line_start}-{line_end}");
 
     if commits.is_empty() {
         let _ = writeln!(output, "\nNo git history found for this line range.");
@@ -234,11 +233,7 @@ fn format_diff_entry(entry: &DiffLogEntry) -> String {
         let relevant: Vec<&str> = entry
             .diff
             .lines()
-            .filter(|l| {
-                l.starts_with('+')
-                    || l.starts_with('-')
-                    || l.starts_with("@@")
-            })
+            .filter(|l| l.starts_with('+') || l.starts_with('-') || l.starts_with("@@"))
             .take(MAX_DIFF_LINES_PER_COMMIT)
             .collect();
 

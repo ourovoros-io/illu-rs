@@ -154,7 +154,8 @@ fn self_context_handle_query_shows_callees() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = context::handle_context(&db, "handle_query", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "handle_query", false, None, None, None, false).unwrap();
     assert!(
         result.contains("format_symbols") || result.contains("format_docs"),
         "handle_query should show callees like format_symbols or format_docs: {result}"

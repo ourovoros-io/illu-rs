@@ -32,7 +32,11 @@ pub fn handle_callpath(
 
     if all_paths {
         let max_paths = usize::try_from(max_paths.unwrap_or(5).max(1)).unwrap_or(5);
-        let cfg = DfsConfig { max_depth, max_paths, exclude_tests };
+        let cfg = DfsConfig {
+            max_depth,
+            max_paths,
+            exclude_tests,
+        };
         handle_all_paths(db, from, to, from_name, to_name, &cfg)
     } else {
         handle_shortest_path(db, from, to, from_name, to_name, max_depth, exclude_tests)
@@ -194,7 +198,8 @@ fn handle_all_paths(
         let _ = writeln!(
             output,
             "No call paths found from `{from}` to `{to}` \
-             within depth {}.", cfg.max_depth
+             within depth {}.",
+            cfg.max_depth
         );
         return Ok(output);
     }
@@ -254,10 +259,14 @@ mod tests {
         let d_id = insert_symbol(&db, file_id, "d");
 
         // Diamond: a -> b -> d, a -> c -> d
-        db.insert_symbol_ref(a_id, b_id, "call", "high", None).unwrap();
-        db.insert_symbol_ref(a_id, c_id, "call", "high", None).unwrap();
-        db.insert_symbol_ref(b_id, d_id, "call", "high", None).unwrap();
-        db.insert_symbol_ref(c_id, d_id, "call", "high", None).unwrap();
+        db.insert_symbol_ref(a_id, b_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(a_id, c_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(b_id, d_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(c_id, d_id, "call", "high", None)
+            .unwrap();
 
         db
     }
@@ -308,7 +317,8 @@ mod tests {
     #[test]
     fn test_callpath_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_callpath(&db, "nonexistent", "other", None, false, None, false).unwrap();
+        let result =
+            handle_callpath(&db, "nonexistent", "other", None, false, None, false).unwrap();
         assert!(result.contains("not found"), "missing symbol: {result}");
     }
 }

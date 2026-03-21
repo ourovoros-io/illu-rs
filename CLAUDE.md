@@ -116,6 +116,10 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Type usage compact mode** — `type_usage` accepts `compact: bool` parameter. When true, groups results by file with counts instead of listing every entry with full signatures.
 - **History show_diff** — `history` accepts `show_diff: bool` parameter. When true, uses `git log -L<start>,<end>:<file>` to show function-level code diffs per commit. Output capped at ~4000 chars.
 - **Overview filters mod/use** — `handle_overview` excludes `Mod` and `Use` symbol kinds from output to focus on actual API surface (functions, structs, enums, traits).
+- **Wildcard + kind filter** — `query: "*", kind: "struct"` (wildcard with kind-only filter) now seeds results via `get_symbols_by_path_prefix("")` instead of returning empty. All kind-only wildcard queries work without needing a path filter.
+- **Relevance-ranked results** — `format_symbols` sorts results by high-confidence incoming reference count (descending), then by name. Most-referenced symbols appear first. Uses `Database::count_refs_for_symbol` per result (max 50 queries, trivially fast).
+- **Similar noise filtering** — `score_one` excludes `NOISY_SIMILAR_CALLEES` (`new`, `from`, `into`, `default`, `clone`, `build`, `init`, `fmt`, `write`, `writeln`, `push`, `len`, `is_empty`, `to_string`, `to_owned`, `as_str`, `as_ref`, `iter`, `collect`, `map`, `filter`) from shared callee scoring to prevent ubiquitous constructors/iterators from inflating similarity scores.
+- **Docs topic LIKE fallback** — `handle_docs_with_topic` falls back to `Database::search_docs_content` (LIKE-based content search) when FTS search returns no results. Catches terms FTS tokenization can't handle (e.g. "FTS5").
 
 ## Lint Configuration
 

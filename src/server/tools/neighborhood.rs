@@ -182,9 +182,11 @@ impl<'a> TreeRenderer<'a> {
         }
 
         let children = if self.use_callers {
-            self.db.get_callers_by_name(name, None, self.exclude_tests)?
+            self.db
+                .get_callers_by_name(name, None, self.exclude_tests)?
         } else {
-            self.db.get_callees_by_name(name, None, self.exclude_tests)?
+            self.db
+                .get_callees_by_name(name, None, self.exclude_tests)?
         };
 
         let child_prefix = if is_root {
@@ -341,7 +343,8 @@ mod tests {
     #[test]
     fn test_neighborhood_tree_format_up() {
         let db = setup_db_with_chain();
-        let result = handle_neighborhood(&db, "center", Some(2), Some("up"), Some("tree"), false).unwrap();
+        let result =
+            handle_neighborhood(&db, "center", Some(2), Some("up"), Some("tree"), false).unwrap();
 
         assert!(result.contains("## Caller Tree: center"));
         assert!(result.contains("**center**"));
@@ -366,7 +369,8 @@ mod tests {
         db.insert_symbol_ref(child_a_id, grandchild_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_neighborhood(&db, "root", Some(2), Some("down"), Some("tree"), false).unwrap();
+        let result =
+            handle_neighborhood(&db, "root", Some(2), Some("down"), Some("tree"), false).unwrap();
 
         assert!(result.contains("**root**"));
         assert!(result.contains("├── "));

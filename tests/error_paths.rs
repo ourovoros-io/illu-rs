@@ -117,7 +117,8 @@ fn query_on_empty_crate_returns_no_results() {
 #[test]
 fn context_on_nonexistent_symbol_returns_not_found() {
     let (_dir, db) = empty_crate();
-    let result = context::handle_context(&db, "Nonexistent", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "Nonexistent", false, None, None, None, false).unwrap();
     let indicates_missing = result.contains("not found")
         || result.contains("No symbol")
         || result.contains("no symbol");

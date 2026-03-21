@@ -1211,6 +1211,28 @@ impl Database {
         Ok(results)
     }
 
+    /// LIKE-based content search for docs, scoped to a dependency.
+    /// Broader than FTS — catches terms FTS tokenization can't handle.
+    pub fn search_docs_content(&self, dep_name: &str, query: &str) -> SqlResult<Vec<DocResult>> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let pattern = format!("%{}%", escape_like(query));
+        let mut stmt = self.conn.prepare(
+            "SELECT d.content, d.source, dep.name, dep.version, d.module \
+             FROM docs d \
+             JOIN dependencies dep ON dep.id = d.dependency_id \
+             WHERE dep.name = ?1 AND d.content LIKE ?2 ESCAPE '\\' \
+             LIMIT 10",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query(params![dep_name, pattern])?;
+        while let Some(row) = rows.next()? {
+            results.push(row_to_doc_result(row)?);
+        }
+        Ok(results)
+    }
+
     pub fn insert_trait_impl(
         &self,
         type_name: &str,
@@ -1772,6 +1794,20 @@ impl Database {
             results.push((row.get(0)?, row.get(1)?, row.get(2)?));
         }
         Ok(results)
+    }
+
+    /// Count incoming high-confidence references for a specific symbol.
+    pub fn count_refs_for_symbol(&self, name: &str, file_path: &str) -> SqlResult<i64> {
+        self.conn.query_row(
+            "SELECT COUNT(DISTINCT sr.source_symbol_id) \
+             FROM symbols ts \
+             JOIN files f ON f.id = ts.file_id \
+             JOIN symbol_refs sr ON sr.target_symbol_id = ts.id \
+             WHERE ts.name = ?1 AND f.path = ?2 \
+               AND sr.confidence = 'high'",
+            params![name, file_path],
+            |row| row.get(0),
+        )
     }
 
     /// Search for structs whose `details` field contains the given text.
@@ -3192,6 +3228,55 @@ mod tests {
         assert_eq!(results[0].2, 2);
         assert_eq!(results[1].0, "c");
         assert_eq!(results[1].2, 1);
+    }
+
+    #[test]
+    fn test_count_refs_for_symbol() {
+        let db = Database::open_in_memory().unwrap();
+        let f1 = db.insert_file("src/lib.rs", "h1").unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'target_fn', 'fn', 'public', 1, 5, 'fn target_fn()')",
+                params![f1],
+            )
+            .unwrap();
+        let target = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'caller_a', 'fn', 'public', 6, 10, 'fn caller_a()')",
+                params![f1],
+            )
+            .unwrap();
+        let caller_a = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, line_start, line_end, signature) \
+                 VALUES (?1, 'caller_b', 'fn', 'public', 11, 15, 'fn caller_b()')",
+                params![f1],
+            )
+            .unwrap();
+        let caller_b = SymbolId(db.conn.last_insert_rowid());
+
+        db.insert_symbol_ref(caller_a, target, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(caller_b, target, "call", "high", None)
+            .unwrap();
+
+        let count = db.count_refs_for_symbol("target_fn", "src/lib.rs").unwrap();
+        assert_eq!(count, 2);
+
+        let count = db.count_refs_for_symbol("caller_a", "src/lib.rs").unwrap();
+        assert_eq!(count, 0);
+
+        let count = db
+            .count_refs_for_symbol("nonexistent", "src/lib.rs")
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

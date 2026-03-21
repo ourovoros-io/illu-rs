@@ -83,6 +83,21 @@ fn handle_docs_with_topic(
         .collect();
 
     if filtered.is_empty() {
+        // LIKE fallback for terms FTS can't tokenize (e.g. "FTS5")
+        let like_results = db.search_docs_content(dep_name, topic)?;
+        if !like_results.is_empty() {
+            let mut output = String::new();
+            let _ = writeln!(output, "## {dep_name} — {topic}\n");
+            for doc in &like_results {
+                let _ = writeln!(
+                    output,
+                    "### {} ({})\n\n{}\n",
+                    doc.dependency_name, doc.source, doc.content
+                );
+            }
+            return Ok(output);
+        }
+
         let dep = db.get_dependency_by_name(dep_name)?;
         let mut msg = match dep {
             Some(_) => format!(
@@ -180,5 +195,28 @@ mod tests {
 
         let result = handle_docs(&db, "serde", Some("graphql")).unwrap();
         assert!(result.contains("no docs match topic"));
+    }
+
+    #[test]
+    fn test_docs_topic_like_fallback() {
+        let db = Database::open_in_memory().unwrap();
+        let dep_id = db
+            .insert_dependency("rusqlite", "0.31.0", true, None)
+            .unwrap();
+        db.store_doc_with_module(
+            dep_id,
+            "docs.rs",
+            "rusqlite supports FTS5 full-text search via virtual tables",
+            "features",
+        )
+        .unwrap();
+
+        // "FTS5" may not match via FTS tokenization,
+        // but LIKE fallback should find it
+        let result = handle_docs(&db, "rusqlite", Some("FTS5")).unwrap();
+        assert!(
+            result.contains("FTS5"),
+            "LIKE fallback should find FTS5 in doc content\n{result}"
+        );
     }
 }

@@ -86,6 +86,8 @@ fn format_symbols(
         db.search_symbols_by_signature(sig)?
     } else if let Some(p) = path {
         db.get_symbols_by_path_prefix(p)?
+    } else if kind.is_some() {
+        db.get_symbols_by_path_prefix("")?
     } else {
         return Ok(());
     };
@@ -118,10 +120,14 @@ fn format_symbols(
             })
             .collect()
     };
-    if let Some(max) = limit {
-        let max = usize::try_from(max.max(1)).unwrap_or(50);
-        symbols.truncate(max);
-    }
+    // Cap before expensive per-symbol ref count queries,
+    // then sort by relevance, then apply user limit
+    let max = limit
+        .and_then(|l| usize::try_from(l.max(1)).ok())
+        .unwrap_or(50);
+    symbols.truncate(max.saturating_mul(4).min(200));
+    sort_by_ref_count(db, &mut symbols)?;
+    symbols.truncate(max);
     if !symbols.is_empty() {
         output.push_str("## Symbols\n\n");
         for sym in &symbols {
@@ -139,6 +145,23 @@ fn format_symbols(
         }
         output.push('\n');
     }
+    Ok(())
+}
+
+fn sort_by_ref_count(
+    db: &Database,
+    symbols: &mut Vec<crate::db::StoredSymbol>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if symbols.len() <= 1 {
+        return Ok(());
+    }
+    let mut with_counts: Vec<(i64, crate::db::StoredSymbol)> = Vec::with_capacity(symbols.len());
+    for sym in symbols.drain(..) {
+        let count = db.count_refs_for_symbol(&sym.name, &sym.file_path)?;
+        with_counts.push((count, sym));
+    }
+    with_counts.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+    symbols.extend(with_counts.into_iter().map(|(_, s)| s));
     Ok(())
 }
 
@@ -961,6 +984,129 @@ mod tests {
         assert!(
             result.contains("get_users"),
             "empty query + path should list symbols: {result}"
+        );
+    }
+
+    #[test]
+    fn test_query_wildcard_kind_only() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "MyStruct".into(),
+                    kind: SymbolKind::Struct,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub struct MyStruct".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                make_fn("my_func", "src/lib.rs", 7, "pub fn my_func()"),
+            ],
+        )
+        .unwrap();
+
+        let result = handle_query(
+            &db,
+            "*",
+            Some("symbols"),
+            Some("struct"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.contains("MyStruct"),
+            "Should find struct with wildcard+kind: {result}"
+        );
+        assert!(
+            !result.contains("my_func"),
+            "Should NOT find function when kind=struct: {result}"
+        );
+    }
+
+    #[test]
+    fn test_query_results_sorted_by_ref_count() {
+        use crate::indexer::parser::{RefKind, SymbolRef};
+
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                make_fn("parse_alpha", "src/lib.rs", 1, "pub fn parse_alpha()"),
+                make_fn("parse_beta", "src/lib.rs", 7, "pub fn parse_beta()"),
+                make_fn("caller1", "src/lib.rs", 13, "pub fn caller1()"),
+                make_fn("caller2", "src/lib.rs", 19, "pub fn caller2()"),
+                make_fn("caller3", "src/lib.rs", 25, "pub fn caller3()"),
+            ],
+        )
+        .unwrap();
+
+        let map = db.build_symbol_id_map().unwrap();
+        // parse_beta gets 3 refs, parse_alpha gets 1
+        db.store_symbol_refs_fast(
+            &[
+                SymbolRef {
+                    source_name: "caller1".into(),
+                    target_name: "parse_beta".into(),
+                    source_file: "src/lib.rs".into(),
+                    target_file: Some("src/lib.rs".into()),
+                    kind: RefKind::Call,
+                    target_context: None,
+                    ref_line: Some(14),
+                },
+                SymbolRef {
+                    source_name: "caller2".into(),
+                    target_name: "parse_beta".into(),
+                    source_file: "src/lib.rs".into(),
+                    target_file: Some("src/lib.rs".into()),
+                    kind: RefKind::Call,
+                    target_context: None,
+                    ref_line: Some(20),
+                },
+                SymbolRef {
+                    source_name: "caller3".into(),
+                    target_name: "parse_beta".into(),
+                    source_file: "src/lib.rs".into(),
+                    target_file: Some("src/lib.rs".into()),
+                    kind: RefKind::Call,
+                    target_context: None,
+                    ref_line: Some(26),
+                },
+                SymbolRef {
+                    source_name: "caller1".into(),
+                    target_name: "parse_alpha".into(),
+                    source_file: "src/lib.rs".into(),
+                    target_file: Some("src/lib.rs".into()),
+                    kind: RefKind::Call,
+                    target_context: None,
+                    ref_line: Some(15),
+                },
+            ],
+            &map,
+        )
+        .unwrap();
+
+        let result =
+            handle_query(&db, "parse", Some("symbols"), None, None, None, None, None).unwrap();
+        // parse_beta (3 refs) should appear before parse_alpha (1 ref)
+        let beta_pos = result.find("parse_beta").unwrap();
+        let alpha_pos = result.find("parse_alpha").unwrap();
+        assert!(
+            beta_pos < alpha_pos,
+            "parse_beta (3 refs) should appear before parse_alpha (1 ref)\n{result}"
         );
     }
 }

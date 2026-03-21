@@ -226,13 +226,18 @@ mod tests {
         let c3 = sym_id(&db, "caller3");
 
         // real_fn: 2 high-confidence refs
-        db.insert_symbol_ref(c1, real_id, "call", "high", None).unwrap();
-        db.insert_symbol_ref(c2, real_id, "call", "high", None).unwrap();
+        db.insert_symbol_ref(c1, real_id, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(c2, real_id, "call", "high", None)
+            .unwrap();
 
         // noise_fn: 3 refs but all low-confidence
-        db.insert_symbol_ref(c1, noise_id, "call", "low", None).unwrap();
-        db.insert_symbol_ref(c2, noise_id, "call", "low", None).unwrap();
-        db.insert_symbol_ref(c3, noise_id, "call", "low", None).unwrap();
+        db.insert_symbol_ref(c1, noise_id, "call", "low", None)
+            .unwrap();
+        db.insert_symbol_ref(c2, noise_id, "call", "low", None)
+            .unwrap();
+        db.insert_symbol_ref(c3, noise_id, "call", "low", None)
+            .unwrap();
 
         let result = handle_stats(&db, None).unwrap();
         assert!(
