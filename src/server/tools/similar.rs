@@ -26,16 +26,48 @@ pub fn handle_similar(
         .map(|(name, _)| name)
         .collect();
 
-    let mut candidates = if let Some(ret) = return_type {
+    // Gather candidates from both return type AND parameter types
+    let mut candidates = Vec::new();
+    if let Some(ret) = return_type {
         let core_type = extract_core_type(ret);
         if core_type.len() >= 3 {
-            db.search_symbols_by_signature(core_type)?
+            candidates = db.search_symbols_by_signature(core_type)?;
         } else {
-            db.search_symbols_by_signature(ret.trim())?
+            candidates = db.search_symbols_by_signature(ret.trim())?;
         }
-    } else {
-        Vec::new()
-    };
+    }
+
+    // Also search by shared parameter types to find matches with identical params
+    let target_params = extract_param_section(target_sig);
+    if let Some(tp) = target_params {
+        for word in tp.split(|c: char| !c.is_alphanumeric() && c != '_') {
+            if word.len() >= 4 && word.chars().next().is_some_and(char::is_uppercase) {
+                let mut param_matches = db.search_symbols_by_signature(word)?;
+                for m in param_matches.drain(..) {
+                    if !candidates
+                        .iter()
+                        .any(|c| c.name == m.name && c.file_path == m.file_path)
+                    {
+                        candidates.push(m);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    // Also include same-file siblings of the same kind as candidates
+    let mut same_file = db.get_symbols_by_path_prefix(&target.file_path)?;
+    for s in same_file.drain(..) {
+        if s.kind == target.kind
+            && (s.name != target.name || s.file_path != target.file_path)
+            && !candidates
+                .iter()
+                .any(|c| c.name == s.name && c.file_path == s.file_path)
+        {
+            candidates.push(s);
+        }
+    }
 
     candidates.retain(|s| {
         (s.name != target.name || s.file_path != target.file_path) && s.kind == target.kind
@@ -74,9 +106,12 @@ pub fn handle_similar(
 }
 
 fn extract_core_type(ret: &str) -> &str {
-    ret.trim_start_matches("Result<")
-        .trim_start_matches("Option<")
-        .split([',', '>'])
+    let inner = ret
+        .trim_start_matches("Result<")
+        .trim_start_matches("Option<");
+    // Extract just the type name without generics: Vec<u8> → Vec
+    inner
+        .split([',', '>', '<', ' '])
         .next()
         .unwrap_or(ret)
         .trim()
@@ -131,19 +166,30 @@ fn score_one(
 
     let cand_params = extract_param_section(cand_sig);
     if let (Some(tp), Some(cp)) = (target_params, cand_params) {
-        if tp.contains("&self") && cp.contains("&self") {
+        // Score self-receiver matching
+        if tp.contains("&mut self") && cp.contains("&mut self") {
+            score += 2;
+            reasons.push("`&mut self` receiver".to_string());
+        } else if tp.contains("&self") && cp.contains("&self") {
             score += 1;
-            reasons.push("`&self` parameter".to_string());
+            reasons.push("`&self` receiver".to_string());
         }
+
+        // Score ALL matching parameter types (not just the first)
+        let mut matched_types = Vec::new();
         for word in tp.split(|c: char| !c.is_alphanumeric() && c != '_') {
-            if word.len() >= 4
+            if word.len() >= 3
                 && word.chars().next().is_some_and(char::is_uppercase)
+                && word != "Self"
                 && cp.contains(word)
+                && !matched_types.contains(&word)
             {
                 score += 1;
-                reasons.push(format!("param type `{word}`"));
-                break;
+                matched_types.push(word);
             }
+        }
+        if !matched_types.is_empty() {
+            reasons.push(format!("param types: {}", matched_types.join(", ")));
         }
     }
 

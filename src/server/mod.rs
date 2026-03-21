@@ -341,6 +341,9 @@ struct GraphExportParams {
     path: Option<String>,
     /// Max traversal depth for symbol graphs (default: 2)
     depth: Option<i64>,
+    /// Direction for symbol graph: "down" (callees only), "up" (callers only),
+    /// "both" (default). Only applies to symbol graphs, not file graphs.
+    direction: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1012,6 +1015,7 @@ impl IlluServer {
             params.symbol_name.as_deref(),
             params.path.as_deref(),
             params.depth,
+            params.direction.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))

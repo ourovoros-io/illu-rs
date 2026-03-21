@@ -870,7 +870,7 @@ fn cross_file_reference_in_impact() {
         ),
         (
             "service.rs",
-            "pub fn create_user(name: &str, email: &str) -> User {\n    User {\n        name: name.into(),\n        email: email.into(),\n    }\n}\n",
+            "use crate::models::User;\npub fn create_user(name: &str, email: &str) -> User {\n    User {\n        name: name.into(),\n        email: email.into(),\n    }\n}\n",
         ),
     ]);
 

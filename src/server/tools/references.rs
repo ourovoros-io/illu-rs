@@ -30,9 +30,14 @@ pub fn handle_references(
     }
 
     let call_count = render_call_sites(db, &symbols, path, exclude_tests, &mut output)?;
-    let base_name = symbol_name.rsplit("::").next().unwrap_or(symbol_name);
-    let type_count = render_type_usage(db, base_name, path, &mut output)?;
-    let impl_count = render_trait_impls(db, base_name, &mut output)?;
+    // For type usage, use the type name (not the method name) for Type::method symbols
+    let type_search_name = if let Some((type_name, _method)) = symbol_name.split_once("::") {
+        type_name
+    } else {
+        symbol_name
+    };
+    let type_count = render_type_usage(db, type_search_name, path, &mut output)?;
+    let impl_count = render_trait_impls(db, type_search_name, &mut output)?;
 
     let _ = writeln!(
         output,
@@ -99,7 +104,10 @@ fn render_type_usage(
     let mut entries = Vec::new();
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     for s in &sig_results {
-        if s.name == base_name || s.kind == crate::indexer::parser::SymbolKind::Use {
+        if s.name == base_name
+            || s.kind == crate::indexer::parser::SymbolKind::Use
+            || !super::type_usage::contains_whole_word(&s.signature, base_name)
+        {
             continue;
         }
         if path.is_some_and(|p| !s.file_path.starts_with(p)) {

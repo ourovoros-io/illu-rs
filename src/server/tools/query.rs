@@ -270,8 +270,16 @@ fn format_body_search(
     limit: Option<i64>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut symbols = db.search_symbols_by_body(query)?;
-    if let Some(p) = path {
+    let is_wildcard = query == "*" || query.is_empty();
+    let mut symbols = if is_wildcard {
+        db.get_symbols_by_path_prefix(path.unwrap_or(""))?
+            .into_iter()
+            .filter(|s| s.body.is_some())
+            .collect()
+    } else {
+        db.search_symbols_by_body(query)?
+    };
+    if let (false, Some(p)) = (is_wildcard, path) {
         symbols.retain(|s| s.file_path.starts_with(p));
     }
     let mut symbols: Vec<_> = if let Some(k) = kind {

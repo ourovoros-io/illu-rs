@@ -1,4 +1,5 @@
 use crate::db::{Database, StoredSymbol};
+use crate::indexer::parser::SymbolKind;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
@@ -47,29 +48,28 @@ fn write_call_sites(
     db: &Database,
     symbols: &[StoredSymbol],
 ) -> Result<usize, Box<dyn std::error::Error>> {
-    let mut total_refs = 0usize;
-    let mut caller_output = String::new();
+    // Collect all callers across definitions, deduplicating by (name, file)
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for sym in symbols {
         let callers = db.get_callers(&sym.name, &sym.file_path, false)?;
-        if callers.is_empty() {
-            continue;
-        }
-        let mut by_file: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for c in &callers {
-            by_file.entry(&c.file_path).or_default().push(&c.name);
-        }
-        for (file, names) in &by_file {
-            let _ = writeln!(caller_output, "#### {file}\n");
-            for name in names {
-                let _ = writeln!(caller_output, "- {name}");
-                total_refs += 1;
+        for c in callers {
+            let key = (c.name.clone(), c.file_path.clone());
+            if seen.insert(key) {
+                by_file.entry(c.file_path).or_default().push(c.name);
             }
-            let _ = writeln!(caller_output);
         }
     }
+    let total_refs = seen.len();
     if total_refs > 0 {
         let _ = writeln!(output, "### Call Sites ({total_refs} references)\n");
-        output.push_str(&caller_output);
+        for (file, names) in &by_file {
+            let _ = writeln!(output, "#### {file}\n");
+            for name in names {
+                let _ = writeln!(output, "- {name}");
+            }
+            let _ = writeln!(output);
+        }
     }
     Ok(total_refs)
 }
@@ -80,7 +80,14 @@ fn write_signature_usage(
     base_name: &str,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let sig_matches = db.search_symbols_by_signature(base_name)?;
-    let filtered: Vec<_> = sig_matches.iter().filter(|s| s.name != base_name).collect();
+    let filtered: Vec<_> = sig_matches
+        .iter()
+        .filter(|s| {
+            s.name != base_name
+                && s.kind != SymbolKind::Use
+                && super::type_usage::contains_whole_word(&s.signature, base_name)
+        })
+        .collect();
     if !filtered.is_empty() {
         let _ = writeln!(
             output,
