@@ -19,6 +19,7 @@ pub fn handle_context(
     file: Option<&str>,
     sections: Option<&[&str]>,
     callers_path: Option<&str>,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = resolve_symbols(db, symbol_name, file)?;
     if symbols.is_empty() {
@@ -44,10 +45,10 @@ pub fn handle_context(
             render_trait_info(db, &mut output, sym)?;
         }
         if show("callers") {
-            render_callers(db, &mut output, sym, callers_path)?;
+            render_callers(db, &mut output, sym, callers_path, exclude_tests)?;
         }
         if show("callees") {
-            render_callees(db, &mut output, sym, callers_path)?;
+            render_callees(db, &mut output, sym, callers_path, exclude_tests)?;
         }
         if show("tested_by") {
             render_tested_by(db, &mut output, sym)?;
@@ -211,8 +212,9 @@ fn render_callers(
     output: &mut String,
     sym: &StoredSymbol,
     callers_path: Option<&str>,
+    exclude_tests: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut callers = db.get_callers(&sym.name, &sym.file_path)?;
+    let mut callers = db.get_callers(&sym.name, &sym.file_path, exclude_tests)?;
     if let Some(p) = callers_path {
         callers.retain(|c| c.file_path.starts_with(p));
     }
@@ -236,8 +238,9 @@ fn render_callees(
     output: &mut String,
     sym: &StoredSymbol,
     callers_path: Option<&str>,
+    exclude_tests: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut callees = db.get_callees(&sym.name, &sym.file_path)?;
+    let mut callees = db.get_callees(&sym.name, &sym.file_path, exclude_tests)?;
     if let Some(p) = callers_path {
         callees.retain(|c| c.file_path.starts_with(p));
     }
@@ -413,7 +416,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "parse_config", false, None, None, None).unwrap();
+        let result = handle_context(&db, "parse_config", false, None, None, None, false).unwrap();
         assert!(result.contains("parse_config"));
         assert!(result.contains("src/lib.rs"));
         assert!(result.contains("public"));
@@ -422,7 +425,7 @@ mod tests {
     #[test]
     fn test_context_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_context(&db, "nonexistent", false, None, None, None).unwrap();
+        let result = handle_context(&db, "nonexistent", false, None, None, None, false).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
@@ -454,7 +457,7 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "serialize and deserialize data")
             .unwrap();
 
-        let result = handle_context(&db, "serialize", false, None, None, None).unwrap();
+        let result = handle_context(&db, "serialize", false, None, None, None, false).unwrap();
         assert!(result.contains("serialize"));
         assert!(result.contains("Related Documentation"));
     }
@@ -483,7 +486,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "Config", false, None, None, None).unwrap();
+        let result = handle_context(&db, "Config", false, None, None, None, false).unwrap();
         assert!(result.contains("> Application configuration."));
         assert!(result.contains("> Holds all settings."));
         assert!(result.contains("### Fields/Variants"));
@@ -543,7 +546,7 @@ mod tests {
         db.insert_symbol_ref(caller_id, callee_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_context(&db, "caller_fn", false, None, None, None).unwrap();
+        let result = handle_context(&db, "caller_fn", false, None, None, None, false).unwrap();
         assert!(result.contains("### Callees"));
         assert!(result.contains("**Calls:**"));
         assert!(result.contains("callee_fn"));
@@ -578,7 +581,7 @@ mod tests {
         db.insert_trait_impl("MyStruct", "Debug", file_id, 22, 30)
             .unwrap();
 
-        let result = handle_context(&db, "MyStruct", false, None, None, None).unwrap();
+        let result = handle_context(&db, "MyStruct", false, None, None, None, false).unwrap();
         assert!(result.contains("### Trait Implementations"));
         assert!(result.contains("**Display**"));
         assert!(result.contains("**Debug**"));
@@ -632,7 +635,7 @@ mod tests {
         db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
+        let result = handle_context(&db, "target_fn", false, None, None, None, false).unwrap();
         assert!(
             result.contains("### Called By"),
             "should show callers section"
@@ -668,7 +671,7 @@ mod tests {
             .unwrap();
 
         // Qualified query should return only Database::new
-        let result = handle_context(&db, "Database::new", false, None, None, None).unwrap();
+        let result = handle_context(&db, "Database::new", false, None, None, None, false).unwrap();
         assert!(result.contains("Database"), "should find Database::new");
         assert!(!result.contains("Server"), "should NOT include Server::new");
     }
@@ -718,12 +721,12 @@ mod tests {
         .unwrap();
 
         // Without file filter: both appear
-        let result = handle_context(&db, "Config", false, None, None, None).unwrap();
+        let result = handle_context(&db, "Config", false, None, None, None, false).unwrap();
         assert!(result.contains("src/a.rs"));
         assert!(result.contains("src/b.rs"));
 
         // With file filter: only one
-        let result = handle_context(&db, "Config", false, Some("src/a.rs"), None, None).unwrap();
+        let result = handle_context(&db, "Config", false, Some("src/a.rs"), None, None, false).unwrap();
         assert!(result.contains("src/a.rs"));
         assert!(!result.contains("src/b.rs"));
     }
@@ -774,7 +777,7 @@ mod tests {
             .unwrap();
 
         let sections: &[&str] = &["source"];
-        let result = handle_context(&db, "my_fn", false, None, Some(sections), None).unwrap();
+        let result = handle_context(&db, "my_fn", false, None, Some(sections), None, false).unwrap();
         assert!(result.contains("### Source"), "source section present");
         assert!(!result.contains("### Callees"), "callees section absent");
     }
@@ -825,7 +828,7 @@ mod tests {
             .unwrap();
 
         let sections: &[&str] = &["callers"];
-        let result = handle_context(&db, "target", false, None, Some(sections), None).unwrap();
+        let result = handle_context(&db, "target", false, None, Some(sections), None, false).unwrap();
         assert!(result.contains("### Called By"), "callers section present");
         assert!(!result.contains("### Source"), "source section absent");
     }
@@ -875,7 +878,7 @@ mod tests {
         db.insert_symbol_ref(all_fn_id, dep_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_context(&db, "all_fn", false, None, None, None).unwrap();
+        let result = handle_context(&db, "all_fn", false, None, None, None, false).unwrap();
         assert!(result.contains("### Source"), "source present");
         assert!(result.contains("### Callees"), "callees present");
     }
@@ -958,12 +961,12 @@ mod tests {
             .unwrap();
 
         // Without callers_path: both callers shown
-        let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
+        let result = handle_context(&db, "target_fn", false, None, None, None, false).unwrap();
         assert!(result.contains("src_caller"), "src caller present");
         assert!(result.contains("test_caller"), "test caller present");
 
         // With callers_path="src/": only src caller
-        let result = handle_context(&db, "target_fn", false, None, None, Some("src/")).unwrap();
+        let result = handle_context(&db, "target_fn", false, None, None, Some("src/"), false).unwrap();
         assert!(result.contains("src_caller"), "src caller present");
         assert!(
             !result.contains("test_caller"),
@@ -1011,7 +1014,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "MyType::method_a", false, None, None, None).unwrap();
+        let result = handle_context(&db, "MyType::method_a", false, None, None, None, false).unwrap();
         assert!(
             result.contains("### Related (impl MyType)"),
             "should show related section with impl label"
@@ -1059,7 +1062,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = handle_context(&db, "func_one", false, None, None, None).unwrap();
+        let result = handle_context(&db, "func_one", false, None, None, None, false).unwrap();
         assert!(
             result.contains("### Related (same file)"),
             "should show related section with file label"
@@ -1108,7 +1111,7 @@ mod tests {
         .unwrap();
 
         let sections: &[&str] = &["source"];
-        let result = handle_context(&db, "alpha", false, None, Some(sections), None).unwrap();
+        let result = handle_context(&db, "alpha", false, None, Some(sections), None, false).unwrap();
         assert!(result.contains("### Source"), "source section present");
         assert!(
             !result.contains("### Related"),
@@ -1141,7 +1144,7 @@ mod tests {
 
         let sections: &[&str] = &["related"];
         let result =
-            handle_context(&db, "BigType::method_0", false, None, Some(sections), None).unwrap();
+            handle_context(&db, "BigType::method_0", false, None, Some(sections), None, false).unwrap();
         assert!(
             result.contains("4 more"),
             "should show overflow count when >10 related, got: {result}"
@@ -1191,7 +1194,7 @@ mod tests {
 
         // Only request source section to avoid "Related" siblings
         let sections: &[&str] = &["source", "callers", "callees"];
-        let result = handle_context(&db, "index_repo", false, None, Some(sections), None).unwrap();
+        let result = handle_context(&db, "index_repo", false, None, Some(sections), None, false).unwrap();
         assert!(result.contains("index_repo"), "should find exact match");
         assert!(
             !result.contains("open_or_index"),
@@ -1251,7 +1254,7 @@ mod tests {
         db.insert_symbol_ref(caller_id, target_id, "call", "high", Some(42))
             .unwrap();
 
-        let result = handle_context(&db, "target_fn", false, None, None, None).unwrap();
+        let result = handle_context(&db, "target_fn", false, None, None, None, false).unwrap();
         // Should show ref_line (42), not caller's definition line (10)
         assert!(
             result.contains("src/lib.rs:42"),

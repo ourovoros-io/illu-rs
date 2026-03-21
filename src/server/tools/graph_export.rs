@@ -43,7 +43,7 @@ fn export_symbol_graph(
         if depth >= max_depth {
             continue;
         }
-        let callees = db.get_callees_by_name(&name, Some("high"))?;
+        let callees = db.get_callees_by_name(&name, Some("high"), false)?;
         for (callee, _path) in &callees {
             let _ = writeln!(output, "  \"{name}\" -> \"{callee}\";");
             if seen.insert(callee.clone()) {

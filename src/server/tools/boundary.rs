@@ -24,7 +24,7 @@ pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std:
             continue;
         }
 
-        let callers = db.get_callers(&sym.name, &sym.file_path)?;
+        let callers = db.get_callers(&sym.name, &sym.file_path, false)?;
         let mut ext_files: Vec<&str> = callers
             .iter()
             .filter(|c| !c.file_path.starts_with(path))

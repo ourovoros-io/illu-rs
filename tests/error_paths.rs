@@ -117,7 +117,7 @@ fn query_on_empty_crate_returns_no_results() {
 #[test]
 fn context_on_nonexistent_symbol_returns_not_found() {
     let (_dir, db) = empty_crate();
-    let result = context::handle_context(&db, "Nonexistent", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Nonexistent", false, None, None, None, false).unwrap();
     let indicates_missing = result.contains("not found")
         || result.contains("No symbol")
         || result.contains("no symbol");
@@ -156,7 +156,7 @@ fn unicode_in_doc_comments_preserved() {
     let (_dir, db) = index_source(
         "/// H\u{00e9}llo w\u{00f6}rld \u{2014} docs with \u{00fc}\u{00f1}\u{00ed}c\u{00f6}d\u{00e9}\npub fn greet() {}\n",
     );
-    let result = context::handle_context(&db, "greet", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "greet", false, None, None, None, false).unwrap();
     assert!(
         result.contains("H\u{00e9}llo"),
         "unicode 'Héllo' should be preserved: {result}"

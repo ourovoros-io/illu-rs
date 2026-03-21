@@ -32,7 +32,7 @@ pub fn handle_references(
     let _ = writeln!(output, "\n### Call Sites\n");
     let mut call_count = 0usize;
     for sym in &symbols {
-        let callers = db.get_callers(&sym.name, &sym.file_path)?;
+        let callers = db.get_callers(&sym.name, &sym.file_path, false)?;
         for c in &callers {
             if path.is_none() || c.file_path.starts_with(path.unwrap_or("")) {
                 let line = c.ref_line.unwrap_or(c.line_start);

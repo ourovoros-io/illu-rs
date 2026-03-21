@@ -121,7 +121,7 @@ fn self_context_database_has_source() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = context::handle_context(&db, "Database", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Database", false, None, None, None, false).unwrap();
     assert!(
         result.contains("pub struct Database"),
         "context should show pub struct Database: {result}"
@@ -138,7 +138,7 @@ fn self_context_parse_rust_source_has_signature() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let result =
-        context::handle_context(&db, "parse_rust_source", false, None, None, None).unwrap();
+        context::handle_context(&db, "parse_rust_source", false, None, None, None, false).unwrap();
     assert!(
         result.contains("pub fn parse_rust_source"),
         "context should show pub fn parse_rust_source: {result}"
@@ -154,7 +154,7 @@ fn self_context_handle_query_shows_callees() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = context::handle_context(&db, "handle_query", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "handle_query", false, None, None, None, false).unwrap();
     assert!(
         result.contains("format_symbols") || result.contains("format_docs"),
         "handle_query should show callees like format_symbols or format_docs: {result}"
@@ -239,7 +239,7 @@ fn self_query_and_context_agree_on_file_path() {
     )
     .unwrap();
     let context_result =
-        context::handle_context(&db, "extract_refs", false, None, None, None).unwrap();
+        context::handle_context(&db, "extract_refs", false, None, None, None, false).unwrap();
     assert!(
         query_result.contains("parser.rs"),
         "query should reference parser.rs: {query_result}"
@@ -297,7 +297,7 @@ fn tool_queries_complete_under_100ms() {
     );
 
     let start = Instant::now();
-    let _ = context::handle_context(&db, "Database", false, None, None, None).unwrap();
+    let _ = context::handle_context(&db, "Database", false, None, None, None, false).unwrap();
     let context_time = start.elapsed();
     assert!(
         context_time.as_millis() < 100,
@@ -418,7 +418,7 @@ fn self_every_query_result_has_valid_context() {
         "truncate_at",
     ];
     for name in &known_symbols {
-        let result = context::handle_context(&db, name, false, None, None, None).unwrap();
+        let result = context::handle_context(&db, name, false, None, None, None, false).unwrap();
         assert!(
             result.contains("## "),
             "context for '{name}' missing header: {result}"

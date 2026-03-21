@@ -130,7 +130,7 @@ fn test_query_tool_all() {
 #[test]
 fn test_context_tool() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "Config", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Config", false, None, None, None, false).unwrap();
     assert!(result.contains("Config"), "context should find Config");
     assert!(
         result.contains("src/lib.rs"),
@@ -315,7 +315,7 @@ fn test_workspace_impact_crate_summary() {
 #[test]
 fn test_workspace_context_shows_file_path() {
     let (_dir, db) = setup_workspace_db();
-    let result = context::handle_context(&db, "SharedConfig", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "SharedConfig", false, None, None, None, false).unwrap();
     assert!(
         result.contains("shared/src/lib.rs"),
         "context should show crate-relative path"
@@ -337,7 +337,7 @@ fn test_workspace_skill_file() {
 #[test]
 fn test_context_tool_enriched() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "Config", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Config", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Application configuration"),
         "context should include doc comment"
@@ -355,7 +355,7 @@ fn test_context_tool_enriched() {
 #[test]
 fn test_context_trait_impls() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "Config", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "Config", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Display"),
         "context should show Display trait impl for Config"
@@ -365,7 +365,7 @@ fn test_context_trait_impls() {
 #[test]
 fn test_context_callees() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "parse_config", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "parse_config", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Config") || result.contains("new"),
         "parse_config should show callees"
@@ -414,7 +414,7 @@ fn test_overview_tool() {
 #[test]
 fn test_enum_details_in_context() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "LogLevel", false, None, None, None).unwrap();
+    let result = context::handle_context(&db, "LogLevel", false, None, None, None, false).unwrap();
     assert!(result.contains("Debug"), "should show enum variants");
     assert!(
         result.contains("Error(String)"),

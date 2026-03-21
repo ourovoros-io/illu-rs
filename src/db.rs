@@ -1419,8 +1419,13 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees(&self, symbol_name: &str, source_file: &str) -> SqlResult<Vec<CalleeInfo>> {
-        let mut stmt = self.conn.prepare_cached(
+    pub fn get_callees(
+        &self,
+        symbol_name: &str,
+        source_file: &str,
+        exclude_tests: bool,
+    ) -> SqlResult<Vec<CalleeInfo>> {
+        let query = if exclude_tests {
             "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type, \
              sr.ref_line \
              FROM symbol_refs sr \
@@ -1428,8 +1433,18 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              JOIN files sf ON sf.id = ss.file_id \
-             WHERE ss.name = ?1 AND sf.path = ?2",
-        )?;
+             WHERE ss.name = ?1 AND sf.path = ?2 AND ts.is_test = 0"
+        } else {
+            "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type, \
+             sr.ref_line \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             WHERE ss.name = ?1 AND sf.path = ?2"
+        };
+        let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, source_file])?;
         while let Some(row) = rows.next()? {
@@ -1447,8 +1462,13 @@ impl Database {
     }
 
     /// Find symbols that directly reference the given symbol (reverse of `get_callees`).
-    pub fn get_callers(&self, symbol_name: &str, target_file: &str) -> SqlResult<Vec<CalleeInfo>> {
-        let mut stmt = self.conn.prepare_cached(
+    pub fn get_callers(
+        &self,
+        symbol_name: &str,
+        target_file: &str,
+        exclude_tests: bool,
+    ) -> SqlResult<Vec<CalleeInfo>> {
+        let query = if exclude_tests {
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
              sr.ref_line \
              FROM symbol_refs sr \
@@ -1456,8 +1476,18 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              JOIN files tf ON tf.id = ts.file_id \
-             WHERE ts.name = ?1 AND tf.path = ?2",
-        )?;
+             WHERE ts.name = ?1 AND tf.path = ?2 AND ss.is_test = 0"
+        } else {
+            "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
+             sr.ref_line \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             JOIN files tf ON tf.id = ts.file_id \
+             WHERE ts.name = ?1 AND tf.path = ?2"
+        };
+        let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, target_file])?;
         while let Some(row) = rows.next()? {
@@ -1478,16 +1508,26 @@ impl Database {
         &self,
         symbol_name: &str,
         min_confidence: Option<&str>,
+        exclude_tests: bool,
     ) -> SqlResult<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare_cached(
+        let query = if exclude_tests {
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2)",
-        )?;
+             AND (?2 IS NULL OR sr.confidence = ?2) AND ts.is_test = 0"
+        } else {
+            "SELECT DISTINCT ts.name, f.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files f ON f.id = ts.file_id \
+             WHERE ss.name = ?1 AND sr.kind = 'call' \
+             AND (?2 IS NULL OR sr.confidence = ?2)"
+        };
+        let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, min_confidence])?;
         while let Some(row) = rows.next()? {
@@ -1500,16 +1540,26 @@ impl Database {
         &self,
         symbol_name: &str,
         min_confidence: Option<&str>,
+        exclude_tests: bool,
     ) -> SqlResult<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare_cached(
+        let query = if exclude_tests {
             "SELECT DISTINCT ss.name, sf.path \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              WHERE ts.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2)",
-        )?;
+             AND (?2 IS NULL OR sr.confidence = ?2) AND ss.is_test = 0"
+        } else {
+            "SELECT DISTINCT ss.name, sf.path \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN symbols ts ON ts.id = sr.target_symbol_id \
+             JOIN files sf ON sf.id = ss.file_id \
+             WHERE ts.name = ?1 AND sr.kind = 'call' \
+             AND (?2 IS NULL OR sr.confidence = ?2)"
+        };
+        let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![symbol_name, min_confidence])?;
         while let Some(row) = rows.next()? {
@@ -2403,7 +2453,7 @@ mod tests {
             .unwrap();
         db.insert_symbol_ref(caller_id, callee_b_id, "type_ref", "high", None)
             .unwrap();
-        let callees = db.get_callees("caller", "src/lib.rs").unwrap();
+        let callees = db.get_callees("caller", "src/lib.rs", false).unwrap();
         assert_eq!(callees.len(), 2);
         let names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"callee_a"));
@@ -2475,7 +2525,7 @@ mod tests {
         let impls = db.get_trait_impls_for_type("Foo").unwrap();
         assert!(impls.is_empty());
         // Verify: ref to deleted symbol gone
-        let callees = db.get_callees("main", "src/main.rs").unwrap();
+        let callees = db.get_callees("main", "src/main.rs", false).unwrap();
         assert!(callees.is_empty());
         // Verify: second file still intact
         assert!(db.get_file_hash("src/main.rs").unwrap().is_some());
@@ -2988,21 +3038,21 @@ mod tests {
         db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
             .unwrap();
 
-        let callers = db.get_callers_by_name("target_fn", None).unwrap();
+        let callers = db.get_callers_by_name("target_fn", None, false).unwrap();
         assert_eq!(callers.len(), 1);
         assert_eq!(callers[0].0, "caller_fn");
         assert_eq!(callers[0].1, "src/lib.rs");
 
         // No callers for caller_fn
-        let empty = db.get_callers_by_name("caller_fn", None).unwrap();
+        let empty = db.get_callers_by_name("caller_fn", None, false).unwrap();
         assert!(empty.is_empty());
 
         // Type refs should be excluded
         db.insert_symbol_ref(caller_id, target_id, "type_ref", "high", None)
             .unwrap();
-        let callers = db.get_callers_by_name("target_fn", None).unwrap();
+        let callers = db.get_callers_by_name("target_fn", None, false).unwrap();
         assert_eq!(callers.len(), 1, "type_ref should not appear in callers");
-        let callees = db.get_callees_by_name("caller_fn", None).unwrap();
+        let callees = db.get_callees_by_name("caller_fn", None, false).unwrap();
         assert_eq!(callees.len(), 1, "type_ref should not appear in callees");
     }
 

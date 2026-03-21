@@ -8,6 +8,7 @@ pub fn handle_neighborhood(
     depth: Option<i64>,
     direction: Option<&str>,
     format: Option<&str>,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let max_depth = usize::try_from(depth.unwrap_or(2).max(1)).unwrap_or(2);
     let dir = direction.unwrap_or("both");
@@ -26,20 +27,20 @@ pub fn handle_neighborhood(
 
     // Tree format only works for single-direction; fall back to list for "both"
     if fmt == "tree" && dir != "both" {
-        return render_tree_output(db, symbol_name, base, dir, max_depth);
+        return render_tree_output(db, symbol_name, base, dir, max_depth, exclude_tests);
     }
 
     let include_down = dir == "both" || dir == "down";
     let include_up = dir == "both" || dir == "up";
 
     let outward = if include_down {
-        bfs_collect(db, base, max_depth, Direction::Down)?
+        bfs_collect(db, base, max_depth, Direction::Down, exclude_tests)?
     } else {
         BTreeMap::new()
     };
 
     let inward = if include_up {
-        bfs_collect(db, base, max_depth, Direction::Up)?
+        bfs_collect(db, base, max_depth, Direction::Up, exclude_tests)?
     } else {
         BTreeMap::new()
     };
@@ -67,6 +68,7 @@ fn bfs_collect(
     base: &str,
     max_depth: usize,
     direction: Direction,
+    exclude_tests: bool,
 ) -> Result<BTreeMap<String, BfsEntry>, Box<dyn std::error::Error>> {
     let mut visited: BTreeMap<String, BfsEntry> = BTreeMap::new();
     let mut queue: VecDeque<(String, usize)> = VecDeque::new();
@@ -77,8 +79,8 @@ fn bfs_collect(
             continue;
         }
         let neighbors = match direction {
-            Direction::Down => db.get_callees_by_name(&current, None)?,
-            Direction::Up => db.get_callers_by_name(&current, None)?,
+            Direction::Down => db.get_callees_by_name(&current, None, exclude_tests)?,
+            Direction::Up => db.get_callers_by_name(&current, None, exclude_tests)?,
         };
         for (neighbor, file_path) in neighbors {
             if !visited.contains_key(&neighbor) {
@@ -145,16 +147,18 @@ struct TreeRenderer<'a> {
     max_depth: usize,
     visited: HashSet<String>,
     use_callers: bool,
+    exclude_tests: bool,
 }
 
 impl<'a> TreeRenderer<'a> {
-    fn new(db: &'a Database, max_depth: usize, use_callers: bool) -> Self {
+    fn new(db: &'a Database, max_depth: usize, use_callers: bool, exclude_tests: bool) -> Self {
         Self {
             db,
             output: String::new(),
             max_depth,
             visited: HashSet::new(),
             use_callers,
+            exclude_tests,
         }
     }
 
@@ -178,9 +182,9 @@ impl<'a> TreeRenderer<'a> {
         }
 
         let children = if self.use_callers {
-            self.db.get_callers_by_name(name, None)?
+            self.db.get_callers_by_name(name, None, self.exclude_tests)?
         } else {
-            self.db.get_callees_by_name(name, None)?
+            self.db.get_callees_by_name(name, None, self.exclude_tests)?
         };
 
         let child_prefix = if is_root {
@@ -207,13 +211,14 @@ fn render_tree_output(
     base: &str,
     dir: &str,
     max_depth: usize,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let label = if dir == "down" {
         "Call Tree"
     } else {
         "Caller Tree"
     };
-    let mut renderer = TreeRenderer::new(db, max_depth, dir == "up");
+    let mut renderer = TreeRenderer::new(db, max_depth, dir == "up", exclude_tests);
     let _ = writeln!(
         renderer.output,
         "## {label}: {symbol_name} (depth {max_depth})\n"
@@ -272,7 +277,7 @@ mod tests {
     #[test]
     fn test_neighborhood_bidirectional() {
         let db = setup_db_with_chain();
-        let result = handle_neighborhood(&db, "center", None, None, None).unwrap();
+        let result = handle_neighborhood(&db, "center", None, None, None, false).unwrap();
 
         assert!(result.contains("## Neighborhood: center"));
         assert!(result.contains("### Callers (upstream)"));
@@ -285,7 +290,7 @@ mod tests {
     #[test]
     fn test_neighborhood_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_neighborhood(&db, "nonexistent", None, None, None).unwrap();
+        let result = handle_neighborhood(&db, "nonexistent", None, None, None, false).unwrap();
         assert!(result.contains("not found"));
     }
 
@@ -295,7 +300,7 @@ mod tests {
         let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
         insert_symbol(&db, file_id, "lonely");
 
-        let result = handle_neighborhood(&db, "lonely", None, None, None).unwrap();
+        let result = handle_neighborhood(&db, "lonely", None, None, None, false).unwrap();
         assert!(result.contains("### Center: lonely"));
         assert!(result.contains("No connections found"));
     }
@@ -303,7 +308,7 @@ mod tests {
     #[test]
     fn test_neighborhood_direction_down() {
         let db = setup_db_with_chain();
-        let result = handle_neighborhood(&db, "center", None, Some("down"), None).unwrap();
+        let result = handle_neighborhood(&db, "center", None, Some("down"), None, false).unwrap();
 
         assert!(result.contains("### Callees (downstream)"));
         assert!(result.contains("**beta** (src/lib.rs)"));
@@ -314,7 +319,7 @@ mod tests {
     #[test]
     fn test_neighborhood_direction_up() {
         let db = setup_db_with_chain();
-        let result = handle_neighborhood(&db, "center", None, Some("up"), None).unwrap();
+        let result = handle_neighborhood(&db, "center", None, Some("up"), None, false).unwrap();
 
         assert!(result.contains("### Callers (upstream)"));
         assert!(result.contains("**alpha** (src/lib.rs)"));
@@ -326,7 +331,7 @@ mod tests {
     fn test_neighborhood_tree_format() {
         let db = setup_db_with_chain();
         let result =
-            handle_neighborhood(&db, "center", Some(2), Some("down"), Some("tree")).unwrap();
+            handle_neighborhood(&db, "center", Some(2), Some("down"), Some("tree"), false).unwrap();
 
         assert!(result.contains("## Call Tree: center"));
         assert!(result.contains("**center**"));
@@ -336,7 +341,7 @@ mod tests {
     #[test]
     fn test_neighborhood_tree_format_up() {
         let db = setup_db_with_chain();
-        let result = handle_neighborhood(&db, "center", Some(2), Some("up"), Some("tree")).unwrap();
+        let result = handle_neighborhood(&db, "center", Some(2), Some("up"), Some("tree"), false).unwrap();
 
         assert!(result.contains("## Caller Tree: center"));
         assert!(result.contains("**center**"));
@@ -361,11 +366,62 @@ mod tests {
         db.insert_symbol_ref(child_a_id, grandchild_id, "call", "high", None)
             .unwrap();
 
-        let result = handle_neighborhood(&db, "root", Some(2), Some("down"), Some("tree")).unwrap();
+        let result = handle_neighborhood(&db, "root", Some(2), Some("down"), Some("tree"), false).unwrap();
 
         assert!(result.contains("**root**"));
         assert!(result.contains("├── "));
         assert!(result.contains("└── "));
         assert!(result.contains("grandchild"));
+    }
+
+    fn insert_test_symbol(db: &Database, file_id: crate::db::FileId, name: &str) -> SymbolId {
+        db.conn
+            .execute(
+                "INSERT INTO symbols \
+                 (file_id, name, kind, visibility, \
+                  line_start, line_end, signature, is_test) \
+                 VALUES (?1, ?2, 'function', 'public', \
+                         1, 10, ?3, 1)",
+                params![file_id, name, format!("fn {name}()")],
+            )
+            .unwrap();
+        let id = SymbolId(db.conn.last_insert_rowid());
+        db.conn
+            .execute(
+                "INSERT INTO symbols_fts (rowid, name, signature, doc_comment) \
+                 VALUES (?1, ?2, ?3, '')",
+                params![id, name, format!("fn {name}()")],
+            )
+            .unwrap();
+        id
+    }
+
+    #[test]
+    fn test_neighborhood_exclude_tests() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+
+        let prod_caller = insert_symbol(&db, file_id, "prod_caller");
+        let target = insert_symbol(&db, file_id, "target");
+        let test_caller = insert_test_symbol(&db, file_id, "test_caller");
+
+        // prod_caller -> target, test_caller -> target
+        db.insert_symbol_ref(prod_caller, target, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(test_caller, target, "call", "high", None)
+            .unwrap();
+
+        // Without exclude_tests: both callers visible
+        let result = handle_neighborhood(&db, "target", None, Some("up"), None, false).unwrap();
+        assert!(result.contains("prod_caller"), "prod caller present");
+        assert!(result.contains("test_caller"), "test caller present");
+
+        // With exclude_tests: only production caller visible
+        let result = handle_neighborhood(&db, "target", None, Some("up"), None, true).unwrap();
+        assert!(result.contains("prod_caller"), "prod caller still present");
+        assert!(
+            !result.contains("test_caller"),
+            "test caller should be excluded"
+        );
     }
 }

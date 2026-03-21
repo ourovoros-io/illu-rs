@@ -14,6 +14,7 @@ pub fn handle_callpath(
     max_depth: Option<i64>,
     all_paths: bool,
     max_paths: Option<i64>,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let max_depth = usize::try_from(max_depth.unwrap_or(10).max(1)).unwrap_or(10);
 
@@ -31,9 +32,10 @@ pub fn handle_callpath(
 
     if all_paths {
         let max_paths = usize::try_from(max_paths.unwrap_or(5).max(1)).unwrap_or(5);
-        handle_all_paths(db, from, to, from_name, to_name, max_depth, max_paths)
+        let cfg = DfsConfig { max_depth, max_paths, exclude_tests };
+        handle_all_paths(db, from, to, from_name, to_name, &cfg)
     } else {
-        handle_shortest_path(db, from, to, from_name, to_name, max_depth)
+        handle_shortest_path(db, from, to, from_name, to_name, max_depth, exclude_tests)
     }
 }
 
@@ -44,6 +46,7 @@ fn handle_shortest_path(
     from_name: &str,
     to_name: &str,
     max_depth: usize,
+    exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut visited: HashSet<String> = HashSet::new();
     let mut parent: HashMap<String, String> = HashMap::new();
@@ -58,7 +61,7 @@ fn handle_shortest_path(
             continue;
         }
 
-        let callees = db.get_callees_by_name(&current, None)?;
+        let callees = db.get_callees_by_name(&current, None, exclude_tests)?;
         for (callee_name, _file) in callees {
             if visited.contains(&callee_name) {
                 continue;
@@ -115,16 +118,21 @@ fn handle_shortest_path(
     Ok(output)
 }
 
+struct DfsConfig {
+    max_depth: usize,
+    max_paths: usize,
+    exclude_tests: bool,
+}
+
 fn find_all_paths(
     db: &Database,
     target: &str,
-    max_depth: usize,
-    max_paths: usize,
+    cfg: &DfsConfig,
     current_path: &mut Vec<String>,
     visited: &mut HashSet<String>,
     results: &mut Vec<Vec<String>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if results.len() >= max_paths || current_path.len() > max_depth {
+    if results.len() >= cfg.max_paths || current_path.len() > cfg.max_depth {
         return Ok(());
     }
 
@@ -133,9 +141,9 @@ fn find_all_paths(
         .ok_or("current_path must not be empty")?
         .clone();
 
-    let callees = db.get_callees_by_name(&current, None)?;
+    let callees = db.get_callees_by_name(&current, None, cfg.exclude_tests)?;
     for (callee_name, _file) in callees {
-        if results.len() >= max_paths {
+        if results.len() >= cfg.max_paths {
             break;
         }
         if callee_name == target {
@@ -149,15 +157,7 @@ fn find_all_paths(
         }
         visited.insert(callee_name.clone());
         current_path.push(callee_name.clone());
-        find_all_paths(
-            db,
-            target,
-            max_depth,
-            max_paths,
-            current_path,
-            visited,
-            results,
-        )?;
+        find_all_paths(db, target, cfg, current_path, visited, results)?;
         current_path.pop();
         visited.remove(&callee_name);
     }
@@ -171,8 +171,7 @@ fn handle_all_paths(
     to: &str,
     from_name: &str,
     to_name: &str,
-    max_depth: usize,
-    max_paths: usize,
+    cfg: &DfsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut current_path = vec![from_name.to_string()];
     let mut visited: HashSet<String> = HashSet::new();
@@ -182,8 +181,7 @@ fn handle_all_paths(
     find_all_paths(
         db,
         to_name,
-        max_depth,
-        max_paths,
+        cfg,
         &mut current_path,
         &mut visited,
         &mut results,
@@ -196,7 +194,7 @@ fn handle_all_paths(
         let _ = writeln!(
             output,
             "No call paths found from `{from}` to `{to}` \
-             within depth {max_depth}."
+             within depth {}.", cfg.max_depth
         );
         return Ok(output);
     }
@@ -267,7 +265,7 @@ mod tests {
     #[test]
     fn test_callpath_shortest() {
         let db = setup_diamond();
-        let result = handle_callpath(&db, "a", "d", None, false, None).unwrap();
+        let result = handle_callpath(&db, "a", "d", None, false, None, false).unwrap();
         assert!(result.contains("## Call Path:"), "header missing: {result}");
         assert!(result.contains("hops"), "hop count missing: {result}");
     }
@@ -275,7 +273,7 @@ mod tests {
     #[test]
     fn test_callpath_all_paths() {
         let db = setup_diamond();
-        let result = handle_callpath(&db, "a", "d", None, true, None).unwrap();
+        let result = handle_callpath(&db, "a", "d", None, true, None, false).unwrap();
         assert!(
             result.contains("2 paths found"),
             "should find two paths: {result}"
@@ -290,7 +288,7 @@ mod tests {
         insert_symbol(&db, file_id, "x");
         insert_symbol(&db, file_id, "y");
         // No edges between x and y
-        let result = handle_callpath(&db, "x", "y", None, true, None).unwrap();
+        let result = handle_callpath(&db, "x", "y", None, true, None, false).unwrap();
         assert!(
             result.contains("No call paths found"),
             "should report no paths: {result}"
@@ -300,7 +298,7 @@ mod tests {
     #[test]
     fn test_callpath_all_paths_max_paths() {
         let db = setup_diamond();
-        let result = handle_callpath(&db, "a", "d", None, true, Some(1)).unwrap();
+        let result = handle_callpath(&db, "a", "d", None, true, Some(1), false).unwrap();
         assert!(
             result.contains("1 paths found"),
             "should respect max_paths=1: {result}"
@@ -310,7 +308,7 @@ mod tests {
     #[test]
     fn test_callpath_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_callpath(&db, "nonexistent", "other", None, false, None).unwrap();
+        let result = handle_callpath(&db, "nonexistent", "other", None, false, None, false).unwrap();
         assert!(result.contains("not found"), "missing symbol: {result}");
     }
 }

@@ -50,7 +50,7 @@ fn write_call_sites(
     let mut total_refs = 0usize;
     let mut caller_output = String::new();
     for sym in symbols {
-        let callers = db.get_callers(&sym.name, &sym.file_path)?;
+        let callers = db.get_callers(&sym.name, &sym.file_path, false)?;
         if callers.is_empty() {
             continue;
         }

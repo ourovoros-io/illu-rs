@@ -100,6 +100,8 @@ struct ContextParams {
     sections: Option<Vec<String>>,
     /// Filter callers and callees to this path prefix (e.g. "src/" to exclude test callers)
     callers_path: Option<String>,
+    /// Exclude test functions from callers/callees (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -152,6 +154,8 @@ struct CallpathParams {
     all_paths: Option<bool>,
     /// Max number of paths when `all_paths=true` (default: 5)
     max_paths: Option<i64>,
+    /// Exclude test functions from paths (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -200,6 +204,8 @@ struct NeighborhoodParams {
     direction: Option<String>,
     /// Format: "list" (default flat), "tree" (hierarchical indented)
     format: Option<String>,
+    /// Exclude test functions from results (default: false)
+    exclude_tests: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -386,6 +392,7 @@ impl IlluServer {
             params.file.as_deref(),
             sections.as_deref(),
             params.callers_path.as_deref(),
+            params.exclude_tests.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -511,6 +518,7 @@ impl IlluServer {
             params.max_depth,
             params.all_paths.unwrap_or(false),
             params.max_paths,
+            params.exclude_tests.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -613,6 +621,7 @@ impl IlluServer {
             params.depth,
             params.direction.as_deref(),
             params.format.as_deref(),
+            params.exclude_tests.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))

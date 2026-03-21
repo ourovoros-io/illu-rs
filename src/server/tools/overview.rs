@@ -125,7 +125,7 @@ pub fn handle_overview(
 
 fn render_same_file_callees(db: &Database, output: &mut String, sym: &crate::db::StoredSymbol) {
     if sym.kind == SymbolKind::Function
-        && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path)
+        && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path, false)
     {
         let same_file_calls: Vec<&str> = callees
             .iter()
