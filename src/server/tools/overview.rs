@@ -20,66 +20,96 @@ pub fn handle_overview(
 
     let max_symbols = limit.map(|l| usize::try_from(l.max(1)).unwrap_or(usize::MAX));
     let mut output = String::new();
-    let mut current_file = "";
     let mut file_count = 0u32;
     let mut kind_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     let mut shown = 0usize;
 
+    // Group symbols by file, preserving order, filtering out EnumVariant
+    let mut by_file: Vec<(&str, Vec<&crate::db::StoredSymbol>)> = Vec::new();
     for sym in &symbols {
-        // Variants are shown in their parent enum's details
         if sym.kind == SymbolKind::EnumVariant {
             continue;
         }
-        if let Some(max) = max_symbols
-            && shown >= max
-        {
-            break;
+        if by_file.last().is_none_or(|(f, _)| *f != sym.file_path.as_str()) {
+            by_file.push((&sym.file_path, Vec::new()));
         }
-        shown += 1;
-        if sym.file_path != current_file {
-            current_file = &sym.file_path;
-            file_count += 1;
-            let _ = writeln!(output, "### {current_file}\n");
+        if let Some(last) = by_file.last_mut() {
+            last.1.push(sym);
         }
+    }
 
-        *kind_counts.entry(sym.kind.to_string()).or_default() += 1;
+    // Apply limit with breadth-first distribution
+    let total_eligible: usize = by_file.iter().map(|(_, s)| s.len()).sum();
+    if let Some(max) = max_symbols
+        && max < total_eligible
+    {
+        let guaranteed = by_file.len().min(max);
+        let remaining = max.saturating_sub(guaranteed);
+        let pool = total_eligible.saturating_sub(guaranteed);
 
-        let _ = write!(
-            output,
-            "- **{}** ({}) `{}`",
-            sym.name, sym.kind, sym.signature
-        );
-
-        if let Some(doc) = &sym.doc_comment
-            && let Some(first_line) = doc.lines().next()
-        {
-            let _ = write!(output, " — *{first_line}*");
+        for (_file, syms) in &mut by_file {
+            let extra = if pool > 0 && remaining > 0 {
+                // Integer proportion: (overflow - 1) * remaining / pool
+                // using multiply-then-divide to avoid floats
+                let overflow = syms.len().saturating_sub(1);
+                overflow * remaining / pool
+            } else {
+                0
+            };
+            let budget = (1 + extra).min(syms.len());
+            syms.truncate(budget);
         }
+    }
 
-        let _ = writeln!(output);
+    // Render from grouped symbols
+    for (file_path, syms) in &by_file {
+        if syms.is_empty() {
+            continue;
+        }
+        file_count += 1;
+        let _ = writeln!(output, "### {file_path}\n");
 
-        if sym.kind == SymbolKind::Function
-            && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path)
-        {
-            let same_file_calls: Vec<&str> = callees
-                .iter()
-                .filter(|c| c.file_path == sym.file_path && c.ref_kind == "call")
-                .map(|c| c.name.as_str())
-                .collect();
-            if !same_file_calls.is_empty() {
-                let _ = writeln!(output, "    calls: {}", same_file_calls.join(", "));
+        for sym in syms {
+            shown += 1;
+            *kind_counts.entry(sym.kind.to_string()).or_default() += 1;
+
+            let _ = write!(
+                output,
+                "- **{}** ({}) `{}`",
+                sym.name, sym.kind, sym.signature
+            );
+
+            if let Some(doc) = &sym.doc_comment
+                && let Some(first_line) = doc.lines().next()
+            {
+                let _ = write!(output, " — *{first_line}*");
+            }
+
+            let _ = writeln!(output);
+
+            if sym.kind == SymbolKind::Function
+                && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path)
+            {
+                let same_file_calls: Vec<&str> = callees
+                    .iter()
+                    .filter(|c| c.file_path == sym.file_path && c.ref_kind == "call")
+                    .map(|c| c.name.as_str())
+                    .collect();
+                if !same_file_calls.is_empty() {
+                    let _ = writeln!(output, "    calls: {}", same_file_calls.join(", "));
+                }
             }
         }
     }
 
-    let truncated = max_symbols.is_some_and(|max| shown >= max && symbols.len() > shown);
+    let truncated = max_symbols.is_some_and(|max| max < total_eligible);
     let _ = writeln!(
         output,
         "\n---\n**Summary:** {} symbols across {} files{}",
         shown,
         file_count,
         if truncated {
-            format!(" (limited to {shown}, {} total)", symbols.len())
+            format!(" (limited to {shown}, {total_eligible} total)")
         } else {
             String::new()
         },
@@ -366,6 +396,61 @@ mod tests {
         assert!(
             !next_line.starts_with("    calls:"),
             "helper_a should not have a calls line"
+        );
+    }
+
+    #[test]
+    fn test_overview_limit_distributes_across_files() {
+        let db = Database::open_in_memory().unwrap();
+
+        let file_a = db.insert_file("src/big.rs", "h1").unwrap();
+        let file_b = db.insert_file("src/small.rs", "h2").unwrap();
+
+        let big_syms: Vec<_> = (0..20)
+            .map(|i| Symbol {
+                name: format!("big_fn_{i}"),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/big.rs".into(),
+                line_start: i * 10 + 1,
+                line_end: i * 10 + 5,
+                signature: format!("pub fn big_fn_{i}()"),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            })
+            .collect();
+        store_symbols(&db, file_a, &big_syms).unwrap();
+
+        let small_syms: Vec<_> = (0..5)
+            .map(|i| Symbol {
+                name: format!("small_fn_{i}"),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/small.rs".into(),
+                line_start: i * 10 + 1,
+                line_end: i * 10 + 5,
+                signature: format!("pub fn small_fn_{i}()"),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            })
+            .collect();
+        store_symbols(&db, file_b, &small_syms).unwrap();
+
+        let result = handle_overview(&db, "src/", false, Some(10)).unwrap();
+        assert!(result.contains("### src/big.rs"), "big file should appear");
+        assert!(
+            result.contains("### src/small.rs"),
+            "small file should also appear with breadth-first distribution"
+        );
+        assert!(
+            result.contains("small_fn_"),
+            "small file should have at least one symbol shown"
         );
     }
 }
