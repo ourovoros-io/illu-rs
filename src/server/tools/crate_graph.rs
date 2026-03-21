@@ -74,3 +74,84 @@ pub fn handle_crate_graph(db: &Database) -> Result<String, Box<dyn std::error::E
 
     Ok(output)
 }
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests")]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    #[test]
+    fn test_crate_graph_single_crate_returns_early() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_crate("my_crate", "crates/my_crate").unwrap();
+
+        let result = handle_crate_graph(&db).unwrap();
+        assert_eq!(result, "Single-crate project — no crate dependency graph.");
+    }
+
+    #[test]
+    fn test_crate_graph_empty_returns_early() {
+        let db = Database::open_in_memory().unwrap();
+        let result = handle_crate_graph(&db).unwrap();
+        assert_eq!(result, "Single-crate project — no crate dependency graph.");
+    }
+
+    #[test]
+    fn test_crate_graph_shows_deps() {
+        let db = Database::open_in_memory().unwrap();
+        let app_id = db.insert_crate("app", "crates/app").unwrap();
+        let core_id = db.insert_crate("core", "crates/core").unwrap();
+        let util_id = db.insert_crate("util", "crates/util").unwrap();
+        db.insert_crate_dep(app_id, core_id).unwrap();
+        db.insert_crate_dep(core_id, util_id).unwrap();
+
+        let result = handle_crate_graph(&db).unwrap();
+
+        assert!(result.contains("## Crate Dependency Graph"));
+        assert!(result.contains("**app**"));
+        assert!(result.contains("**core**"));
+        assert!(result.contains("**util**"));
+        assert!(result.contains("**app** → core"));
+        assert!(result.contains("**core** → util"));
+    }
+
+    #[test]
+    fn test_crate_graph_identifies_roots_and_leaves() {
+        let db = Database::open_in_memory().unwrap();
+        // app -> core -> util
+        // app is root (nothing depends on it)
+        // util is leaf (no deps)
+        // core is neither
+        let app_id = db.insert_crate("app", "crates/app").unwrap();
+        let core_id = db.insert_crate("core", "crates/core").unwrap();
+        let util_id = db.insert_crate("util", "crates/util").unwrap();
+        db.insert_crate_dep(app_id, core_id).unwrap();
+        db.insert_crate_dep(core_id, util_id).unwrap();
+
+        let result = handle_crate_graph(&db).unwrap();
+
+        assert!(
+            result.contains("Root crates"),
+            "should identify root crates"
+        );
+        assert!(result.contains("**app**"), "app should be a root");
+        assert!(
+            result.contains("Leaf crates"),
+            "should identify leaf crates"
+        );
+        assert!(result.contains("**util**"), "util should be a leaf");
+    }
+
+    #[test]
+    fn test_crate_graph_no_deps_between_crates() {
+        let db = Database::open_in_memory().unwrap();
+        db.insert_crate("alpha", "crates/alpha").unwrap();
+        db.insert_crate("beta", "crates/beta").unwrap();
+
+        let result = handle_crate_graph(&db).unwrap();
+
+        assert!(result.contains("## Crate Dependency Graph"));
+        assert!(result.contains("No inter-crate dependencies."));
+    }
+}
