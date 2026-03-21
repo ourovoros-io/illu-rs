@@ -122,7 +122,8 @@ mod tests {
             .unwrap();
 
         // Low-confidence ref
-        db.insert_symbol_ref(baz_id, bar_id, "call", "low", None).unwrap();
+        db.insert_symbol_ref(baz_id, bar_id, "call", "low", None)
+            .unwrap();
 
         let result = handle_health(&db).unwrap();
 

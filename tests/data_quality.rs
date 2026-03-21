@@ -103,7 +103,8 @@ where
 }
 ",
     );
-    let result = context::handle_context(&db, "collect_items", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "collect_items", false, None, None, None, false).unwrap();
     assert!(result.contains("collect_items"), "should find the function");
     assert!(
         result.contains("<T, I>") || result.contains("<T,I>"),
@@ -124,7 +125,8 @@ pub async fn fetch_data(url: &str) -> Result<String, Box<dyn std::error::Error>>
 }
 ",
     );
-    let result = context::handle_context(&db, "fetch_data", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "fetch_data", false, None, None, None, false).unwrap();
     assert!(
         result.contains("async"),
         "signature must include async keyword: {result}"
@@ -146,7 +148,8 @@ pub struct BorrowedSlice<'a, T: Clone> {
 }
 ",
     );
-    let result = context::handle_context(&db, "BorrowedSlice", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "BorrowedSlice", false, None, None, None, false).unwrap();
     assert!(
         result.contains("'a") && result.contains('T'),
         "signature must include lifetime and generic: {result}"
@@ -395,7 +398,8 @@ fn multiline_doc_comment_fully_captured() {
 pub fn documented() {}
 ",
     );
-    let result = context::handle_context(&db, "documented", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "documented", false, None, None, None, false).unwrap();
     assert!(
         result.contains("First line of docs"),
         "first line: {result}"
@@ -468,7 +472,8 @@ pub fn make_config() -> Config {
 }
 ",
     );
-    let result = context::handle_context(&db, "make_config", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "make_config", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Config"),
         "make_config should reference Config: {result}"
@@ -981,7 +986,8 @@ fn workspace_context_shows_correct_file_paths() {
         "file path should be crate-relative: {result}"
     );
 
-    let result = context::handle_context(&db, "create_user", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "create_user", false, None, None, None, false).unwrap();
     assert!(
         result.contains("api/src/lib.rs"),
         "api function path: {result}"
@@ -1100,7 +1106,8 @@ pub fn error() -> String {
 #[test]
 fn pub_crate_visibility_shown() {
     let (_dir, db) = index_source("pub(crate) fn internal_api() -> u32 { 42 }\n");
-    let result = context::handle_context(&db, "internal_api", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "internal_api", false, None, None, None, false).unwrap();
     assert!(
         result.contains("pub(crate)"),
         "pub(crate) visibility: {result}"
@@ -1167,7 +1174,8 @@ pub struct FixedArray<const N: usize> {
 }
 ",
     );
-    let result = context::handle_context(&db, "FixedArray", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "FixedArray", false, None, None, None, false).unwrap();
     assert!(
         result.contains("FixedArray"),
         "should find struct with const generic: {result}"
@@ -1395,8 +1403,10 @@ fn callees_scoped_to_source_file() {
         ("a.rs", "pub fn caller_a() { shared(); }\n"),
         ("b.rs", "pub fn caller_b() { shared(); }\n"),
     ]);
-    let result_a = context::handle_context(&db, "caller_a", false, None, None, None, false).unwrap();
-    let result_b = context::handle_context(&db, "caller_b", false, None, None, None, false).unwrap();
+    let result_a =
+        context::handle_context(&db, "caller_a", false, None, None, None, false).unwrap();
+    let result_b =
+        context::handle_context(&db, "caller_b", false, None, None, None, false).unwrap();
     // Each should show shared as callee, but caller_a's callees should not
     // include anything from caller_b and vice versa
     assert!(
@@ -1591,7 +1601,8 @@ fn realistic_codebase_indexes_all_symbols() {
 fn realistic_codebase_trait_impl_detected() {
     let (_dir, db) = index_realistic_codebase();
 
-    let result = context::handle_context(&db, "UserService", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "UserService", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Handler"),
         "UserService context should mention Handler trait impl: {result}"

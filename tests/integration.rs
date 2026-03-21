@@ -315,7 +315,8 @@ fn test_workspace_impact_crate_summary() {
 #[test]
 fn test_workspace_context_shows_file_path() {
     let (_dir, db) = setup_workspace_db();
-    let result = context::handle_context(&db, "SharedConfig", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "SharedConfig", false, None, None, None, false).unwrap();
     assert!(
         result.contains("shared/src/lib.rs"),
         "context should show crate-relative path"
@@ -365,7 +366,8 @@ fn test_context_trait_impls() {
 #[test]
 fn test_context_callees() {
     let (_dir, db) = setup_indexed_db();
-    let result = context::handle_context(&db, "parse_config", false, None, None, None, false).unwrap();
+    let result =
+        context::handle_context(&db, "parse_config", false, None, None, None, false).unwrap();
     assert!(
         result.contains("Config") || result.contains("new"),
         "parse_config should show callees"
