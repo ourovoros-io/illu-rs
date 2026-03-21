@@ -40,7 +40,14 @@ pub fn handle_neighborhood(
         BTreeMap::new()
     };
 
-    Ok(format_list_output(symbol_name, base, &syms, &inward, &outward, max_depth))
+    Ok(format_list_output(
+        symbol_name,
+        base,
+        &syms,
+        &inward,
+        &outward,
+        max_depth,
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -195,7 +202,11 @@ fn render_tree_output(
     dir: &str,
     max_depth: usize,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let label = if dir == "down" { "Call Tree" } else { "Caller Tree" };
+    let label = if dir == "down" {
+        "Call Tree"
+    } else {
+        "Caller Tree"
+    };
     let mut renderer = TreeRenderer::new(db, max_depth, dir == "up");
     let _ = writeln!(
         renderer.output,
@@ -286,8 +297,7 @@ mod tests {
     #[test]
     fn test_neighborhood_direction_down() {
         let db = setup_db_with_chain();
-        let result =
-            handle_neighborhood(&db, "center", None, Some("down"), None).unwrap();
+        let result = handle_neighborhood(&db, "center", None, Some("down"), None).unwrap();
 
         assert!(result.contains("### Callees (downstream)"));
         assert!(result.contains("**beta**"));
@@ -298,8 +308,7 @@ mod tests {
     #[test]
     fn test_neighborhood_direction_up() {
         let db = setup_db_with_chain();
-        let result =
-            handle_neighborhood(&db, "center", None, Some("up"), None).unwrap();
+        let result = handle_neighborhood(&db, "center", None, Some("up"), None).unwrap();
 
         assert!(result.contains("### Callers (upstream)"));
         assert!(result.contains("**alpha**"));
@@ -311,8 +320,7 @@ mod tests {
     fn test_neighborhood_tree_format() {
         let db = setup_db_with_chain();
         let result =
-            handle_neighborhood(&db, "center", Some(2), Some("down"), Some("tree"))
-                .unwrap();
+            handle_neighborhood(&db, "center", Some(2), Some("down"), Some("tree")).unwrap();
 
         assert!(result.contains("## Call Tree: center"));
         assert!(result.contains("**center**"));
@@ -322,9 +330,7 @@ mod tests {
     #[test]
     fn test_neighborhood_tree_format_up() {
         let db = setup_db_with_chain();
-        let result =
-            handle_neighborhood(&db, "center", Some(2), Some("up"), Some("tree"))
-                .unwrap();
+        let result = handle_neighborhood(&db, "center", Some(2), Some("up"), Some("tree")).unwrap();
 
         assert!(result.contains("## Caller Tree: center"));
         assert!(result.contains("**center**"));
@@ -349,9 +355,7 @@ mod tests {
         db.insert_symbol_ref(child_a_id, grandchild_id, "call", "high")
             .unwrap();
 
-        let result =
-            handle_neighborhood(&db, "root", Some(2), Some("down"), Some("tree"))
-                .unwrap();
+        let result = handle_neighborhood(&db, "root", Some(2), Some("down"), Some("tree")).unwrap();
 
         assert!(result.contains("**root**"));
         assert!(result.contains("├── "));

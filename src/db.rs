@@ -1846,7 +1846,8 @@ pub struct SymbolIdMap {
 
 impl SymbolIdMap {
     /// Resolve a symbol name to its DB ID using a three-tier lookup:
-    /// impl-qualified, then file-qualified, then name-only fallback.
+    /// impl-qualified, then file-qualified (with `mod.rs` fallback),
+    /// then name-only fallback.
     #[must_use]
     pub fn resolve(
         &self,
@@ -1861,15 +1862,32 @@ impl SymbolIdMap {
         {
             return Some((*id, "high"));
         }
-        if let Some(file) = target_file
-            && let Some(id) = self
-                .file_qualified
-                .get(&(name.to_string(), file.to_string()))
-        {
-            return Some((*id, "high"));
+        if let Some(file) = target_file {
+            let key = (name.to_string(), file.to_string());
+            if let Some(id) = self.file_qualified.get(&key) {
+                return Some((*id, "high"));
+            }
+            // Try mod.rs variant: src/foo/bar.rs → src/foo/bar/mod.rs
+            if let Some(alt) = mod_rs_alternative(file) {
+                let alt_key = (name.to_string(), alt);
+                if let Some(id) = self.file_qualified.get(&alt_key) {
+                    return Some((*id, "high"));
+                }
+            }
         }
         self.name_only.get(name).map(|id| (*id, "low"))
     }
+}
+
+/// Generate the alternative path for module resolution:
+/// `src/foo/bar.rs` → `src/foo/bar/mod.rs` and vice versa.
+fn mod_rs_alternative(path: &str) -> Option<String> {
+    path.strip_suffix("/mod.rs")
+        .map(|stem| format!("{stem}.rs"))
+        .or_else(|| {
+            path.strip_suffix(".rs")
+                .map(|stem| format!("{stem}/mod.rs"))
+        })
 }
 
 #[derive(Debug, PartialEq, Eq)]

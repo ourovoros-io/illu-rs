@@ -76,57 +76,13 @@ pub fn refresh_index(
         .map(|f| (f.path, (f.content_hash, f.crate_id)))
         .collect();
 
-    let mut dirty_files: Vec<DirtyFile> = Vec::new();
     crate::status::set("refreshing ▸ scanning files");
 
-    // Walk all .rs files in the repo, skipping target/ and hidden dirs
-    let walker = walkdir::WalkDir::new(&config.repo_path)
-        .into_iter()
-        .filter_entry(|e| {
-            if !e.file_type().is_dir() || e.depth() == 0 {
-                return true;
-            }
-            let name = e.file_name().to_string_lossy();
-            name != "target" && !name.starts_with('.')
-        });
-    for result in walker {
-        let entry = match result {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::warn!("Skipping directory entry: {e}");
-                continue;
-            }
-        };
-        let path = entry.path();
-        if path.extension().is_none_or(|ext| ext != "rs") {
-            continue;
-        }
-        let relative = path
-            .strip_prefix(&config.repo_path)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .to_string();
+    // Try git-based detection first, fall back to full walk
+    let candidate_files = git_changed_rs_files(&config.repo_path, &existing);
+    let dirty_files = collect_dirty_files(&config.repo_path, &candidate_files, &existing);
 
-        let source = std::fs::read_to_string(path)?;
-        let hash = content_hash(&source);
-
-        let needs_update = match existing.get(&relative) {
-            Some((old_hash, _)) => *old_hash != hash,
-            None => true,
-        };
-
-        if needs_update {
-            let crate_id = existing.get(&relative).and_then(|(_, cid)| *cid);
-            dirty_files.push(DirtyFile {
-                relative_path: relative,
-                source,
-                hash,
-                crate_id,
-            });
-        }
-    }
-
-    // Check for deleted files
+    // Check for deleted files (only in full-walk mode, git handles this via status)
     for path in existing.keys() {
         let full = config.repo_path.join(path);
         if !full.exists() {
@@ -494,6 +450,127 @@ fn content_hash(content: &str) -> String {
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     format!("{hash:x}")
+}
+
+/// Use `git status` to find changed/new/deleted `.rs` files.
+/// Returns a list of relative paths to check. If git fails, returns all
+/// indexed files plus walks for new ones (full scan fallback).
+fn git_changed_rs_files(
+    repo_path: &std::path::Path,
+    existing: &std::collections::HashMap<String, (String, Option<crate::db::CrateId>)>,
+) -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .args([
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=normal",
+            "--no-renames",
+        ])
+        .current_dir(repo_path)
+        .output();
+
+    let Ok(output) = output else {
+        tracing::debug!("git status failed, falling back to full scan");
+        return full_scan_rs_files(repo_path);
+    };
+    if !output.status.success() {
+        tracing::debug!("git status returned non-zero, falling back to full scan");
+        return full_scan_rs_files(repo_path);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut changed: Vec<String> = Vec::new();
+
+    for line in stdout.lines() {
+        if line.len() < 4 {
+            continue;
+        }
+        let path = line[3..].trim();
+        if std::path::Path::new(path)
+            .extension()
+            .is_some_and(|ext| ext == "rs")
+        {
+            changed.push(path.to_string());
+        }
+    }
+
+    // Also check for new .rs files not yet tracked by git but present on disk
+    // and not yet in our index (e.g., files in .gitignore that we still want)
+    // For now, the git status output covers new untracked files ("?? path").
+
+    // Also include files that are in our index but might have been modified
+    // outside of git tracking (rare but possible)
+    for path in existing.keys() {
+        if !changed.contains(path) {
+            let full = repo_path.join(path);
+            if !full.exists() {
+                changed.push(path.clone());
+            }
+        }
+    }
+
+    tracing::debug!(count = changed.len(), "git detected changed .rs files");
+    changed
+}
+
+/// Fallback: walk the repo for all `.rs` files.
+fn full_scan_rs_files(repo_path: &std::path::Path) -> Vec<String> {
+    let mut files = Vec::new();
+    let walker = walkdir::WalkDir::new(repo_path)
+        .into_iter()
+        .filter_entry(|e| {
+            if !e.file_type().is_dir() || e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            name != "target" && !name.starts_with('.')
+        });
+    for result in walker {
+        let Ok(entry) = result else { continue };
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "rs") {
+            let relative = path
+                .strip_prefix(repo_path)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            files.push(relative);
+        }
+    }
+    files
+}
+
+/// Read candidate files and determine which ones actually changed
+/// by comparing content hashes.
+fn collect_dirty_files(
+    repo_path: &std::path::Path,
+    candidates: &[String],
+    existing: &std::collections::HashMap<String, (String, Option<crate::db::CrateId>)>,
+) -> Vec<DirtyFile> {
+    let mut dirty = Vec::new();
+    for relative in candidates {
+        let full_path = repo_path.join(relative);
+        let Ok(source) = std::fs::read_to_string(&full_path) else {
+            continue; // File deleted or unreadable
+        };
+        let hash = content_hash(&source);
+
+        let needs_update = match existing.get(relative.as_str()) {
+            Some((old_hash, _)) => *old_hash != hash,
+            None => true,
+        };
+
+        if needs_update {
+            let crate_id = existing.get(relative.as_str()).and_then(|(_, cid)| *cid);
+            dirty.push(DirtyFile {
+                relative_path: relative.clone(),
+                source,
+                hash,
+                crate_id,
+            });
+        }
+    }
+    dirty
 }
 
 fn get_current_commit_hash(

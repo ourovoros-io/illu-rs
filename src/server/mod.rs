@@ -701,8 +701,8 @@ impl IlluServer {
         self.refresh()?;
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
-        let result = tools::blame::handle_blame(&db, repo_path, &params.symbol_name)
-            .map_err(to_mcp_err)?;
+        let result =
+            tools::blame::handle_blame(&db, repo_path, &params.symbol_name).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -718,8 +718,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new(&format!("boundary \u{25b8} {}", params.path));
         self.refresh()?;
         let db = self.lock_db()?;
-        let result =
-            tools::boundary::handle_boundary(&db, &params.path).map_err(to_mcp_err)?;
+        let result = tools::boundary::handle_boundary(&db, &params.path).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

@@ -294,6 +294,12 @@ fn extract_symbols(
                             symbols,
                         );
                     }
+                    // Recurse into inline module bodies
+                    if child.kind() == "mod_item"
+                        && let Some(body) = find_child_by_kind(&child, "declaration_list")
+                    {
+                        extract_symbols(&body, source, file_path, None, symbols, trait_impls);
+                    }
                     symbols.push(sym);
                 }
             }
@@ -391,20 +397,44 @@ fn extract_function_signature(node: &Node, source: &str, file_path: &str) -> Opt
 }
 
 fn extract_struct_details(node: &Node, source: &str) -> Option<String> {
-    let list = find_child_by_kind(node, "field_declaration_list")?;
-    let mut fields = Vec::new();
-    let mut cursor = list.walk();
-    for child in list.children(&mut cursor) {
-        if child.kind() == "field_declaration" {
-            let text = node_text(&child, source).trim_end().to_string();
-            let text = text.strip_suffix(',').unwrap_or(&text).to_string();
-            fields.push(text);
+    // Named fields: struct Foo { pub x: i32, y: String }
+    if let Some(list) = find_child_by_kind(node, "field_declaration_list") {
+        let mut fields = Vec::new();
+        let mut cursor = list.walk();
+        for child in list.children(&mut cursor) {
+            if child.kind() == "field_declaration" {
+                let text = node_text(&child, source).trim_end().to_string();
+                let text = text.strip_suffix(',').unwrap_or(&text).to_string();
+                fields.push(text);
+            }
+        }
+        if !fields.is_empty() {
+            return Some(fields.join("\n"));
         }
     }
-    if fields.is_empty() {
-        return None;
+    // Tuple fields: struct Pair(pub u32, pub String)
+    if let Some(list) = find_child_by_kind(node, "ordered_field_declaration_list") {
+        let text = node_text(&list, source);
+        // Strip outer parens: "(pub u32, pub String)" → "pub u32, pub String"
+        let inner = text
+            .strip_prefix('(')
+            .and_then(|s| s.strip_suffix(')'))
+            .unwrap_or(&text);
+        let fields: Vec<&str> = inner
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !fields.is_empty() {
+            let details: Vec<String> = fields
+                .iter()
+                .enumerate()
+                .map(|(i, f)| format!("{i}: {f}"))
+                .collect();
+            return Some(details.join("\n"));
+        }
     }
-    Some(fields.join("\n"))
+    None
 }
 
 fn extract_enum_details(node: &Node, source: &str) -> Option<String> {
@@ -465,19 +495,27 @@ fn extract_enum_variants(
 
 fn extract_trait_details(node: &Node, source: &str) -> Option<String> {
     let list = find_child_by_kind(node, "declaration_list")?;
-    let mut methods = Vec::new();
+    let mut items = Vec::new();
     let mut cursor = list.walk();
     for child in list.children(&mut cursor) {
-        if child.kind() == "function_signature_item" || child.kind() == "function_item" {
-            let sig = get_signature(&child, source);
-            let sig = sig.strip_suffix(';').unwrap_or(&sig).to_string();
-            methods.push(sig);
+        match child.kind() {
+            "function_signature_item" | "function_item" | "const_item" => {
+                let sig = get_signature(&child, source);
+                let sig = sig.strip_suffix(';').unwrap_or(&sig).to_string();
+                items.push(sig);
+            }
+            "associated_type" => {
+                let text = node_text(&child, source).trim_end().to_string();
+                let text = text.strip_suffix(';').unwrap_or(&text).to_string();
+                items.push(text);
+            }
+            _ => {}
         }
     }
-    if methods.is_empty() {
+    if items.is_empty() {
         return None;
     }
-    Some(methods.join("\n"))
+    Some(items.join("\n"))
 }
 
 fn extract_named_item(
@@ -735,43 +773,54 @@ impl std::fmt::Display for RefKind {
     }
 }
 
-/// Convert a qualified path to a relative file path, resolving both
+/// Convert a qualified path to candidate relative file paths, resolving both
 /// `crate::` prefixes and workspace crate prefixes via `crate_map`.
-fn qualified_path_to_file_with_crates<S: std::hash::BuildHasher>(
+/// Returns both `module.rs` and `module/mod.rs` variants for each path.
+fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
     qualified_path: &str,
     crate_map: &std::collections::HashMap<String, String, S>,
-) -> Option<String> {
+) -> Vec<String> {
     // crate:: prefix (current crate)
     if let Some(path) = qualified_path.strip_prefix("crate::") {
         let segments: Vec<&str> = path.split("::").collect();
         if segments.len() < 2 {
-            return None;
+            return Vec::new();
         }
         let module_segments = &segments[..segments.len() - 1];
-        return Some(format!("src/{}.rs", module_segments.join("/")));
+        let joined = module_segments.join("/");
+        return vec![format!("src/{joined}.rs"), format!("src/{joined}/mod.rs")];
     }
 
     // Workspace crate prefixes
     let segments: Vec<&str> = qualified_path.split("::").collect();
     if segments.len() < 2 {
-        return None;
+        return Vec::new();
     }
     let crate_name = segments[0];
-    let crate_path = crate_map.get(crate_name)?;
+    let Some(crate_path) = crate_map.get(crate_name) else {
+        return Vec::new();
+    };
 
     if segments.len() == 2 {
-        // shared::Config -> shared/src/lib.rs
-        return Some(format!("{crate_path}/src/lib.rs"));
+        return vec![format!("{crate_path}/src/lib.rs")];
     }
-    // shared::config::Config -> shared/src/config.rs
     let module_segments = &segments[1..segments.len() - 1];
-    Some(format!("{crate_path}/src/{}.rs", module_segments.join("/")))
+    let joined = module_segments.join("/");
+    vec![
+        format!("{crate_path}/src/{joined}.rs"),
+        format!("{crate_path}/src/{joined}/mod.rs"),
+    ]
 }
 
-/// Convert a `crate::` qualified path to a relative file path.
+/// Convert a `crate::` qualified path to a relative file path (first candidate).
 #[cfg(test)]
 fn qualified_path_to_file(qualified_path: &str) -> Option<String> {
-    qualified_path_to_file_with_crates(qualified_path, &std::collections::HashMap::new())
+    qualified_path_to_files_with_crates(
+        qualified_path,
+        &std::collections::HashMap::<String, String>::new(),
+    )
+    .into_iter()
+    .next()
 }
 
 /// Build an import map from `use` declarations in the given AST root.
@@ -1004,6 +1053,202 @@ fn collect_locals(node: &Node, source: &str) -> std::collections::HashSet<String
     locals
 }
 
+/// Extract the base type name from a type AST node, stripping references
+/// and extracting the outermost type from generics.
+/// `&Database` → `Database`, `&mut Config` → `Config`,
+/// `Vec<String>` → `Vec`, `Option<&str>` → `Option`.
+fn extract_type_from_node(node: &Node, source: &str) -> Option<String> {
+    match node.kind() {
+        "type_identifier" => Some(node_text(node, source)),
+        "scoped_type_identifier" => {
+            // e.g. std::io::Result → last segment
+            let text = node_text(node, source);
+            text.rsplit("::").next().map(String::from)
+        }
+        "reference_type" => {
+            // &T or &mut T → recurse to find the inner type
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(t) = extract_type_from_node(&child, source) {
+                    return Some(t);
+                }
+            }
+            None
+        }
+        "generic_type" => {
+            // Vec<T> → "Vec" (the outer type)
+            find_child_by_kind(node, "type_identifier").map(|n| node_text(&n, source))
+        }
+        _ => None,
+    }
+}
+
+/// Infer the type of a let-binding's value expression.
+/// Handles: `Type::method(...)`, `Type { ... }`, and `Type(...)`.
+fn infer_type_from_value(node: &Node, source: &str) -> Option<String> {
+    // Unwrap try expressions: `expr?` → look at inner expr
+    let inner = if node.kind() == "try_expression" {
+        node.child(0)?
+    } else {
+        *node
+    };
+
+    match inner.kind() {
+        "call_expression" => {
+            // Type::new(...) → look at the function part
+            let func = inner.child(0)?;
+            infer_type_from_call_func(&func, source)
+        }
+        "struct_expression" => {
+            // Config { field: value } → get the type name
+            let mut cursor = inner.walk();
+            for child in inner.children(&mut cursor) {
+                if let Some(t) = extract_type_from_node(&child, source) {
+                    return Some(t);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Extract the type from the function part of a call expression.
+/// `Database::open` → `Database`, `Self::new` → `None` (handled by `impl_type`).
+fn infer_type_from_call_func(node: &Node, source: &str) -> Option<String> {
+    if node.kind() == "scoped_identifier" {
+        // Type::method — first child is the type
+        let first = node.child(0)?;
+        match first.kind() {
+            "type_identifier" => Some(node_text(&first, source)),
+            "identifier" => {
+                // Could be a module path like `module::func`,
+                // only treat as type if it looks like UpperCamelCase
+                let name = node_text(&first, source);
+                if name.chars().next().is_some_and(char::is_uppercase) {
+                    Some(name)
+                } else {
+                    None
+                }
+            }
+            "scoped_identifier" => {
+                // Nested: std::fs::File::open → get "File"
+                // The last type_identifier before :: is the type
+                let text = node_text(&first, source);
+                for segment in text.rsplit("::") {
+                    if segment.chars().next().is_some_and(char::is_uppercase) {
+                        return Some(segment.to_string());
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Build a mapping of local variable names to their inferred type names.
+/// Sources: function parameters (type annotations), let bindings
+/// (type annotations and constructor inference), and `self` → `impl_type`.
+fn collect_local_types(
+    fn_node: &Node,
+    source: &str,
+    impl_type: Option<&str>,
+) -> std::collections::HashMap<String, String> {
+    let mut types = std::collections::HashMap::new();
+
+    // `self` always maps to impl_type
+    if let Some(it) = impl_type {
+        types.insert("self".to_string(), it.to_string());
+    }
+
+    // Extract types from function parameters
+    if let Some(params) = find_child_by_kind(fn_node, "parameters") {
+        let mut cursor = params.walk();
+        for param in params.children(&mut cursor) {
+            if param.kind() == "parameter" {
+                let name = find_child_by_kind(&param, "identifier").map(|n| node_text(&n, source));
+                let Some(name) = name else { continue };
+
+                // Look for type annotation on the parameter
+                let mut inner = param.walk();
+                for child in param.children(&mut inner) {
+                    if let Some(t) = extract_type_from_node(&child, source) {
+                        types.insert(name, t);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Walk the function body for let bindings
+    let mut stack = vec![*fn_node];
+    while let Some(n) = stack.pop() {
+        let mut cursor = n.walk();
+        for child in n.children(&mut cursor) {
+            if child.kind() == "let_declaration" {
+                let name = find_child_by_kind(&child, "identifier").map(|n| node_text(&n, source));
+                let Some(name) = name else { continue };
+
+                // Strategy 1: explicit type annotation
+                let mut found = false;
+                let mut inner = child.walk();
+                for c in child.children(&mut inner) {
+                    if let Some(t) = extract_type_from_node(&c, source) {
+                        types.insert(name.clone(), t);
+                        found = true;
+                        break;
+                    }
+                }
+
+                // Strategy 2: infer from value expression
+                if !found {
+                    let mut inner = child.walk();
+                    for c in child.children(&mut inner) {
+                        if c.kind() == "call_expression"
+                            || c.kind() == "struct_expression"
+                            || c.kind() == "try_expression"
+                        {
+                            if let Some(t) = infer_type_from_value(&c, source) {
+                                types.insert(name.clone(), t);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            // Recurse into blocks but not into nested functions
+            if child.kind() != "function_item" && child.kind() != "closure_expression" {
+                stack.push(child);
+            }
+        }
+    }
+
+    types
+}
+
+fn resolve_target_file<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
+    name: &str,
+    ctx: &RefContext<'_, S, S2>,
+) -> Option<String> {
+    if let Some(info) = ctx.import_map.get(name) {
+        let first = qualified_path_to_files_with_crates(&info.qualified_path, ctx.crate_map)
+            .into_iter()
+            .next();
+        if first.is_some() {
+            return first;
+        }
+    }
+    if ctx.known_symbols.contains(name) {
+        Some(ctx.file_path.to_string())
+    } else {
+        None
+    }
+}
+
 fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     fn_node: &Node,
     fn_name: &str,
@@ -1012,6 +1257,7 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     refs: &mut Vec<SymbolRef>,
 ) {
     let locals = collect_locals(fn_node, ctx.source);
+    let local_types = collect_local_types(fn_node, ctx.source, impl_type);
     let mut seen = std::collections::HashSet::new();
     let mut stack = vec![*fn_node];
 
@@ -1032,61 +1278,44 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                         && ctx.known_symbols.contains(&name)
                         && seen.insert(name.clone())
                     {
-                        let target_file = ctx.import_map.get(&name)
-                            .and_then(|info| {
-                                qualified_path_to_file_with_crates(&info.qualified_path, ctx.crate_map)
-                            })
-                            .or_else(|| {
-                                if ctx.known_symbols.contains(&name) {
-                                    Some(ctx.file_path.to_string())
-                                } else {
-                                    None
-                                }
-                            });
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
                             source_file: ctx.file_path.to_string(),
-                            target_name: name,
+                            target_name: name.clone(),
                             kind: ref_kind,
-                            target_file,
+                            target_file: resolve_target_file(&name, ctx),
                             target_context: None,
                         });
                     }
                 }
                 "field_identifier" => {
                     let name = node_text(&child, ctx.source);
-                    let is_self_call = child.parent().is_some_and(|p| {
-                        p.kind() == "field_expression"
-                            && p.child(0).is_some_and(|c| c.kind() == "self")
+                    let target_context = child.parent().and_then(|p| {
+                        if p.kind() != "field_expression" {
+                            return None;
+                        }
+                        let receiver = p.child(0)?;
+                        match receiver.kind() {
+                            "self" => impl_type.map(String::from),
+                            "identifier" => {
+                                let var_name = node_text(&receiver, ctx.source);
+                                local_types.get(&var_name).cloned()
+                            }
+                            _ => None,
+                        }
                     });
-                    let target_context = if is_self_call {
-                        impl_type.map(String::from)
-                    } else {
-                        None
-                    };
                     if name != fn_name
                         && !is_noisy_symbol(&name)
                         && !locals.contains(&name)
                         && ctx.known_symbols.contains(&name)
                         && seen.insert(name.clone())
                     {
-                        let target_file = ctx.import_map.get(&name)
-                            .and_then(|info| {
-                                qualified_path_to_file_with_crates(&info.qualified_path, ctx.crate_map)
-                            })
-                            .or_else(|| {
-                                if ctx.known_symbols.contains(&name) {
-                                    Some(ctx.file_path.to_string())
-                                } else {
-                                    None
-                                }
-                            });
                         refs.push(SymbolRef {
                             source_name: fn_name.to_string(),
                             source_file: ctx.file_path.to_string(),
-                            target_name: name,
+                            target_name: name.clone(),
                             kind: RefKind::Call,
-                            target_file,
+                            target_file: resolve_target_file(&name, ctx),
                             target_context,
                         });
                     }
@@ -1799,7 +2028,7 @@ impl<T: Clone> From<Vec<T>> for Wrapper<T> {
     }
 
     #[test]
-    fn test_tuple_struct_no_field_details() {
+    fn test_tuple_struct_field_details() {
         let source = r"
 pub struct Pair(pub u32, pub String);
 ";
@@ -1808,17 +2037,21 @@ pub struct Pair(pub u32, pub String);
             .iter()
             .find(|s| s.name == "Pair" && s.kind == SymbolKind::Struct)
             .unwrap();
-        // Tuple structs use ordered_field_declaration_list, not field_declaration_list
+        let details = sym.details.as_deref().unwrap();
         assert!(
-            sym.details.is_none(),
-            "tuple struct should have no details (uses ordered_field_declaration_list)"
+            details.contains("pub u32"),
+            "tuple struct should list field types: {details}"
+        );
+        assert!(
+            details.contains("pub String"),
+            "tuple struct should list field types: {details}"
         );
     }
 
     // ── 3. Trait Extraction ──
 
     #[test]
-    fn test_trait_associated_type_not_in_details() {
+    fn test_trait_associated_type_in_details() {
         let source = r"
 pub trait Iterator {
     type Item;
@@ -1835,10 +2068,9 @@ pub trait Iterator {
             details.contains("fn next"),
             "details should have fn next: {details}"
         );
-        // extract_trait_details only collects function_signature_item / function_item
         assert!(
-            !details.contains("type Item"),
-            "details should NOT contain associated type: {details}"
+            details.contains("type Item"),
+            "details should contain associated type: {details}"
         );
     }
 
@@ -2142,10 +2374,11 @@ pub enum Never {}
     }
 
     #[test]
-    fn test_inline_mod_does_not_extract_inner_symbols() {
+    fn test_inline_mod_extracts_inner_symbols() {
         let source = r"
 pub mod outer {
     pub fn inner_fn() {}
+    pub struct InnerStruct;
 }
 ";
         let (symbols, _) = parse_rust_source(source, "src/lib.rs").unwrap();
@@ -2155,11 +2388,13 @@ pub mod outer {
                 .any(|s| s.name == "outer" && s.kind == SymbolKind::Mod),
             "should extract mod symbol"
         );
-        // Parser does not recurse into mod_item bodies (only impl_item
-        // and declaration_list are recursed)
         assert!(
-            !symbols.iter().any(|s| s.name == "inner_fn"),
-            "should NOT extract inner_fn from mod body"
+            symbols.iter().any(|s| s.name == "inner_fn"),
+            "should extract inner_fn from inline mod body"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name == "InnerStruct"),
+            "should extract InnerStruct from inline mod body"
         );
     }
 
@@ -2324,35 +2559,51 @@ pub fn documented_with_code() {}
         crate_map.insert("shared".to_string(), "shared".to_string());
         crate_map.insert("core_lib".to_string(), "libs/core".to_string());
 
+        let first = |p: &str| {
+            qualified_path_to_files_with_crates(p, &crate_map)
+                .into_iter()
+                .next()
+        };
+
         // crate:: still works with crate_map present
         assert_eq!(
-            qualified_path_to_file_with_crates("crate::config::Config", &crate_map),
+            first("crate::config::Config"),
             Some("src/config.rs".to_string()),
         );
 
         // workspace crate, top-level symbol -> lib.rs
         assert_eq!(
-            qualified_path_to_file_with_crates("shared::Config", &crate_map),
+            first("shared::Config"),
             Some("shared/src/lib.rs".to_string()),
         );
 
         // workspace crate, nested module
         assert_eq!(
-            qualified_path_to_file_with_crates("shared::config::Config", &crate_map),
+            first("shared::config::Config"),
             Some("shared/src/config.rs".to_string()),
         );
 
         // workspace crate with non-trivial path
         assert_eq!(
-            qualified_path_to_file_with_crates("core_lib::models::User", &crate_map),
+            first("core_lib::models::User"),
             Some("libs/core/src/models.rs".to_string()),
         );
 
-        // unknown crate returns None
-        assert!(qualified_path_to_file_with_crates("unknown::Thing", &crate_map).is_none(),);
+        // unknown crate returns empty
+        assert!(qualified_path_to_files_with_crates("unknown::Thing", &crate_map).is_empty());
 
-        // single segment returns None
-        assert!(qualified_path_to_file_with_crates("Config", &crate_map).is_none(),);
+        // single segment returns empty
+        assert!(qualified_path_to_files_with_crates("Config", &crate_map).is_empty());
+    }
+
+    #[test]
+    fn test_qualified_path_returns_mod_rs_variant() {
+        let crate_map = std::collections::HashMap::<String, String>::new();
+        let candidates =
+            qualified_path_to_files_with_crates("crate::server::tools::Config", &crate_map);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0], "src/server/tools.rs");
+        assert_eq!(candidates[1], "src/server/tools/mod.rs");
     }
 
     #[test]
@@ -2546,8 +2797,10 @@ pub fn caller() -> i32 {
     helper()
 }
 ";
-        let known_symbols: std::collections::HashSet<String> =
-            ["helper", "caller"].iter().map(|s| (*s).to_string()).collect();
+        let known_symbols: std::collections::HashSet<String> = ["helper", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
         let crate_map = std::collections::HashMap::new();
         let refs = extract_refs(source, "src/lib.rs", &known_symbols, &crate_map).unwrap();
         let caller_to_helper = refs
@@ -2562,6 +2815,315 @@ pub fn caller() -> i32 {
             r.target_file.as_deref(),
             Some("src/lib.rs"),
             "same-file ref should have target_file set to source file"
+        );
+    }
+
+    // ── 8. Local Type Inference & Method Resolution ──
+
+    #[test]
+    fn test_refs_param_type_method_has_context() {
+        let source = r"
+pub struct Database;
+
+impl Database {
+    pub fn search(&self) -> Vec<String> { vec![] }
+}
+
+pub fn caller(db: &Database) {
+    db.search();
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "search", "Database"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let search_ref = refs
+            .iter()
+            .find(|r| r.target_name == "search" && r.source_name == "caller");
+        assert!(
+            search_ref.is_some(),
+            "should find db.search() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            search_ref.unwrap().target_context.as_deref(),
+            Some("Database"),
+            "db: &Database → db.search() should have target_context = Database"
+        );
+    }
+
+    #[test]
+    fn test_refs_param_mut_ref_type_method_has_context() {
+        let source = r"
+pub struct Config;
+
+impl Config {
+    pub fn reload(&mut self) {}
+}
+
+pub fn updater(config: &mut Config) {
+    config.reload();
+}
+";
+        let known: std::collections::HashSet<String> = ["updater", "reload", "Config"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let reload_ref = refs
+            .iter()
+            .find(|r| r.target_name == "reload" && r.source_name == "updater");
+        assert!(
+            reload_ref.is_some(),
+            "should find config.reload() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            reload_ref.unwrap().target_context.as_deref(),
+            Some("Config"),
+            "&mut Config → config.reload() should have target_context = Config"
+        );
+    }
+
+    #[test]
+    fn test_refs_let_constructor_infers_type() {
+        let source = r"
+pub struct Database;
+
+impl Database {
+    pub fn open() -> Self { Database }
+    pub fn query(&self) {}
+}
+
+pub fn caller() {
+    let db = Database::open();
+    db.query();
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "open", "query", "Database"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let query_ref = refs
+            .iter()
+            .find(|r| r.target_name == "query" && r.source_name == "caller");
+        assert!(
+            query_ref.is_some(),
+            "should find db.query() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            query_ref.unwrap().target_context.as_deref(),
+            Some("Database"),
+            "let db = Database::open() → db.query() should resolve to Database"
+        );
+    }
+
+    #[test]
+    fn test_refs_let_struct_literal_infers_type() {
+        let source = r"
+pub struct Config {
+    pub port: u16,
+}
+
+impl Config {
+    pub fn validate(&self) -> bool { true }
+}
+
+pub fn caller() {
+    let config = Config { port: 8080 };
+    config.validate();
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "validate", "Config"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let validate_ref = refs
+            .iter()
+            .find(|r| r.target_name == "validate" && r.source_name == "caller");
+        assert!(
+            validate_ref.is_some(),
+            "should find config.validate() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            validate_ref.unwrap().target_context.as_deref(),
+            Some("Config"),
+            "let config = Config {{ ... }} → config.validate() should resolve to Config"
+        );
+    }
+
+    #[test]
+    fn test_refs_let_with_try_operator_infers_type() {
+        let source = r"
+pub struct Database;
+
+impl Database {
+    pub fn open() -> Result<Self, String> { Ok(Database) }
+    pub fn query(&self) {}
+}
+
+pub fn caller() -> Result<(), String> {
+    let db = Database::open()?;
+    db.query();
+    Ok(())
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "open", "query", "Database"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let query_ref = refs
+            .iter()
+            .find(|r| r.target_name == "query" && r.source_name == "caller");
+        assert!(
+            query_ref.is_some(),
+            "should find db.query() after try operator, refs: {refs:?}"
+        );
+        assert_eq!(
+            query_ref.unwrap().target_context.as_deref(),
+            Some("Database"),
+            "let db = Database::open()? → db.query() should resolve to Database"
+        );
+    }
+
+    #[test]
+    fn test_refs_let_with_type_annotation() {
+        let source = r"
+pub struct Server;
+
+impl Server {
+    pub fn start(&self) {}
+}
+
+pub fn caller() {
+    let server: Server = todo!();
+    server.start();
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "start", "Server"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let start_ref = refs
+            .iter()
+            .find(|r| r.target_name == "start" && r.source_name == "caller");
+        assert!(
+            start_ref.is_some(),
+            "should find server.start() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            start_ref.unwrap().target_context.as_deref(),
+            Some("Server"),
+            "let server: Server = ... → server.start() should resolve to Server"
+        );
+    }
+
+    #[test]
+    fn test_refs_no_context_for_unknown_variable() {
+        let source = r"
+pub fn search() {}
+
+pub fn caller(x: i32) {
+    x.search();
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "search"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let search_ref = refs
+            .iter()
+            .find(|r| r.target_name == "search" && r.source_name == "caller");
+        // i32 is a primitive, not in our type system, so no context
+        if let Some(r) = search_ref {
+            assert!(
+                r.target_context.is_none(),
+                "primitive type param should not produce target_context"
+            );
+        }
+    }
+
+    #[test]
+    fn test_local_types_param_owned() {
+        let source = r"
+pub struct Config;
+
+impl Config {
+    pub fn save(&self) {}
+}
+
+pub fn caller(config: Config) {
+    config.save();
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "save", "Config"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let save_ref = refs
+            .iter()
+            .find(|r| r.target_name == "save" && r.source_name == "caller");
+        assert!(
+            save_ref.is_some(),
+            "should find config.save() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            save_ref.unwrap().target_context.as_deref(),
+            Some("Config"),
+            "config: Config → config.save() should resolve to Config"
         );
     }
 }
