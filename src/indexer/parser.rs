@@ -110,13 +110,19 @@ pub struct Symbol {
 }
 
 fn parse_source(source: &str) -> Result<tree_sitter::Tree, String> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .map_err(|e| format!("Failed to set language: {e}"))?;
-    parser
-        .parse(source, None)
-        .ok_or_else(|| "Failed to parse source".to_string())
+    std::thread_local! {
+        static PARSER: std::cell::RefCell<Option<Parser>> = const { std::cell::RefCell::new(None) };
+    }
+    PARSER.with_borrow_mut(|slot| {
+        let parser = slot.get_or_insert_with(|| {
+            let mut p = Parser::new();
+            let _ = p.set_language(&tree_sitter_rust::LANGUAGE.into());
+            p
+        });
+        parser
+            .parse(source, None)
+            .ok_or_else(|| "Failed to parse source".to_string())
+    })
 }
 
 pub fn parse_rust_source(
