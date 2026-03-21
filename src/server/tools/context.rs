@@ -313,6 +313,8 @@ fn render_tested_by(
     Ok(())
 }
 
+const MAX_RELATED: usize = 10;
+
 fn render_related(
     db: &Database,
     output: &mut String,
@@ -341,11 +343,18 @@ fn render_related(
         "Related (same file)".to_string()
     };
     let _ = writeln!(output, "### {label}\n");
-    for s in &related {
+    for s in related.iter().take(MAX_RELATED) {
         let _ = writeln!(
             output,
             "- **{}** ({}, line {}-{})",
             s.name, s.kind, s.line_start, s.line_end
+        );
+    }
+    if related.len() > MAX_RELATED {
+        let _ = writeln!(
+            output,
+            "- *({} more — use `overview` to see all)*",
+            related.len() - MAX_RELATED
         );
     }
     let _ = writeln!(output);
@@ -1107,6 +1116,39 @@ mod tests {
     }
 
     #[test]
+    fn test_context_related_capped_at_10() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        let mut syms = Vec::new();
+        for i in 0..15 {
+            syms.push(Symbol {
+                name: format!("method_{i}"),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: i * 10 + 1,
+                line_end: i * 10 + 9,
+                signature: format!("pub fn method_{i}()"),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: Some("BigType".into()),
+            });
+        }
+        store_symbols(&db, file_id, &syms).unwrap();
+
+        let sections: &[&str] = &["related"];
+        let result =
+            handle_context(&db, "BigType::method_0", false, None, Some(sections), None).unwrap();
+        assert!(
+            result.contains("4 more"),
+            "should show overflow count when >10 related, got: {result}"
+        );
+        assert!(result.contains("overview"), "should suggest overview tool");
+    }
+
+    #[test]
     fn test_context_exact_match_preferred() {
         let db = Database::open_in_memory().unwrap();
         let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
@@ -1148,13 +1190,8 @@ mod tests {
 
         // Only request source section to avoid "Related" siblings
         let sections: &[&str] = &["source", "callers", "callees"];
-        let result =
-            handle_context(&db, "index_repo", false, None, Some(sections), None)
-                .unwrap();
-        assert!(
-            result.contains("index_repo"),
-            "should find exact match"
-        );
+        let result = handle_context(&db, "index_repo", false, None, Some(sections), None).unwrap();
+        assert!(result.contains("index_repo"), "should find exact match");
         assert!(
             !result.contains("open_or_index"),
             "should NOT return fuzzy matches when exact match exists"

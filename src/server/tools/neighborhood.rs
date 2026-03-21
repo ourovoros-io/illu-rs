@@ -60,27 +60,29 @@ enum Direction {
     Down,
 }
 
+type BfsEntry = (usize, String);
+
 fn bfs_collect(
     db: &Database,
     base: &str,
     max_depth: usize,
     direction: Direction,
-) -> Result<BTreeMap<String, usize>, Box<dyn std::error::Error>> {
-    let mut visited: BTreeMap<String, usize> = BTreeMap::new();
+) -> Result<BTreeMap<String, BfsEntry>, Box<dyn std::error::Error>> {
+    let mut visited: BTreeMap<String, BfsEntry> = BTreeMap::new();
     let mut queue: VecDeque<(String, usize)> = VecDeque::new();
-    visited.insert(base.to_string(), 0);
+    visited.insert(base.to_string(), (0, String::new()));
     queue.push_back((base.to_string(), 0));
     while let Some((current, d)) = queue.pop_front() {
         if d >= max_depth {
             continue;
         }
         let neighbors = match direction {
-            Direction::Down => db.get_callees_by_name(&current, Some("high"))?,
-            Direction::Up => db.get_callers_by_name(&current, Some("high"))?,
+            Direction::Down => db.get_callees_by_name(&current, None)?,
+            Direction::Up => db.get_callers_by_name(&current, None)?,
         };
-        for (neighbor, _) in neighbors {
+        for (neighbor, file_path) in neighbors {
             if !visited.contains_key(&neighbor) {
-                visited.insert(neighbor.clone(), d + 1);
+                visited.insert(neighbor.clone(), (d + 1, file_path));
                 queue.push_back((neighbor, d + 1));
             }
         }
@@ -92,8 +94,8 @@ fn format_list_output(
     symbol_name: &str,
     base: &str,
     syms: &[crate::db::StoredSymbol],
-    inward: &BTreeMap<String, usize>,
-    outward: &BTreeMap<String, usize>,
+    inward: &BTreeMap<String, BfsEntry>,
+    outward: &BTreeMap<String, BfsEntry>,
     max_depth: usize,
 ) -> String {
     let mut output = String::new();
@@ -105,8 +107,8 @@ fn format_list_output(
     let callers: Vec<_> = inward.iter().filter(|(n, _)| n.as_str() != base).collect();
     if !callers.is_empty() {
         let _ = writeln!(output, "### Callers (upstream)\n");
-        for (name, d) in &callers {
-            let _ = writeln!(output, "- **{name}** (depth {d})");
+        for (name, (d, file)) in &callers {
+            let _ = writeln!(output, "- **{name}** ({file}) — depth {d}");
         }
         let _ = writeln!(output);
     }
@@ -124,8 +126,8 @@ fn format_list_output(
     let callees: Vec<_> = outward.iter().filter(|(n, _)| n.as_str() != base).collect();
     if !callees.is_empty() {
         let _ = writeln!(output, "### Callees (downstream)\n");
-        for (name, d) in &callees {
-            let _ = writeln!(output, "- **{name}** (depth {d})");
+        for (name, (d, file)) in &callees {
+            let _ = writeln!(output, "- **{name}** ({file}) — depth {d}");
         }
         let _ = writeln!(output);
     }
@@ -176,9 +178,9 @@ impl<'a> TreeRenderer<'a> {
         }
 
         let children = if self.use_callers {
-            self.db.get_callers_by_name(name, Some("high"))?
+            self.db.get_callers_by_name(name, None)?
         } else {
-            self.db.get_callees_by_name(name, Some("high"))?
+            self.db.get_callees_by_name(name, None)?
         };
 
         let child_prefix = if is_root {
@@ -274,9 +276,9 @@ mod tests {
 
         assert!(result.contains("## Neighborhood: center"));
         assert!(result.contains("### Callers (upstream)"));
-        assert!(result.contains("**alpha**"));
+        assert!(result.contains("**alpha** (src/lib.rs)"));
         assert!(result.contains("### Callees (downstream)"));
-        assert!(result.contains("**beta**"));
+        assert!(result.contains("**beta** (src/lib.rs)"));
         assert!(result.contains("### Center: center"));
     }
 
@@ -304,7 +306,7 @@ mod tests {
         let result = handle_neighborhood(&db, "center", None, Some("down"), None).unwrap();
 
         assert!(result.contains("### Callees (downstream)"));
-        assert!(result.contains("**beta**"));
+        assert!(result.contains("**beta** (src/lib.rs)"));
         assert!(!result.contains("### Callers (upstream)"));
         assert!(!result.contains("**alpha**"));
     }
@@ -315,7 +317,7 @@ mod tests {
         let result = handle_neighborhood(&db, "center", None, Some("up"), None).unwrap();
 
         assert!(result.contains("### Callers (upstream)"));
-        assert!(result.contains("**alpha**"));
+        assert!(result.contains("**alpha** (src/lib.rs)"));
         assert!(!result.contains("### Callees (downstream)"));
         assert!(!result.contains("**beta**"));
     }

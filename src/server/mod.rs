@@ -73,6 +73,7 @@ impl IlluServer {
 
 #[derive(Deserialize, JsonSchema)]
 struct QueryParams {
+    /// Search term. Use `*` to match all names when filtering by signature, path, or attribute.
     query: String,
     /// Search scope: symbols (default), docs, files, all, `doc_comments`, bodies
     scope: Option<String>,
@@ -332,7 +333,7 @@ fn text_result(text: String) -> CallToolResult {
 impl IlluServer {
     #[tool(
         name = "query",
-        description = "Search the codebase for symbols, documentation, or files. Scope: symbols (default), docs, files, all, doc_comments, bodies. Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results)."
+        description = "Search the codebase for symbols, documentation, or files. Scope: symbols (default), docs, files, all, doc_comments, bodies. Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results). Use query='*' with signature/path/attribute filters to search without a name."
     )]
     async fn query(
         &self,
@@ -595,7 +596,7 @@ impl IlluServer {
 
     #[tool(
         name = "neighborhood",
-        description = "Explore the local call graph around a symbol. Shows callers (upstream) and callees (downstream) within N hops. Use for understanding a symbol's role in the architecture."
+        description = "Explore the local call graph around a symbol. Shows callers (upstream) and callees (downstream) within N hops. Only follows function calls (excludes type refs). Use for understanding a symbol's role in the architecture."
     )]
     async fn neighborhood(
         &self,

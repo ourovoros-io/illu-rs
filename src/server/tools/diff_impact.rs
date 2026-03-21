@@ -85,6 +85,8 @@ pub fn run_git_diff(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+const MAX_DIFF_OUTPUT: usize = 8000;
+
 /// Analyze the impact of changes from a git diff.
 pub fn handle_diff_impact(
     db: &Database,
@@ -159,7 +161,7 @@ pub fn handle_diff_impact(
         return Ok(output);
     }
 
-    // Run impact analysis for each changed symbol
+    // Run impact analysis for each changed symbol (with output budget)
     let mut impact_sections = Vec::new();
     for (_file, sym) in &changed_symbols {
         let dependents = db.impact_dependents(&sym.name, sym.impl_type.as_deref())?;
@@ -170,7 +172,12 @@ pub fn handle_diff_impact(
 
     if !impact_sections.is_empty() {
         let _ = writeln!(output, "\n### Downstream Impact\n");
+        let mut truncated = false;
         for (name, dependents) in &impact_sections {
+            if output.len() > MAX_DIFF_OUTPUT {
+                truncated = true;
+                break;
+            }
             let _ = writeln!(output, "#### {name}");
             for dep in dependents {
                 let _ = writeln!(
@@ -178,7 +185,20 @@ pub fn handle_diff_impact(
                     "- {} ({}) — depth {}",
                     dep.name, dep.file_path, dep.depth
                 );
+                if output.len() > MAX_DIFF_OUTPUT {
+                    truncated = true;
+                    break;
+                }
             }
+        }
+        if truncated {
+            let total: usize = impact_sections.iter().map(|(_, d)| d.len()).sum();
+            let _ = writeln!(
+                output,
+                "\n*(truncated — {total} total dependents across {} symbols. \
+                 Use `impact` on individual symbols for full details.)*",
+                impact_sections.len()
+            );
         }
     }
 
@@ -236,7 +256,8 @@ fn render_test_coverage(
             );
         }
         let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
-        let _ = writeln!(output, "\nSuggested: `cargo test {}`", test_names.join(" "));
+        let suggestion = super::format_cargo_test_suggestion(&test_names);
+        let _ = writeln!(output, "\nSuggested: `{suggestion}`");
     }
 }
 

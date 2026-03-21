@@ -69,19 +69,19 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Unused tool** — LEFT JOIN `symbol_refs` to find symbols with zero incoming refs. Excludes entry points (`main`, `#[test]`), `use`/`mod`/`impl` kinds, and `EnumVariant` symbols.
 - **Freshness tool** — Compares `get_commit_hash` against `git rev-parse HEAD`. Lists changed files via `git diff --name-only`. Does NOT call `refresh()` — reports current state only.
 - **Crate graph tool** — Formats `crate_deps` as an adjacency list. Identifies root crates (no dependents) and leaf crates (no deps).
-- **Query filters** — `attribute`, `signature`, `kind`, and `path` filters are all combinable. The broadest filter is used for the initial DB query, then remaining filters are applied as `.retain()` post-filters. `doc_comments` scope searches doc comment content. Default scope is `symbols` (not `all`) — use `scope: "all"` or `scope: "docs"` to include dependency docs.
+- **Query filters** — `attribute`, `signature`, `kind`, and `path` filters are all combinable. The broadest filter is used for the initial DB query, then remaining filters are applied as `.retain()` post-filters. `doc_comments` scope searches doc comment content. Default scope is `symbols` (not `all`) — use `scope: "all"` or `scope: "docs"` to include dependency docs. Wildcard query (`*` or empty string) with filters searches by filter only (e.g. `query: "*", signature: "-> Vec"` finds all functions returning Vec).
 - **Context sections** — Optional `sections` parameter controls which sections render: `source`, `callers`, `callees`, `tested_by`, `traits`, `docs`. Omit for all sections. Header always renders.
 - **Implements tool** — Uses `trait_impls` table to query trait/type relationships bidirectionally.
-- **Neighborhood tool** — Bidirectional BFS using `get_callees_by_name` (downstream) and `get_callers_by_name` (upstream) within N hops.
+- **Neighborhood tool** — Bidirectional BFS using `get_callees_by_name` (downstream) and `get_callers_by_name` (upstream) within N hops. Filters to `ref_kind = 'call'` only — excludes type refs and enum variants for clean call graphs. List format shows file paths alongside symbol names.
 - **Callpath all_paths** — When `all_paths=true`, uses DFS with backtracking to find up to `max_paths` paths (default 5).
-- **Diff impact changes_only** — When `changes_only=true`, skips downstream impact and test coverage, returns only changed symbols.
+- **Diff impact changes_only** — When `changes_only=true`, skips downstream impact and test coverage, returns only changed symbols. Output is capped at ~8000 chars with truncation summary to prevent token overflow.
 - **Type usage tool** — Best-effort text search on `signature` and `details` columns to find where a type is used as params, returns, and struct fields.
 - **File graph tool** — Derives file-level dependencies from `symbol_refs` table (no new tables needed). If symbol A in file X references symbol B in file Y, X depends on Y.
 - **Symbols_at tool** — Wraps existing `get_symbols_at_lines` DB method for file:line lookup. Returns all symbols whose line range contains the given line.
 - **Query bodies scope** — `scope: "bodies"` searches within function body text via LIKE on the `body` column. Also supports `limit` parameter to cap result count.
-- **Query/overview limit** — Optional `limit` parameter truncates results. Overview distributes limit across files breadth-first (each file gets at least 1 symbol), shows "(limited to N, M total)" when truncated.
+- **Query/overview limit** — Optional `limit` parameter truncates results. Overview distributes limit across files breadth-first; when limit < file count, drops files entirely to respect the limit. Shows "(limited to N, M total)" when truncated.
 - **Context callers_path** — Optional `callers_path` parameter filters callers and callees to a path prefix (e.g. `"src/"` to exclude test callers).
-- **Context related section** — Shows sibling symbols in the same file with matching `impl_type`. Labels as "Related (impl X)" for methods or "Related (same file)" for top-level.
+- **Context related section** — Shows sibling symbols in the same file with matching `impl_type`. Labels as "Related (impl X)" for methods or "Related (same file)" for top-level. Capped at 10 items with "(N more)" overflow note.
 - **Stats tool** — Aggregates file/symbol counts, kind breakdown, test coverage ratio, most-referenced symbols, and largest files into a compact dashboard.
 - **Hotspots tool** — Identifies high-risk symbols: most-referenced (fragile to change), most-referencing (high complexity), and largest functions (by line span).
 - **Rename_plan tool** — Unified preview of all locations referencing a symbol: definition, call sites, type usage in signatures, struct fields, trait implementations, and doc comments.
@@ -91,7 +91,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Caller/callee line numbers** — Context callers and callees now show `name (file:line)` for direct navigation.
 - **Neighborhood tree format** — `format: "tree"` + `direction: "down"/"up"` renders hierarchical call tree with `├──`/`└──` characters.
 - **Body search snippets** — `scope: "bodies"` results now show the first matching line from the body as a snippet.
-- **Boundary tool** — Classifies symbols as "Public API" (called from outside path) or "Internal Only" (safe to refactor).
+- **Boundary tool** — Classifies symbols as "Public API" (called from outside path) or "Internal Only" (safe to refactor). Public API shows summarized usage counts (e.g. "5 site(s) across 3 files") instead of listing every call site.
 - **Health tool** — Reports ref confidence distribution, signature quality, noise sources, and coverage metrics.
 - **Blame tool** — Runs `git blame` on a symbol's line range, summarizes author, date, and commit message.
 - **Constructor tracking** — `new`, `from`, `into`, `clone`, `default`, `build`, `init` are tracked as symbol refs (removed from `NOISY_SYMBOL_NAMES`). `impl_type` disambiguation prevents cross-type collisions.
@@ -107,6 +107,10 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **LIKE escape** — All path-based LIKE queries use `escape_like()` + `ESCAPE '\\'` clause to handle paths with `%` or `_`.
 - **Qualified caller/callee names** — Context callers/callees show `ImplType::method` format when impl_type is available, preventing ambiguity.
 - **Macro body ref extraction** — `collect_body_refs()` descends into `macro_invocation` token trees to extract potential symbol references.
+- **Module body ref extraction** — `collect_refs()` recurses into `mod_item` nodes to extract refs from functions inside modules (e.g. `#[cfg(test)] mod tests { ... }`).
+- **Calls-only graph traversal** — `get_callees_by_name` and `get_callers_by_name` filter to `sr.kind = 'call'`, excluding type refs and enum variant refs from call graphs, neighborhood, and callpath.
+- **Cargo test cap** — When >20 tests are related, impact/diff_impact/test_impact suggest `cargo test` without filter names instead of an unusably long command.
+- **FTS name-only for short queries** — `search_symbols` uses FTS column filter `name:"query"*` for queries <= 5 chars to prevent doc_comment noise. Longer queries still search across all FTS columns.
 
 ## Lint Configuration
 

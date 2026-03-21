@@ -77,21 +77,24 @@ fn format_symbols(
     limit: Option<i64>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let is_wildcard = query.is_empty() || query == "*";
     let mut all_symbols = if let Some(attr) = attribute {
         db.search_symbols_by_attribute(attr)?
-    } else if !query.is_empty() {
+    } else if !is_wildcard {
         db.search_symbols(query)?
     } else if let Some(sig) = signature {
         db.search_symbols_by_signature(sig)?
+    } else if let Some(p) = path {
+        db.get_symbols_by_path_prefix(p)?
     } else {
-        db.search_symbols(query)?
+        return Ok(());
     };
-    if attribute.is_some() && !query.is_empty() {
+    if attribute.is_some() && !is_wildcard {
         let q = query.to_lowercase();
         all_symbols.retain(|s| s.name.to_lowercase().contains(&q));
     }
     if let Some(sig) = signature
-        && (attribute.is_some() || !query.is_empty())
+        && (attribute.is_some() || !is_wildcard)
     {
         let sig_lower = sig.to_lowercase();
         all_symbols.retain(|s| s.signature.to_lowercase().contains(&sig_lower));
@@ -885,8 +888,7 @@ mod tests {
             .unwrap();
 
         // Default scope should NOT include docs
-        let result =
-            handle_query(&db, "parse", None, None, None, None, None, None).unwrap();
+        let result = handle_query(&db, "parse", None, None, None, None, None, None).unwrap();
         assert!(result.contains("parse"), "should have symbol results");
         assert!(
             !result.contains("## Documentation"),
@@ -894,12 +896,71 @@ mod tests {
         );
 
         // Explicit "all" scope should include both
-        let result =
-            handle_query(&db, "parse", Some("all"), None, None, None, None, None).unwrap();
+        let result = handle_query(&db, "parse", Some("all"), None, None, None, None, None).unwrap();
         assert!(result.contains("parse"));
         assert!(
             result.contains("## Documentation"),
             "explicit 'all' scope should include docs"
+        );
+    }
+
+    #[test]
+    fn test_query_wildcard_with_signature_filter() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "get_users".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "pub fn get_users() -> Vec<User>".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "count".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 7,
+                    line_end: 10,
+                    signature: "pub fn count() -> usize".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // Wildcard query with signature filter
+        let result =
+            handle_query(&db, "*", None, None, None, Some("Vec<User>"), None, None).unwrap();
+        assert!(
+            result.contains("get_users"),
+            "wildcard + signature should find matching symbols: {result}"
+        );
+        assert!(
+            !result.contains("count"),
+            "should not include non-matching signatures"
+        );
+
+        // Empty query with path filter
+        let result = handle_query(&db, "", None, None, None, None, Some("src/"), None).unwrap();
+        assert!(
+            result.contains("get_users"),
+            "empty query + path should list symbols: {result}"
         );
     }
 }

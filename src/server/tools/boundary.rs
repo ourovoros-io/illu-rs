@@ -12,7 +12,7 @@ pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std:
     let mut output = String::new();
     let _ = writeln!(output, "## Module Boundary: {path}\n");
 
-    let mut external_api: BTreeMap<String, Vec<(String, Vec<String>)>> = BTreeMap::new();
+    let mut external_api: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     let mut internal_only: Vec<(String, String)> = Vec::new();
 
     for sym in &symbols {
@@ -25,20 +25,32 @@ pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std:
         }
 
         let callers = db.get_callers(&sym.name, &sym.file_path)?;
-        let external_callers: Vec<String> = callers
+        let mut ext_files: Vec<&str> = callers
             .iter()
             .filter(|c| !c.file_path.starts_with(path))
-            .map(|c| format!("{}:{}", c.file_path, c.line_start))
+            .map(|c| c.file_path.as_str())
             .collect();
 
         let qname = super::qualified_name(sym);
-        if external_callers.is_empty() {
+        if ext_files.is_empty() {
             internal_only.push((qname, sym.file_path.clone()));
         } else {
+            let site_count = ext_files.len();
+            ext_files.sort_unstable();
+            ext_files.dedup();
+            let summary = if ext_files.len() <= 3 {
+                format!("{site_count} site(s) in {}", ext_files.join(", "))
+            } else {
+                format!(
+                    "{site_count} site(s) across {} files ({}, ...)",
+                    ext_files.len(),
+                    ext_files[..3].join(", ")
+                )
+            };
             external_api
                 .entry(sym.file_path.clone())
                 .or_default()
-                .push((qname, external_callers));
+                .push((qname, summary));
         }
     }
 
@@ -47,8 +59,8 @@ pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std:
         let _ = writeln!(output, "### Public API ({total} symbols used externally)\n");
         for (file, syms) in &external_api {
             let _ = writeln!(output, "#### {file}\n");
-            for (name, callers) in syms {
-                let _ = writeln!(output, "- **{name}** — used by: {}", callers.join(", "));
+            for (name, summary) in syms {
+                let _ = writeln!(output, "- **{name}** — {summary}");
             }
             let _ = writeln!(output);
         }
@@ -189,7 +201,10 @@ mod tests {
 
         assert!(result.contains("Public API"));
         assert!(result.contains("public_fn"));
-        assert!(result.contains("src/other/main.rs:1"));
+        assert!(
+            result.contains("1 site(s) in src/other/main.rs"),
+            "should show summarized usage: {result}"
+        );
     }
 
     #[test]

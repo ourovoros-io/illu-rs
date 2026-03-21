@@ -1022,6 +1022,9 @@ fn collect_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
             "declaration_list" => {
                 collect_refs(&child, ctx, impl_type, refs);
             }
+            "mod_item" => {
+                collect_refs(&child, ctx, None, refs);
+            }
             "struct_item" | "enum_item" => {
                 collect_derive_refs(&child, ctx, refs);
             }
@@ -3242,6 +3245,44 @@ pub fn caller(config: Config) {
             save_ref.unwrap().target_context.as_deref(),
             Some("Config"),
             "config: Config → config.save() should resolve to Config"
+        );
+    }
+
+    #[test]
+    fn test_extract_refs_inside_mod_item() {
+        let source = r"
+pub struct Database;
+
+impl Database {
+    pub fn open_in_memory() -> Self { Database }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_creates_schema() {
+        let db = Database::open_in_memory();
+    }
+}
+";
+        let known: std::collections::HashSet<String> =
+            ["Database", "open_in_memory", "test_creates_schema"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+        let refs = extract_refs(
+            source,
+            "src/db.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        assert!(
+            refs.iter().any(
+                |r| r.source_name == "test_creates_schema" && r.target_name == "open_in_memory"
+            ),
+            "should extract refs from functions inside mod items, refs: {refs:?}"
         );
     }
 }
