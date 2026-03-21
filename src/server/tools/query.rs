@@ -82,10 +82,12 @@ fn format_symbols(
         db.search_symbols_by_attribute(attr)?
     } else if !is_wildcard {
         db.search_symbols(query)?
+    } else if let Some(p) = path {
+        // Path is the most selective seed for wildcard queries;
+        // check it before signature to avoid LIMIT truncation
+        db.get_symbols_by_path_prefix(p)?
     } else if let Some(sig) = signature {
         db.search_symbols_by_signature(sig)?
-    } else if let Some(p) = path {
-        db.get_symbols_by_path_prefix(p)?
     } else if kind.is_some() {
         db.get_symbols_by_path_prefix("")?
     } else {
@@ -95,9 +97,7 @@ fn format_symbols(
         let q = query.to_lowercase();
         all_symbols.retain(|s| s.name.to_lowercase().contains(&q));
     }
-    if let Some(sig) = signature
-        && (attribute.is_some() || !is_wildcard)
-    {
+    if let Some(sig) = signature {
         let sig_lower = sig.to_lowercase();
         all_symbols.retain(|s| s.signature.to_lowercase().contains(&sig_lower));
     }
@@ -1107,6 +1107,59 @@ mod tests {
         assert!(
             beta_pos < alpha_pos,
             "parse_beta (3 refs) should appear before parse_alpha (1 ref)\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_query_wildcard_kind_signature_path() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/db.rs", "hash").unwrap();
+        let file_id2 = db.insert_file("src/other.rs", "hash2").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                make_fn("open", "src/db.rs", 1, "pub fn open() -> Result<Self>"),
+                make_fn("close", "src/db.rs", 5, "pub fn close()"),
+            ],
+        )
+        .unwrap();
+        store_symbols(
+            &db,
+            file_id2,
+            &[make_fn(
+                "run",
+                "src/other.rs",
+                1,
+                "pub fn run() -> Result<()>",
+            )],
+        )
+        .unwrap();
+
+        // Wildcard + kind + signature + path should find only
+        // functions returning Result in src/db.rs
+        let result = handle_query(
+            &db,
+            "*",
+            Some("symbols"),
+            Some("function"),
+            None,
+            Some("-> Result"),
+            Some("src/db.rs"),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.contains("open"),
+            "Should find open() which returns Result in db.rs: {result}"
+        );
+        assert!(
+            !result.contains("close"),
+            "Should NOT find close() which has no Result return: {result}"
+        );
+        assert!(
+            !result.contains("run"),
+            "Should NOT find run() which is in other.rs: {result}"
         );
     }
 }

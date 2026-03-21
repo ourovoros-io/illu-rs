@@ -5,6 +5,7 @@ pub fn handle_batch_context(
     db: &Database,
     symbols: &[String],
     full_body: bool,
+    sections: Option<&[&str]>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     if symbols.is_empty() {
         return Ok("No symbols provided.".to_string());
@@ -15,7 +16,7 @@ pub fn handle_batch_context(
         if i > 0 {
             output.push_str("\n---\n\n");
         }
-        let result = context::handle_context(db, symbol, full_body, None, None, None, false)?;
+        let result = context::handle_context(db, symbol, full_body, None, sections, None, false)?;
         output.push_str(&result);
     }
 
@@ -49,7 +50,7 @@ mod tests {
     #[test]
     fn test_batch_context_empty_symbols() {
         let db = crate::db::Database::open_in_memory().unwrap();
-        let result = handle_batch_context(&db, &[], false).unwrap();
+        let result = handle_batch_context(&db, &[], false, None).unwrap();
         assert_eq!(result, "No symbols provided.");
     }
 
@@ -68,7 +69,7 @@ mod tests {
         .unwrap();
 
         let symbols = vec!["alpha".to_string(), "beta".to_string()];
-        let result = handle_batch_context(&db, &symbols, false).unwrap();
+        let result = handle_batch_context(&db, &symbols, false, None).unwrap();
 
         assert!(result.contains("alpha"), "should contain alpha context");
         assert!(result.contains("beta"), "should contain beta context");
@@ -82,7 +83,7 @@ mod tests {
         store_symbols(&db, file_id, &[make_fn("existing", "src/lib.rs", 1)]).unwrap();
 
         let symbols = vec!["existing".to_string(), "missing".to_string()];
-        let result = handle_batch_context(&db, &symbols, false).unwrap();
+        let result = handle_batch_context(&db, &symbols, false, None).unwrap();
 
         assert!(result.contains("existing"), "found symbol should appear");
         assert!(
@@ -98,10 +99,25 @@ mod tests {
         store_symbols(&db, file_id, &[make_fn("solo", "src/lib.rs", 5)]).unwrap();
 
         let symbols = vec!["solo".to_string()];
-        let result = handle_batch_context(&db, &symbols, false).unwrap();
+        let result = handle_batch_context(&db, &symbols, false, None).unwrap();
 
         assert!(result.contains("solo"));
         // Single result has no separator
         assert!(!result.contains("---"));
+    }
+
+    #[test]
+    fn test_batch_context_with_sections() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash1").unwrap();
+        store_symbols(&db, file_id, &[make_fn("helper", "src/lib.rs", 1)]).unwrap();
+
+        let result =
+            handle_batch_context(&db, &["helper".to_string()], false, Some(&["callers"])).unwrap();
+        // Should NOT contain source section
+        assert!(
+            !result.contains("### Source"),
+            "sections filter should exclude source"
+        );
     }
 }

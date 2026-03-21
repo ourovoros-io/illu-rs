@@ -1439,22 +1439,22 @@ impl Database {
     ) -> SqlResult<Vec<CalleeInfo>> {
         let query = if exclude_tests {
             "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type, \
-             sr.ref_line \
+             sr.ref_line, ts.is_test \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              JOIN files sf ON sf.id = ss.file_id \
-             WHERE ss.name = ?1 AND sf.path = ?2 AND ts.is_test = 0"
+             WHERE ss.name = ?1 AND sf.path = ?2 AND sr.confidence = 'high' AND ts.is_test = 0"
         } else {
             "SELECT DISTINCT ts.name, ts.kind, f.path, sr.kind, ts.line_start, ts.impl_type, \
-             sr.ref_line \
+             sr.ref_line, ts.is_test \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              JOIN files sf ON sf.id = ss.file_id \
-             WHERE ss.name = ?1 AND sf.path = ?2"
+             WHERE ss.name = ?1 AND sf.path = ?2 AND sr.confidence = 'high'"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
@@ -1468,6 +1468,7 @@ impl Database {
                 line_start: row.get(4)?,
                 impl_type: row.get(5)?,
                 ref_line: row.get(6)?,
+                is_test: row.get(7)?,
             });
         }
         Ok(results)
@@ -1482,7 +1483,7 @@ impl Database {
     ) -> SqlResult<Vec<CalleeInfo>> {
         let query = if exclude_tests {
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
-             sr.ref_line \
+             sr.ref_line, ss.is_test \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
@@ -1491,7 +1492,7 @@ impl Database {
              WHERE ts.name = ?1 AND tf.path = ?2 AND ss.is_test = 0"
         } else {
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
-             sr.ref_line \
+             sr.ref_line, ss.is_test \
              FROM symbol_refs sr \
              JOIN symbols ss ON ss.id = sr.source_symbol_id \
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
@@ -1511,6 +1512,7 @@ impl Database {
                 line_start: row.get(4)?,
                 impl_type: row.get(5)?,
                 ref_line: row.get(6)?,
+                is_test: row.get(7)?,
             });
         }
         Ok(results)
@@ -1529,7 +1531,8 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2) AND ts.is_test = 0"
+             AND (?2 IS NULL OR sr.confidence = ?2) AND ts.is_test = 0 \
+             AND ts.kind NOT IN ('const', 'static')"
         } else {
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
@@ -1537,7 +1540,8 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2)"
+             AND (?2 IS NULL OR sr.confidence = ?2) \
+             AND ts.kind NOT IN ('const', 'static')"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
@@ -1561,7 +1565,8 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              WHERE ts.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2) AND ss.is_test = 0"
+             AND (?2 IS NULL OR sr.confidence = ?2) AND ss.is_test = 0 \
+             AND ss.kind NOT IN ('const', 'static')"
         } else {
             "SELECT DISTINCT ss.name, sf.path \
              FROM symbol_refs sr \
@@ -1569,7 +1574,8 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              WHERE ts.name = ?1 AND sr.kind = 'call' \
-             AND (?2 IS NULL OR sr.confidence = ?2)"
+             AND (?2 IS NULL OR sr.confidence = ?2) \
+             AND ss.kind NOT IN ('const', 'static')"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
@@ -2034,6 +2040,7 @@ pub struct CalleeInfo {
     pub line_start: i64,
     pub impl_type: Option<String>,
     pub ref_line: Option<i64>,
+    pub is_test: bool,
 }
 
 #[cfg(test)]

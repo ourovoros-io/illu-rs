@@ -772,6 +772,27 @@ fn is_noisy_symbol(name: &str) -> bool {
     NOISY_SYMBOL_NAMES.contains(&name)
 }
 
+/// Extract type context from a simple scoped identifier like `Database::new`.
+/// Returns the type/module name if the first child is an identifier or type identifier.
+fn extract_scoped_context(node: &Node, source: &str) -> Option<String> {
+    if node.child_count() < 3 {
+        return None;
+    }
+    let first = node.child(0)?;
+    let kind = first.kind();
+    if kind == "identifier" || kind == "type_identifier" {
+        Some(node_text(&first, source))
+    } else {
+        None
+    }
+}
+
+const CONSTRUCTOR_NAMES: &[&str] = &["new", "from", "into", "default", "clone", "build", "init"];
+
+fn is_constructor_name(name: &str) -> bool {
+    CONSTRUCTOR_NAMES.contains(&name)
+}
+
 impl std::fmt::Display for RefKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1376,6 +1397,97 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
             });
         }
     }
+
+    /// Add a ref from a fully-qualified `crate::` path.
+    /// Bypasses noisy-symbol filter since the qualification is
+    /// unambiguous and resolves the target file from the path.
+    fn try_add_qualified(
+        &mut self,
+        name: &str,
+        kind: RefKind,
+        target_context: Option<String>,
+        target_file: Option<String>,
+        line: Option<i64>,
+        refs: &mut Vec<SymbolRef>,
+    ) {
+        if name != self.fn_name
+            && self.ctx.known_symbols.contains(name)
+            && self.seen.insert(name.to_string())
+        {
+            refs.push(SymbolRef {
+                source_name: self.fn_name.to_string(),
+                source_file: self.ctx.file_path.to_string(),
+                target_name: name.to_string(),
+                kind,
+                target_file,
+                target_context,
+                ref_line: line,
+            });
+        }
+    }
+
+    /// Handle a `crate::module::symbol` scoped identifier.
+    /// Returns true if handled (caller should NOT descend).
+    fn handle_crate_path(&mut self, child: &Node, refs: &mut Vec<SymbolRef>) -> bool {
+        let text = node_text(child, self.ctx.source);
+        if !text.starts_with("crate::") {
+            return false;
+        }
+        let segments: Vec<&str> = text.split("::").collect();
+        let Some(&final_name) = segments.last() else {
+            return true;
+        };
+        let line = i64::try_from(child.start_position().row + 1).ok();
+        let target_file = qualified_path_to_files_with_crates(&text, self.ctx.crate_map)
+            .into_iter()
+            .next();
+
+        // Check if second-to-last segment is a type name
+        let type_seg = segments
+            .get(segments.len().wrapping_sub(2))
+            .filter(|s| s.starts_with(|c: char| c.is_uppercase()));
+
+        let target_context = type_seg.map(|s| (*s).to_string());
+
+        if let Some(type_name) = type_seg {
+            self.try_add_qualified(
+                type_name,
+                RefKind::TypeRef,
+                None,
+                target_file.clone(),
+                line,
+                refs,
+            );
+        }
+
+        self.try_add_qualified(
+            final_name,
+            RefKind::Call,
+            target_context,
+            target_file,
+            line,
+            refs,
+        );
+        true
+    }
+
+    /// Handle a simple `Type::method` scoped identifier.
+    /// Returns `true` if handled (caller should NOT descend).
+    fn handle_scoped_call(&mut self, child: &Node, refs: &mut Vec<SymbolRef>) -> bool {
+        let Some(type_context) = extract_scoped_context(child, self.ctx.source) else {
+            return false;
+        };
+        let last_idx = u32::try_from(child.child_count().saturating_sub(1));
+        if let Some(method_node) = last_idx.ok().and_then(|i| child.child(i)) {
+            let method_name = node_text(&method_node, self.ctx.source);
+            let line = i64::try_from(method_node.start_position().row + 1).ok();
+            if self.ctx.known_symbols.contains(&type_context) || !is_constructor_name(&method_name)
+            {
+                self.try_add(&method_name, RefKind::Call, Some(type_context), line, refs);
+            }
+        }
+        true
+    }
 }
 
 fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
@@ -1427,6 +1539,12 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                     });
                     let line = i64::try_from(child.start_position().row + 1).ok();
                     col.try_add(&name, RefKind::Call, target_context, line, refs);
+                }
+                "scoped_identifier" => {
+                    if !col.handle_crate_path(&child, refs) && !col.handle_scoped_call(&child, refs)
+                    {
+                        stack.push(child);
+                    }
                 }
                 "macro_invocation" => {
                     let mut macro_stack = vec![child];
@@ -3291,6 +3409,190 @@ mod tests {
                 |r| r.source_name == "test_creates_schema" && r.target_name == "open_in_memory"
             ),
             "should extract refs from functions inside mod items, refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_crate_path_refs_bypass_noisy_filter() {
+        // "set" is in NOISY_SYMBOL_NAMES, but crate::status::set()
+        // should still be tracked because the qualified path is unambiguous
+        let source = r#"
+pub fn set(msg: &str) {}
+pub struct StatusGuard;
+
+impl StatusGuard {
+    pub fn new(msg: &str) -> Self { Self }
+}
+
+pub fn caller() {
+    crate::status::set("hello");
+    let _g = crate::status::StatusGuard::new("test");
+}
+"#;
+        let known: std::collections::HashSet<String> = ["set", "StatusGuard", "new", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/status.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+
+        let set_ref = refs
+            .iter()
+            .find(|r| r.target_name == "set" && r.source_name == "caller");
+        assert!(
+            set_ref.is_some(),
+            "crate::status::set() should be tracked despite 'set' being noisy, refs: {refs:?}"
+        );
+
+        let guard_ref = refs
+            .iter()
+            .find(|r| r.target_name == "new" && r.source_name == "caller");
+        assert!(
+            guard_ref.is_some(),
+            "crate::status::StatusGuard::new() should be tracked, refs: {refs:?}"
+        );
+        assert_eq!(
+            guard_ref.unwrap().target_context.as_deref(),
+            Some("StatusGuard"),
+            "should extract StatusGuard as target_context"
+        );
+
+        let type_ref = refs
+            .iter()
+            .find(|r| r.target_name == "StatusGuard" && r.source_name == "caller");
+        assert!(
+            type_ref.is_some(),
+            "StatusGuard should also be tracked as a TypeRef, refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_crate_path_resolves_target_file() {
+        let source = r"
+pub fn caller() {
+    crate::indexer::docs::pending_docs();
+}
+";
+        let known: std::collections::HashSet<String> = ["pending_docs", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/server/mod.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+
+        let pd_ref = refs
+            .iter()
+            .find(|r| r.target_name == "pending_docs" && r.source_name == "caller");
+        assert!(
+            pd_ref.is_some(),
+            "crate::indexer::docs::pending_docs should be tracked, refs: {refs:?}"
+        );
+        assert_eq!(
+            pd_ref.unwrap().target_file.as_deref(),
+            Some("src/indexer/docs.rs"),
+            "target_file should resolve from crate:: path"
+        );
+    }
+
+    #[test]
+    fn test_non_crate_scoped_identifier_descends() {
+        // Non-crate:: scoped identifiers like Module::func should
+        // still descend into children as before
+        let source = r"
+pub struct Foo;
+
+impl Foo {
+    pub fn bar() -> Self { Self }
+}
+
+pub fn caller() {
+    let _ = Foo::bar();
+}
+";
+        let known: std::collections::HashSet<String> = ["Foo", "bar", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+
+        assert!(
+            refs.iter()
+                .any(|r| r.target_name == "bar" && r.source_name == "caller"),
+            "Foo::bar() should still work via normal descend, refs: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_scoped_call_has_type_context() {
+        let source = r"
+struct Database;
+impl Database {
+    fn new() -> Self { Database }
+}
+fn caller() {
+    let db = Database::new();
+}
+";
+        let known: std::collections::HashSet<String> = ["Database", "new", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs =
+            extract_refs(source, "test.rs", &known, &std::collections::HashMap::new()).unwrap();
+        let new_ref = refs
+            .iter()
+            .find(|r| r.source_name == "caller" && r.target_name == "new");
+        assert!(
+            new_ref.is_some(),
+            "should find ref to new from caller, refs: {refs:?}"
+        );
+        assert_eq!(
+            new_ref.unwrap().target_context.as_deref(),
+            Some("Database"),
+            "scoped call Database::new should have target_context = Database"
+        );
+    }
+
+    #[test]
+    fn test_external_scoped_call_filtered() {
+        let source = r"
+struct MyStruct;
+impl MyStruct {
+    fn new() -> Self { MyStruct }
+}
+fn caller() {
+    let v = Vec::new();
+}
+";
+        let known: std::collections::HashSet<String> = ["MyStruct", "new", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs =
+            extract_refs(source, "test.rs", &known, &std::collections::HashMap::new()).unwrap();
+        let new_refs: Vec<_> = refs
+            .iter()
+            .filter(|r| r.source_name == "caller" && r.target_name == "new")
+            .collect();
+        assert!(
+            new_refs.is_empty(),
+            "Vec::new() should not create ref to 'new', found: {new_refs:?}"
         );
     }
 }

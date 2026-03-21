@@ -119,6 +119,16 @@ fn handle_docs_with_topic(
                 let _ = write!(msg, "\n- `{m}`");
             }
         }
+        if let Ok(Some(summary)) = db.get_doc_by_module(dep_name, "") {
+            let excerpt: String = summary.content.chars().take(500).collect();
+            let truncated = summary.content.chars().count() > 500;
+            let _ = write!(
+                msg,
+                "\n\n**Crate summary** (use without topic for full docs):\n{}{}",
+                excerpt,
+                if truncated { "..." } else { "" }
+            );
+        }
         return Ok(msg);
     }
 
@@ -195,6 +205,35 @@ mod tests {
 
         let result = handle_docs(&db, "serde", Some("graphql")).unwrap();
         assert!(result.contains("no docs match topic"));
+    }
+
+    #[test]
+    fn test_docs_topic_not_found_shows_summary() {
+        let db = Database::open_in_memory().unwrap();
+        let dep_id = db
+            .insert_dependency("mycrate", "1.0.0", false, None)
+            .unwrap();
+        db.store_doc(
+            dep_id,
+            "docs.rs",
+            "A powerful crate for widget processing and data transformation.",
+        )
+        .unwrap();
+
+        let result = handle_docs(&db, "mycrate", Some("nonexistent_topic")).unwrap();
+
+        assert!(
+            result.contains("nonexistent_topic"),
+            "should mention the failed topic"
+        );
+        assert!(
+            result.contains("widget processing"),
+            "should show summary excerpt when topic not found"
+        );
+        assert!(
+            result.contains("Crate summary"),
+            "should have Crate summary header"
+        );
     }
 
     #[test]

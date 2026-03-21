@@ -47,6 +47,7 @@ pub fn handle_impact(
 
     let mut current_depth: i64 = -1;
     let mut depth_buf: Vec<&crate::db::ImpactEntry> = Vec::new();
+    let mut seen_in_impact: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
     for dep in &dependents {
         if dep.depth != current_depth {
@@ -57,6 +58,7 @@ pub fn handle_impact(
             }
             current_depth = dep.depth;
         }
+        seen_in_impact.insert(&dep.name);
         depth_buf.push(dep);
     }
     // Flush last depth
@@ -73,8 +75,12 @@ pub fn handle_impact(
         );
     }
 
-    // Related tests section
-    let tests = db.get_related_tests(base_name, base_impl)?;
+    // Related tests section — exclude tests already shown in impact
+    let all_tests = db.get_related_tests(base_name, base_impl)?;
+    let tests: Vec<_> = all_tests
+        .iter()
+        .filter(|t| !seen_in_impact.contains(t.name.as_str()))
+        .collect();
     if !tests.is_empty() {
         let _ = writeln!(output, "\n### Related Tests\n");
         for t in &tests {
@@ -84,7 +90,9 @@ pub fn handle_impact(
                 t.name, t.file_path, t.line_start
             );
         }
-        let test_names: Vec<&str> = tests.iter().map(|t| t.name.as_str()).collect();
+    }
+    if !all_tests.is_empty() {
+        let test_names: Vec<&str> = all_tests.iter().map(|t| t.name.as_str()).collect();
         let suggestion = super::format_cargo_test_suggestion(&test_names);
         let _ = writeln!(output, "\nSuggested: `{suggestion}`");
     }
@@ -394,12 +402,15 @@ mod tests {
             .unwrap();
 
         let result = handle_impact(&db, "calculate_tax", None, false).unwrap();
+        // Tests that directly call calculate_tax appear in depth entries
         assert!(
-            result.contains("Related Tests"),
-            "should have related tests section"
+            result.contains("test_tax_basic"),
+            "should find direct test in depth entries"
         );
-        assert!(result.contains("test_tax_basic"), "should find direct test");
-        assert!(result.contains("test_tax_zero"), "should find second test");
+        assert!(
+            result.contains("test_tax_zero"),
+            "should find second test in depth entries"
+        );
         assert!(
             !result.contains("unrelated_fn"),
             "should not include unrelated test"
@@ -407,6 +418,13 @@ mod tests {
         assert!(
             result.contains("cargo test"),
             "should suggest cargo test command"
+        );
+        // Since all tests are already in depth entries, Related Tests
+        // section should be omitted (deduplication)
+        assert!(
+            !result.contains("Related Tests"),
+            "tests already in depth entries should not be repeated \
+             in Related Tests section: {result}"
         );
     }
 
@@ -696,11 +714,15 @@ mod tests {
             .unwrap();
 
         let result = handle_impact(&db, "Database::open", None, false).unwrap();
+        // test_open directly calls open → appears in depth entries
         assert!(
-            result.contains("Related Tests"),
-            "should find related tests for Type::method, got: {result}"
+            result.contains("test_open"),
+            "should find test in impact output, got: {result}"
         );
-        assert!(result.contains("test_open"));
+        assert!(
+            result.contains("cargo test"),
+            "should suggest cargo test command, got: {result}"
+        );
     }
 
     #[test]
