@@ -36,7 +36,7 @@ illu-rs install
 
 That's it. Open **Claude Code** or **Gemini CLI** in any Rust project — illu auto-detects the repo, indexes it, and starts serving tools. Works with **git worktrees** too — each worktree gets its own isolated index.
 
-`install` writes MCP config to `~/.claude/settings.json` and `~/.gemini/settings.json`, adds usage instructions to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, and sets up a global gitignore for `.illu/`.
+`install` writes MCP config to `~/.claude/settings.json` and `~/.gemini/settings.json`, adds usage instructions to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, installs a [statusline](#statusline) for Claude Code, and sets up a global gitignore for `.illu/`.
 
 > **Requirements:** Rust toolchain and a C compiler (Xcode CLI tools on macOS, `build-essential` on Linux). All C dependencies (SQLite, tree-sitter) are compiled from source — no system libraries needed.
 
@@ -520,13 +520,13 @@ Any MCP client with stdio transport support works — illu speaks standard MCP.
 | **Version-pinned docs** | Two-tier: crate summary + per-module detail from rustdoc JSON |
 | **Full body on demand** | `full_body: true` reads untruncated source from disk |
 
-## Statusline Extension
+## Statusline
 
-illu writes real-time status to `.illu/status`. See what it's doing in your terminal:
+`illu install` includes a Claude Code statusline that shows model, branch, context usage, and live illu status:
 
 ```
-▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu
-▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28%  ◆ illu: indexing ▸ refs [12/40]
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28% · 4m12s  ◆ illu
+▸ opus · my-project › main  ▰▰▰▱▱▱▱▱▱▱ 28% · 4m12s  ◆ illu: indexing ▸ refs [12/40]
 ```
 
 | Color | Meaning |
@@ -535,16 +535,26 @@ illu writes real-time status to `.illu/status`. See what it's doing in your term
 | Yellow `◆ illu: indexing ...` | Parsing source files |
 | Cyan `◆ illu: fetching docs ...` | Downloading dependency docs |
 
-```bash
-cp extensions/statusline/combined-statusline.sh ~/.claude/statusline.sh
-chmod +x ~/.claude/statusline.sh
-```
+The statusline is installed automatically to `~/.illu/statusline.sh` and configured in `~/.claude/settings.json`. If you already have a custom statusline, `illu install` skips the config and prints instructions for manual setup.
+
+<details>
+<summary>Manual statusline setup</summary>
+
+If you already have a statusline and want to switch:
 
 ```json
-{ "statusLine": { "command": "~/.claude/statusline.sh" } }
+{ "statusLine": { "type": "command", "command": "~/.illu/statusline.sh" } }
 ```
 
-See [`extensions/statusline/`](extensions/statusline/) for standalone and add-to-existing options.
+Or copy the script to your preferred location:
+
+```bash
+cp ~/.illu/statusline.sh ~/.claude/statusline.sh
+```
+
+The script requires `jq` and `git` on PATH.
+
+</details>
 
 ## How It Works
 

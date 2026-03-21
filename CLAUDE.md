@@ -144,7 +144,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **References exclude_tests** — `handle_references` accepts `exclude_tests: bool`. When true, test callers are excluded from the call sites section entirely (not just separated). Summary count reflects production callers only.
 - **Registry** — Auto-populated at `~/.illu/registry.toml` on every `illu serve` startup. Tracks repo name, path, git remote, and last indexed timestamp. Worktrees dedup by `git_common_dir`.
 - **Cross-repo tools** — Open other repos' `.illu/index.db` read-only on demand via `Database::open_readonly`. Name-based matching across repos (no shared index). `cross_query`, `cross_impact`, `cross_deps`, `cross_callpath` all use the registry to find other repos.
-- **Global install** — `illu install` writes MCP config + instruction sections to `~/.claude/` and `~/.gemini/` globally. Uses CWD auto-detection (no `--repo` flag). `illu init` remains for per-repo overrides.
+- **Global install** — `illu install` writes MCP config + instruction sections to `~/.claude/` and `~/.gemini/` globally, installs statusline to `~/.illu/statusline.sh`, and configures `statusLine` in Claude settings (skips if already configured). Uses CWD auto-detection (no `--repo` flag). `illu init` remains for per-repo overrides.
 - **Auto-detection** — `illu serve` without `--repo` detects repo root via `git rev-parse --show-toplevel`. Works with git worktrees — each worktree gets its own index.
 - **repos tool** — Dashboard showing all registered repos with status (active/indexed/missing/no index), symbol counts.
 - **cross_query tool** — Searches symbols across all registered repos except the primary. Same params as `query`, results grouped by repo.
@@ -222,7 +222,6 @@ This repo is indexed by illu (36 tools). **Use illu tools as your first step** �
 | `illu cross_impact <symbol>` | `mcp__illu__cross_impact` | `symbol_name: "<symbol>"` |
 | `illu cross_deps` | `mcp__illu__cross_deps` | |
 | `illu cross_callpath <from> <to>` | `mcp__illu__cross_callpath` | `from: "<from>", to: "<to>"` |
-| `illu install` | *(CLI only)* | |
 
 ### Workflow rules
 
