@@ -544,6 +544,24 @@ impl Database {
         Ok(names)
     }
 
+    /// Get all distinct (name, `impl_type`) pairs for fuzzy matching.
+    pub fn get_all_distinct_symbol_names(
+        &self,
+    ) -> SqlResult<Vec<(String, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT s.name, s.impl_type FROM symbols s \
+             WHERE s.kind != 'use' AND s.kind != 'mod'",
+        )?;
+        let mut results = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(0)?;
+            let impl_type: Option<String> = row.get(1)?;
+            results.push((name, impl_type));
+        }
+        Ok(results)
+    }
+
     /// Look up a symbol's DB id by name and file path.
     pub fn get_symbol_id(&self, name: &str, file_path: &str) -> SqlResult<Option<SymbolId>> {
         let mut stmt = self.conn.prepare(
