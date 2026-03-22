@@ -164,6 +164,13 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **"Did you mean?" suggestions** — `symbol_not_found(db, name)` runs FTS fuzzy search and suggests top 3 matches. For `Type::method` names, also searches the method part alone. All tool handlers pass `db` to `symbol_not_found`.
 - **Boundary uses all confidence levels** — `get_callers` accepts `min_confidence: Option<&str>`. `handle_boundary` passes `None` (all confidences) for inclusive external-caller detection. `render_callers` (context) and `render_call_sites` (references) pass `Some("high")` for precision.
 - **Hotspots exclude_tests on all sections** — `get_most_referencing_symbols` accepts `exclude_tests: bool`. When true, filters `ss.is_test = 0` so test functions don't dominate "Most Referencing".
+- **Levenshtein fallback** — `symbol_not_found` falls back to edit-distance matching when FTS/trigram returns nothing. Scans all distinct symbol names, filters by threshold (40% of query length, min 2 edits), returns top 3. Case-insensitive.
+- **Signature suffix matching** — `signature_matches` checks if filter type words appear as suffixes in signature type words. `-> Result` matches `-> SqlResult<Self>` because `SqlResult` ends with `Result`. Minimum word length: 3 chars.
+- **Overview external callers** — `render_external_callers` shows top 3 callers from outside the symbol's file. Shows overflow count. Complements `render_same_file_callees`.
+- **Diff impact filters structural noise** — `render_diff_output` skips `Mod` and `Impl` kinds from changed symbol listings. Downstream impact and test coverage still see all symbols.
+- **String literal search** — `scope: "strings"` searches within quoted string literals in function bodies. Post-filters body search results by extracting `"..."` content. Shows matching string literal as snippet. Known limitation: raw strings (`r"..."`, `r#"..."#`) not handled.
+- **Smart body truncation** — `extract_body` preserves first 50 lines + last 10 lines with `// ... N lines omitted ...` marker. Previous format: first 100 lines + `// ... truncated`.
+- **Graph export formats** — `handle_graph_export` accepts `format`: `"dot"` (default Graphviz), `"edges"` (compact `A -> B` lines for AI), `"summary"` (node/edge counts, roots, leaves).
 
 ## Lint Configuration
 
