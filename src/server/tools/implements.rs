@@ -10,7 +10,7 @@ pub fn handle_implements(
 
     match (trait_name, type_name) {
         (Some(t), None) => {
-            let impls = db.get_trait_impls_for_trait(t)?;
+            let impls = db.trait_impls_for_trait(t)?;
             let _ = writeln!(output, "## Types implementing `{t}`\n");
             if impls.is_empty() {
                 let _ = writeln!(output, "No implementations found for trait `{t}`.");
@@ -25,7 +25,7 @@ pub fn handle_implements(
             }
         }
         (None, Some(ty)) => {
-            let impls = db.get_trait_impls_for_type(ty)?;
+            let impls = db.trait_impls_for_type(ty)?;
             let _ = writeln!(output, "## Traits implemented by `{ty}`\n");
             if impls.is_empty() {
                 let _ = writeln!(output, "No trait implementations found for type `{ty}`.");
@@ -40,7 +40,7 @@ pub fn handle_implements(
             }
         }
         (Some(t), Some(ty)) => {
-            let impls = db.get_trait_impls_for_type(ty)?;
+            let impls = db.trait_impls_for_type(ty)?;
             let filtered: Vec<_> = impls.iter().filter(|i| i.trait_name == t).collect();
             let _ = writeln!(output, "## `{ty}` implementation of `{t}`\n");
             if filtered.is_empty() {

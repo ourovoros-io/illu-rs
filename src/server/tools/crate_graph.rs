@@ -3,13 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 pub fn handle_crate_graph(db: &Database) -> Result<String, Box<dyn std::error::Error>> {
-    let crate_count = db.get_crate_count()?;
+    let crate_count = db.crate_count()?;
     if crate_count <= 1 {
         return Ok("Single-crate project — no crate dependency graph.".to_string());
     }
 
-    let crates = db.get_all_crates()?;
-    let deps = db.get_all_crate_deps()?;
+    let crates = db.all_crates()?;
+    let deps = db.all_crate_deps()?;
 
     let mut output = String::new();
     let _ = writeln!(output, "## Crate Dependency Graph\n");

@@ -15,7 +15,7 @@ pub fn handle_hotspots(
 
     // Most referenced (fragile to change)
     let most_referenced =
-        db.get_most_referenced_symbols_filtered(max, prefix, Some("high"), exclude_tests)?;
+        db.most_referenced_symbols_filtered(max, prefix, Some("high"), exclude_tests)?;
     if !most_referenced.is_empty() {
         let _ = writeln!(output, "### Most Referenced (fragile to change)\n");
         for (i, entry) in most_referenced.iter().enumerate() {
@@ -33,7 +33,7 @@ pub fn handle_hotspots(
 
     // Most referencing (high complexity)
     let most_referencing =
-        db.get_most_referencing_symbols(max, prefix, Some("high"), exclude_tests)?;
+        db.most_referencing_symbols(max, prefix, Some("high"), exclude_tests)?;
     if !most_referencing.is_empty() {
         let _ = writeln!(output, "### Most Referencing (high complexity)\n");
         for (i, (name, file, count)) in most_referencing.iter().enumerate() {
@@ -43,7 +43,7 @@ pub fn handle_hotspots(
     }
 
     // Largest functions (by line span) — targeted SQL query
-    let largest = db.get_largest_functions(max, prefix, exclude_tests)?;
+    let largest = db.largest_functions(max, prefix, exclude_tests)?;
     if !largest.is_empty() {
         let _ = writeln!(output, "### Largest Functions (by line count)\n");
         for (i, func) in largest.iter().enumerate() {

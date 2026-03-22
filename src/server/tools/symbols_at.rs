@@ -6,7 +6,7 @@ pub fn handle_symbols_at(
     file: &str,
     line: i64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let symbols = db.get_symbols_at_lines(file, &[(line, line)])?;
+    let symbols = db.symbols_at_lines(file, &[(line, line)])?;
 
     let mut output = String::new();
 

@@ -83,11 +83,11 @@ fn format_symbols(
     } else if let Some(p) = path {
         // Path is the most selective seed for wildcard queries;
         // check it before signature to avoid LIMIT truncation
-        db.get_symbols_by_path_prefix(p)?
+        db.symbols_by_path_prefix(p)?
     } else if let Some(sig) = signature {
         db.search_symbols_by_signature(sig)?
     } else if kind.is_some() {
-        db.get_symbols_by_path_prefix("")?
+        db.symbols_by_path_prefix("")?
     } else {
         return Ok(());
     };
@@ -189,7 +189,7 @@ fn format_files(
     limit: Option<i64>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let all_paths = db.get_all_file_paths()?;
+    let all_paths = db.all_file_paths()?;
     let query_lower = query.to_lowercase();
     let mut files: Vec<&str> = all_paths
         .iter()
@@ -267,7 +267,7 @@ fn format_body_search(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let is_wildcard = query == "*" || query.is_empty();
     let mut symbols = if is_wildcard {
-        db.get_symbols_by_path_prefix(path.unwrap_or(""))?
+        db.symbols_by_path_prefix(path.unwrap_or(""))?
             .into_iter()
             .filter(|s| s.body.is_some())
             .collect()

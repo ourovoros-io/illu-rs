@@ -128,7 +128,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
 /// Fuzzy-match a query against all symbol names using edit distance.
 /// Returns top 3 matches within a reasonable distance threshold.
 fn levenshtein_suggestions(db: &Database, query: &str) -> Vec<(String, Option<String>)> {
-    let all_names = db.get_all_distinct_symbol_names().unwrap_or_default();
+    let all_names = db.all_distinct_symbol_names().unwrap_or_default();
     let max_dist = (query.len() * 2 / 5).max(2);
     let mut scored: Vec<(usize, String, Option<String>)> = all_names
         .into_iter()

@@ -25,7 +25,7 @@ pub fn handle_similar(
     let return_type = target_sig.split_once("->").map(|(_, r)| r.trim());
 
     let target_callees: HashSet<String> = db
-        .get_callees_by_name(&target.name, None, false)?
+        .callees_by_name(&target.name, None, false)?
         .into_iter()
         .map(|(name, _)| name)
         .collect();
@@ -61,7 +61,7 @@ pub fn handle_similar(
     }
 
     // Also include same-file siblings of the same kind as candidates
-    let mut same_file = db.get_symbols_by_path_prefix(&target.file_path)?;
+    let mut same_file = db.symbols_by_path_prefix(&target.file_path)?;
     for s in same_file.drain(..) {
         if s.kind == target.kind
             && (s.name != target.name || s.file_path != target.file_path)
@@ -204,7 +204,7 @@ fn score_one(
 
     if !target_callees.is_empty() {
         let cand_callees: HashSet<String> = db
-            .get_callees_by_name(cand_name, None, false)?
+            .callees_by_name(cand_name, None, false)?
             .into_iter()
             .map(|(name, _)| name)
             .collect();

@@ -28,7 +28,7 @@ pub fn handle_cross_callpath(
         other_repos
     };
 
-    let callees = primary_db.get_direct_callees(from)?;
+    let callees = primary_db.direct_callees(from)?;
     let mut found = false;
 
     for repo in &repos_to_search {

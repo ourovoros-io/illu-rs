@@ -3976,7 +3976,7 @@ pub fn handle_impact() {
         assert!(count > 0, "should store at least one ref");
 
         let callers = db
-            .get_callers("resolve_symbol", "src/tools/mod.rs", false, Some("high"))
+            .callers("resolve_symbol", "src/tools/mod.rs", false, Some("high"))
             .unwrap();
         assert!(
             callers.iter().any(|c| c.name == "handle_impact"),
@@ -4023,7 +4023,7 @@ pub fn caller(db: &Database) {
         db.store_symbol_refs_fast(&refs, &map).unwrap();
 
         let callers = db
-            .get_callers("file_count", "src/db.rs", false, Some("high"))
+            .callers("file_count", "src/db.rs", false, Some("high"))
             .unwrap();
         assert!(
             callers.iter().any(|c| c.name == "caller"),
@@ -4042,7 +4042,7 @@ pub fn caller(db: &Database) {
         crate::indexer::index_repo(&db, &config).unwrap();
 
         let callees = db
-            .get_callees("ensure_indexed", "src/main.rs", false)
+            .callees("ensure_indexed", "src/main.rs", false)
             .unwrap();
         assert!(
             callees
@@ -4056,7 +4056,7 @@ pub fn caller(db: &Database) {
         );
 
         let oor_callees = db
-            .get_callees("open_or_index", "src/main.rs", false)
+            .callees("open_or_index", "src/main.rs", false)
             .unwrap();
         assert!(
             oor_callees

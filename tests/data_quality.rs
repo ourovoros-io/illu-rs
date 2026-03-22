@@ -1661,7 +1661,7 @@ fn realistic_codebase_indexes_all_symbols() {
         );
     }
 
-    let all_names = db.get_all_symbol_names().unwrap();
+    let all_names = db.all_symbol_names().unwrap();
     assert!(
         all_names.len() >= 15,
         "should index at least 15 symbols, got {}",

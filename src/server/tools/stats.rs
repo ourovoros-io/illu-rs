@@ -25,11 +25,11 @@ pub fn handle_stats(
     let total_symbols: i64 = kind_counts.iter().map(|(_, c)| c).sum();
 
     // File count
-    let file_counts = db.get_file_symbol_counts(prefix)?;
+    let file_counts = db.file_symbol_counts(prefix)?;
     let file_count = file_counts.len();
 
     // Load only functions for test coverage calculation
-    let mut functions = db.get_symbols_by_path_prefix_filtered(prefix, true)?;
+    let mut functions = db.symbols_by_path_prefix_filtered(prefix, true)?;
     functions.retain(|s| s.kind == SymbolKind::Function);
 
     // Test count
@@ -51,7 +51,7 @@ pub fn handle_stats(
         if super::is_entry_point(sym) {
             continue;
         }
-        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
+        let tests = db.related_tests(&sym.name, sym.impl_type.as_deref())?;
         if tests.is_empty() {
             untested += 1;
         }
@@ -83,7 +83,7 @@ pub fn handle_stats(
 
     // Most referenced
     let most_ref =
-        db.get_most_referenced_symbols_filtered(5, prefix, Some("high"), exclude_tests)?;
+        db.most_referenced_symbols_filtered(5, prefix, Some("high"), exclude_tests)?;
     if !most_ref.is_empty() {
         let _ = writeln!(output, "### Most Referenced\n");
         for entry in &most_ref {

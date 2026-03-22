@@ -56,7 +56,7 @@ fn collect_symbol_edges(
             if d >= max_depth {
                 continue;
             }
-            let callees = db.get_callees(&name, &file, false)?;
+            let callees = db.callees(&name, &file, false)?;
             for c in &callees {
                 edges.push((name.clone(), c.name.clone()));
                 if seen.insert((c.name.clone(), c.file_path.clone())) {
@@ -74,7 +74,7 @@ fn collect_symbol_edges(
             if d >= max_depth {
                 continue;
             }
-            let callers = db.get_callers_by_name(&name, Some("high"), false)?;
+            let callers = db.callers_by_name(&name, Some("high"), false)?;
             for (caller, _path) in &callers {
                 edges.push((caller.clone(), name.clone()));
                 if seen_up.insert(caller.clone()) {
@@ -91,7 +91,7 @@ fn collect_file_edges(
     db: &Database,
     path_prefix: &str,
 ) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
-    let deps = db.get_file_dependencies(path_prefix, Some("high"))?;
+    let deps = db.file_dependencies(path_prefix, Some("high"))?;
     let edges: Vec<(String, String)> = deps
         .into_iter()
         .map(|(src, tgt)| {
@@ -263,8 +263,8 @@ mod tests {
             ],
         )
         .unwrap();
-        let foo_id = db.get_symbol_id("foo", "src/lib.rs").unwrap().unwrap();
-        let bar_id = db.get_symbol_id("bar", "src/lib.rs").unwrap().unwrap();
+        let foo_id = db.symbol_id("foo", "src/lib.rs").unwrap().unwrap();
+        let bar_id = db.symbol_id("bar", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(foo_id, bar_id, "call", "high", Some(2))
             .unwrap();
 

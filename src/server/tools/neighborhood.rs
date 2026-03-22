@@ -116,14 +116,14 @@ fn bfs_collect(
         }
         let neighbors: Vec<(String, String)> = match direction {
             BfsDir::Down => {
-                let callees = db.get_callees(&current_name, &current_file, exclude_tests)?;
+                let callees = db.callees(&current_name, &current_file, exclude_tests)?;
                 callees
                     .into_iter()
                     .filter(|c| c.kind != "const" && c.kind != "static")
                     .map(|c| (c.name, c.file_path))
                     .collect()
             }
-            BfsDir::Up => db.get_callers_by_name(&current_name, Some("high"), exclude_tests)?,
+            BfsDir::Up => db.callers_by_name(&current_name, Some("high"), exclude_tests)?,
         };
         for (neighbor, file_path) in neighbors {
             if super::NOISY_CALLEES.contains(&neighbor.as_str()) {
@@ -233,10 +233,10 @@ impl<'a> TreeRenderer<'a> {
 
         let children = if self.use_callers {
             self.db
-                .get_callers_by_name(name, Some("high"), self.exclude_tests)?
+                .callers_by_name(name, Some("high"), self.exclude_tests)?
         } else {
             self.db
-                .get_callees_by_name(name, Some("high"), self.exclude_tests)?
+                .callees_by_name(name, Some("high"), self.exclude_tests)?
         };
 
         let child_prefix = if is_root {

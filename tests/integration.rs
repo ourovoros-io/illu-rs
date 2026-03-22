@@ -90,7 +90,7 @@ impl std::fmt::Display for Config {
     };
     index_repo(&db, &config).unwrap();
 
-    let serde_id = db.get_dependency_id("serde").unwrap().unwrap();
+    let serde_id = db.dependency_id("serde").unwrap().unwrap();
     db.store_doc(
         serde_id,
         "docs.rs",

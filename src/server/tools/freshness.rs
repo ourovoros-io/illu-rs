@@ -11,7 +11,7 @@ pub fn handle_freshness(
     let _ = writeln!(output, "## Index Freshness\n");
 
     let repo_str = repo_path.to_string_lossy();
-    let indexed_hash = db.get_commit_hash(&repo_str)?;
+    let indexed_hash = db.commit_hash(&repo_str)?;
 
     let head_output = Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -25,7 +25,7 @@ pub fn handle_freshness(
     let _ = writeln!(output, "- **Indexed commit:** `{indexed}`");
     let _ = writeln!(output, "- **Current HEAD:** `{current_head}`");
 
-    let stored_version = db.get_index_version(&repo_str)?;
+    let stored_version = db.index_version(&repo_str)?;
     let current_version = crate::indexer::INDEX_VERSION;
     let _ = writeln!(
         output,

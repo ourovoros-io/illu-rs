@@ -59,7 +59,7 @@ fn render_call_sites(
     let mut prod = Vec::new();
     let mut test = Vec::new();
     for sym in symbols {
-        for c in db.get_callers(&sym.name, &sym.file_path, false, Some("high"))? {
+        for c in db.callers(&sym.name, &sym.file_path, false, Some("high"))? {
             if path.is_some_and(|p| !c.file_path.starts_with(p)) {
                 continue;
             }
@@ -135,8 +135,8 @@ fn render_trait_impls(
     output: &mut String,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let _ = writeln!(output, "\n### Trait Implementations\n");
-    let type_impls = db.get_trait_impls_for_type(base_name)?;
-    let trait_impls = db.get_trait_impls_for_trait(base_name)?;
+    let type_impls = db.trait_impls_for_type(base_name)?;
+    let trait_impls = db.trait_impls_for_trait(base_name)?;
     if type_impls.is_empty() && trait_impls.is_empty() {
         let _ = writeln!(output, "No trait implementations found.");
     }
@@ -270,8 +270,8 @@ mod tests {
         store_symbols(&db, file_id, &symbols).unwrap();
 
         // caller references both Status definitions
-        let enum_id = db.get_symbol_id("Status", "src/lib.rs").unwrap().unwrap();
-        let caller_id = db.get_symbol_id("caller", "src/lib.rs").unwrap().unwrap();
+        let enum_id = db.symbol_id("Status", "src/lib.rs").unwrap().unwrap();
+        let caller_id = db.symbol_id("caller", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(caller_id, enum_id, "call", "high", Some(22))
             .unwrap();
 
@@ -334,13 +334,13 @@ mod tests {
         ];
         store_symbols(&db, file_id, &symbols).unwrap();
 
-        let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
+        let target_id = db.symbol_id("target", "src/lib.rs").unwrap().unwrap();
         let prod_id = db
-            .get_symbol_id("prod_caller", "src/lib.rs")
+            .symbol_id("prod_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         let test_id = db
-            .get_symbol_id("test_caller", "src/lib.rs")
+            .symbol_id("test_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(prod_id, target_id, "call", "high", Some(8))
@@ -408,13 +408,13 @@ mod tests {
         ];
         store_symbols(&db, file_id, &symbols).unwrap();
 
-        let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
+        let target_id = db.symbol_id("target", "src/lib.rs").unwrap().unwrap();
         let prod_id = db
-            .get_symbol_id("prod_caller", "src/lib.rs")
+            .symbol_id("prod_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         let test_id = db
-            .get_symbol_id("test_caller", "src/lib.rs")
+            .symbol_id("test_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(prod_id, target_id, "call", "high", Some(8))

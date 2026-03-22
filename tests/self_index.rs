@@ -332,7 +332,7 @@ fn self_no_symbol_has_inverted_line_range() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let symbols = db.get_symbols_by_path_prefix("src/").unwrap();
+    let symbols = db.symbols_by_path_prefix("src/").unwrap();
     for sym in &symbols {
         assert!(
             sym.line_start <= sym.line_end,
@@ -355,7 +355,7 @@ fn self_no_signature_contains_body() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let symbols = db.get_symbols_by_path_prefix("src/").unwrap();
+    let symbols = db.symbols_by_path_prefix("src/").unwrap();
     for sym in symbols.iter().filter(|s| s.kind == SymbolKind::Function) {
         let trimmed = sym.signature.trim();
         let without_trailing_brace = trimmed.strip_suffix('{').unwrap_or(trimmed);
@@ -388,7 +388,7 @@ fn self_all_file_paths_exist_on_disk() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let symbols = db.get_symbols_by_path_prefix("src/").unwrap();
+    let symbols = db.symbols_by_path_prefix("src/").unwrap();
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let unique_paths: std::collections::HashSet<&str> =
         symbols.iter().map(|s| s.file_path.as_str()).collect();
@@ -441,7 +441,7 @@ fn self_overview_covers_all_public_functions() {
     let db = self_db()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let symbols = db.get_symbols_by_path_prefix("src/").unwrap();
+    let symbols = db.symbols_by_path_prefix("src/").unwrap();
     let public_fns: Vec<&str> = symbols
         .iter()
         .filter(|s| s.kind == SymbolKind::Function && s.visibility == Visibility::Public)

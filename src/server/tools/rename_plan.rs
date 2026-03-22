@@ -52,7 +52,7 @@ fn write_call_sites(
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for sym in symbols {
-        let callers = db.get_callers(&sym.name, &sym.file_path, false, Some("high"))?;
+        let callers = db.callers(&sym.name, &sym.file_path, false, Some("high"))?;
         for c in callers {
             let key = (c.name.clone(), c.file_path.clone());
             if seen.insert(key) {
@@ -133,8 +133,8 @@ fn write_trait_impls(
     db: &Database,
     base_name: &str,
 ) -> Result<usize, Box<dyn std::error::Error>> {
-    let as_type = db.get_trait_impls_for_type(base_name)?;
-    let as_trait = db.get_trait_impls_for_trait(base_name)?;
+    let as_type = db.trait_impls_for_type(base_name)?;
+    let as_trait = db.trait_impls_for_trait(base_name)?;
     let all: Vec<_> = as_type.iter().chain(as_trait.iter()).collect();
     if !all.is_empty() {
         let _ = writeln!(output, "### Trait Implementations ({})\n", all.len());
@@ -224,9 +224,9 @@ mod tests {
 
         store_symbols(&db, file_id, &[target, caller1, caller2]).unwrap();
 
-        let target_id = db.get_symbol_id("do_work", "src/lib.rs").unwrap().unwrap();
-        let caller_a_id = db.get_symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
-        let caller_b_id = db.get_symbol_id("caller_b", "src/lib.rs").unwrap().unwrap();
+        let target_id = db.symbol_id("do_work", "src/lib.rs").unwrap().unwrap();
+        let caller_a_id = db.symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
+        let caller_b_id = db.symbol_id("caller_b", "src/lib.rs").unwrap().unwrap();
 
         db.insert_symbol_ref(caller_a_id, target_id, "call", "high", None)
             .unwrap();

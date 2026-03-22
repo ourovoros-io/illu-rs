@@ -42,15 +42,15 @@ pub struct PendingDoc {
 pub fn pending_docs(
     db: &crate::db::Database,
 ) -> Result<Vec<PendingDoc>, Box<dyn std::error::Error>> {
-    let deps = db.get_direct_dependencies()?;
+    let deps = db.direct_dependencies()?;
     let mut pending = Vec::new();
 
     for dep in &deps {
-        let existing = db.get_docs_for_dependency(&dep.name)?;
+        let existing = db.docs_for_dependency(&dep.name)?;
         if !existing.is_empty() {
             continue;
         }
-        let Some(dep_id) = db.get_dependency_id(&dep.name)? else {
+        let Some(dep_id) = db.dependency_id(&dep.name)? else {
             continue;
         };
         pending.push(PendingDoc {

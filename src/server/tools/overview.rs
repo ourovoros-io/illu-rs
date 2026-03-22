@@ -9,7 +9,7 @@ pub fn handle_overview(
     include_private: bool,
     limit: Option<i64>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let mut symbols = db.get_symbols_by_path_prefix_filtered(path, include_private)?;
+    let mut symbols = db.symbols_by_path_prefix_filtered(path, include_private)?;
 
     // Filter out structural items (mod/use) — overview shows API surface
     symbols.retain(|s| s.kind != SymbolKind::Mod && s.kind != SymbolKind::Use);
@@ -133,7 +133,7 @@ fn render_external_callers(db: &Database, output: &mut String, sym: &crate::db::
         return;
     }
     // get_callers_by_name returns Vec<(name, file_path)> — no target_file needed
-    let Ok(callers) = db.get_callers_by_name(&sym.name, Some("high"), false) else {
+    let Ok(callers) = db.callers_by_name(&sym.name, Some("high"), false) else {
         return;
     };
     let external: Vec<&str> = callers
@@ -159,7 +159,7 @@ fn render_external_callers(db: &Database, output: &mut String, sym: &crate::db::
 
 fn render_same_file_callees(db: &Database, output: &mut String, sym: &crate::db::StoredSymbol) {
     if sym.kind == SymbolKind::Function
-        && let Ok(callees) = db.get_callees(&sym.name, &sym.file_path, false)
+        && let Ok(callees) = db.callees(&sym.name, &sym.file_path, false)
     {
         let same_file_calls: Vec<&str> = callees
             .iter()
@@ -418,11 +418,11 @@ mod tests {
 
         // Create call refs: orchestrate -> helper_a, orchestrate -> helper_b
         let src_id = db
-            .get_symbol_id("orchestrate", "src/lib.rs")
+            .symbol_id("orchestrate", "src/lib.rs")
             .unwrap()
             .unwrap();
-        let a_id = db.get_symbol_id("helper_a", "src/lib.rs").unwrap().unwrap();
-        let b_id = db.get_symbol_id("helper_b", "src/lib.rs").unwrap().unwrap();
+        let a_id = db.symbol_id("helper_a", "src/lib.rs").unwrap().unwrap();
+        let b_id = db.symbol_id("helper_b", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(src_id, a_id, "call", "high", None)
             .unwrap();
         db.insert_symbol_ref(src_id, b_id, "call", "high", None)
@@ -658,8 +658,8 @@ mod tests {
             }],
         )
         .unwrap();
-        let do_work_id = db.get_symbol_id("do_work", "src/lib.rs").unwrap().unwrap();
-        let main_sym_id = db.get_symbol_id("main", "src/main.rs").unwrap().unwrap();
+        let do_work_id = db.symbol_id("do_work", "src/lib.rs").unwrap().unwrap();
+        let main_sym_id = db.symbol_id("main", "src/main.rs").unwrap().unwrap();
         db.insert_symbol_ref(main_sym_id, do_work_id, "call", "high", Some(3))
             .unwrap();
 
