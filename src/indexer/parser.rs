@@ -852,6 +852,14 @@ fn module_to_file(current_file: &str, module_name: &str) -> Option<String> {
     )
 }
 
+/// Resolve `super::` to the parent module's file.
+/// `src/server/tools/impact.rs` -> `src/server/tools/mod.rs`
+fn super_to_file(current_file: &str) -> Option<String> {
+    let path = std::path::Path::new(current_file);
+    let parent = path.parent()?;
+    Some(parent.join("mod.rs").to_string_lossy().to_string())
+}
+
 /// Extract type context from a simple scoped identifier like `Database::new`.
 /// Returns the type/module name if the first child is an identifier or type identifier.
 fn extract_scoped_context(node: &Node, source: &str) -> Option<String> {
@@ -1575,6 +1583,34 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
     /// module paths: we derive the target file from the current file's
     /// directory so the ref gets file-qualified → high confidence.
     fn handle_scoped_call(&mut self, child: &Node, refs: &mut Vec<SymbolRef>) -> bool {
+        // Handle super:: and self:: BEFORE extract_scoped_context,
+        // because tree-sitter uses node kinds "super"/"self" (not "identifier"),
+        // which extract_scoped_context doesn't handle.
+        if let Some(first) = child.child(0) {
+            let first_kind = first.kind();
+            if first_kind == "super" || first_kind == "self" {
+                let last_idx = u32::try_from(child.child_count().saturating_sub(1));
+                if let Some(method_node) = last_idx.ok().and_then(|i| child.child(i)) {
+                    let method_name = node_text(&method_node, self.ctx.source);
+                    let line = i64::try_from(method_node.start_position().row + 1).ok();
+                    let target_file = if first_kind == "self" {
+                        Some(self.ctx.file_path.to_string())
+                    } else {
+                        super_to_file(self.ctx.file_path)
+                    };
+                    self.try_add_qualified(
+                        &method_name,
+                        RefKind::Call,
+                        None,
+                        target_file,
+                        line,
+                        refs,
+                    );
+                }
+                return true;
+            }
+        }
+
         let Some(qualifier) = extract_scoped_context(child, self.ctx.source) else {
             return false;
         };
@@ -3759,6 +3795,72 @@ fn caller() {
             new_refs.len(),
             2,
             "Both Foo::new() and Bar::new() should be captured, got: {new_refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_refs_super_path_from_sibling_file() {
+        let source = r"
+pub fn handle_impact() {
+    super::resolve_symbol();
+}
+";
+        let known: std::collections::HashSet<String> = ["handle_impact", "resolve_symbol"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/server/tools/impact.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let rs_ref = refs
+            .iter()
+            .find(|r| r.target_name == "resolve_symbol" && r.source_name == "handle_impact");
+        assert!(
+            rs_ref.is_some(),
+            "should find super::resolve_symbol() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            rs_ref.unwrap().target_file.as_deref(),
+            Some("src/server/tools/mod.rs"),
+            "super:: from impact.rs should resolve to mod.rs"
+        );
+    }
+
+    #[test]
+    fn test_refs_self_path_resolves_to_current_file() {
+        let source = r"
+pub fn helper() {}
+
+pub fn caller() {
+    self::helper();
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "helper"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/server/tools/mod.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let helper_ref = refs
+            .iter()
+            .find(|r| r.target_name == "helper" && r.source_name == "caller");
+        assert!(
+            helper_ref.is_some(),
+            "should find self::helper() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            helper_ref.unwrap().target_file.as_deref(),
+            Some("src/server/tools/mod.rs"),
+            "self:: should resolve to the current file"
         );
     }
 }
