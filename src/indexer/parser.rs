@@ -852,6 +852,14 @@ fn module_to_file(current_file: &str, module_name: &str) -> Option<String> {
     )
 }
 
+/// Resolve `super::` to the parent module's file.
+/// `src/server/tools/impact.rs` -> `src/server/tools/mod.rs`
+fn super_to_file(current_file: &str) -> Option<String> {
+    let path = std::path::Path::new(current_file);
+    let parent = path.parent()?;
+    Some(parent.join("mod.rs").to_string_lossy().to_string())
+}
+
 /// Extract type context from a simple scoped identifier like `Database::new`.
 /// Returns the type/module name if the first child is an identifier or type identifier.
 fn extract_scoped_context(node: &Node, source: &str) -> Option<String> {
@@ -1473,7 +1481,7 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
         let noisy = target_context.is_none() && is_noisy_symbol(name);
         if name != self.fn_name
             && !noisy
-            && !self.locals.contains(name)
+            && (target_context.is_some() || !self.locals.contains(name))
             && self.ctx.known_symbols.contains(name)
             && self.seen.insert(match &target_context {
                 Some(ctx) => format!("{ctx}::{name}"),
@@ -1575,6 +1583,34 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
     /// module paths: we derive the target file from the current file's
     /// directory so the ref gets file-qualified → high confidence.
     fn handle_scoped_call(&mut self, child: &Node, refs: &mut Vec<SymbolRef>) -> bool {
+        // Handle super:: and self:: BEFORE extract_scoped_context,
+        // because tree-sitter uses node kinds "super"/"self" (not "identifier"),
+        // which extract_scoped_context doesn't handle.
+        if let Some(first) = child.child(0) {
+            let first_kind = first.kind();
+            if first_kind == "super" || first_kind == "self" {
+                let last_idx = u32::try_from(child.child_count().saturating_sub(1));
+                if let Some(method_node) = last_idx.ok().and_then(|i| child.child(i)) {
+                    let method_name = node_text(&method_node, self.ctx.source);
+                    let line = i64::try_from(method_node.start_position().row + 1).ok();
+                    let target_file = if first_kind == "self" {
+                        Some(self.ctx.file_path.to_string())
+                    } else {
+                        super_to_file(self.ctx.file_path)
+                    };
+                    self.try_add_qualified(
+                        &method_name,
+                        RefKind::Call,
+                        None,
+                        target_file,
+                        line,
+                        refs,
+                    );
+                }
+                return true;
+            }
+        }
+
         let Some(qualifier) = extract_scoped_context(child, self.ctx.source) else {
             return false;
         };
@@ -3759,6 +3795,205 @@ fn caller() {
             new_refs.len(),
             2,
             "Both Foo::new() and Bar::new() should be captured, got: {new_refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_refs_super_path_from_sibling_file() {
+        let source = r"
+pub fn handle_impact() {
+    super::resolve_symbol();
+}
+";
+        let known: std::collections::HashSet<String> = ["handle_impact", "resolve_symbol"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/server/tools/impact.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let rs_ref = refs
+            .iter()
+            .find(|r| r.target_name == "resolve_symbol" && r.source_name == "handle_impact");
+        assert!(
+            rs_ref.is_some(),
+            "should find super::resolve_symbol() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            rs_ref.unwrap().target_file.as_deref(),
+            Some("src/server/tools/mod.rs"),
+            "super:: from impact.rs should resolve to mod.rs"
+        );
+    }
+
+    #[test]
+    fn test_refs_self_path_resolves_to_current_file() {
+        let source = r"
+pub fn helper() {}
+
+pub fn caller() {
+    self::helper();
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "helper"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/server/tools/mod.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let helper_ref = refs
+            .iter()
+            .find(|r| r.target_name == "helper" && r.source_name == "caller");
+        assert!(
+            helper_ref.is_some(),
+            "should find self::helper() call, refs: {refs:?}"
+        );
+        assert_eq!(
+            helper_ref.unwrap().target_file.as_deref(),
+            Some("src/server/tools/mod.rs"),
+            "self:: should resolve to the current file"
+        );
+    }
+
+    #[test]
+    fn test_refs_local_var_does_not_shadow_method_call() {
+        // let file_count = db.file_count()?; — the local "file_count"
+        // should NOT prevent tracking the db.file_count() method call
+        let source = r"
+pub struct Database;
+
+impl Database {
+    pub fn file_count(&self) -> Result<i64, String> { Ok(0) }
+}
+
+pub fn caller(db: &Database) -> Result<(), String> {
+    let file_count = db.file_count()?;
+    let _ = file_count + 1;
+    Ok(())
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "file_count", "Database"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let fc_ref = refs
+            .iter()
+            .find(|r| r.target_name == "file_count" && r.source_name == "caller");
+        assert!(
+            fc_ref.is_some(),
+            "db.file_count() should be tracked even when 'file_count' is a local var, refs: {refs:?}"
+        );
+        assert_eq!(
+            fc_ref.unwrap().target_context.as_deref(),
+            Some("Database"),
+            "db.file_count() should have Database context"
+        );
+    }
+
+    #[test]
+    fn test_super_ref_produces_high_confidence_in_store() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        let mod_file_id = db.insert_file("src/tools/mod.rs", "h1").unwrap();
+        let impact_file_id = db.insert_file("src/tools/impact.rs", "h2").unwrap();
+
+        let mod_source = r"
+pub fn resolve_symbol() {}
+";
+        let impact_source = r"
+pub fn handle_impact() {
+    super::resolve_symbol();
+}
+";
+        let (mod_syms, _) = parse_rust_source(mod_source, "src/tools/mod.rs").unwrap();
+        let (impact_syms, _) = parse_rust_source(impact_source, "src/tools/impact.rs").unwrap();
+        crate::indexer::store::store_symbols(&db, mod_file_id, &mod_syms).unwrap();
+        crate::indexer::store::store_symbols(&db, impact_file_id, &impact_syms).unwrap();
+
+        let known: std::collections::HashSet<String> = ["resolve_symbol", "handle_impact"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            impact_source,
+            "src/tools/impact.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+
+        let map = db.build_symbol_id_map().unwrap();
+        let count = db.store_symbol_refs_fast(&refs, &map).unwrap();
+        assert!(count > 0, "should store at least one ref");
+
+        let callers = db
+            .get_callers("resolve_symbol", "src/tools/mod.rs", false, Some("high"))
+            .unwrap();
+        assert!(
+            callers.iter().any(|c| c.name == "handle_impact"),
+            "handle_impact should be a HIGH confidence caller via super::, got: {callers:?}"
+        );
+    }
+
+    #[test]
+    fn test_local_shadow_method_produces_ref_in_store() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        let db_file_id = db.insert_file("src/db.rs", "h1").unwrap();
+        let caller_file_id = db.insert_file("src/caller.rs", "h2").unwrap();
+
+        let db_source = r"
+pub struct Database;
+impl Database {
+    pub fn file_count(&self) -> i64 { 0 }
+}
+";
+        let caller_source = r"
+pub fn caller(db: &Database) {
+    let file_count = db.file_count();
+    let _ = file_count;
+}
+";
+        let (db_syms, _) = parse_rust_source(db_source, "src/db.rs").unwrap();
+        let (caller_syms, _) = parse_rust_source(caller_source, "src/caller.rs").unwrap();
+        crate::indexer::store::store_symbols(&db, db_file_id, &db_syms).unwrap();
+        crate::indexer::store::store_symbols(&db, caller_file_id, &caller_syms).unwrap();
+
+        let known: std::collections::HashSet<String> = ["Database", "file_count", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            caller_source,
+            "src/caller.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+
+        let map = db.build_symbol_id_map().unwrap();
+        db.store_symbol_refs_fast(&refs, &map).unwrap();
+
+        let callers = db
+            .get_callers("file_count", "src/db.rs", false, Some("high"))
+            .unwrap();
+        assert!(
+            callers.iter().any(|c| c.name == "caller"),
+            "caller should reference Database::file_count despite local shadowing, got: {callers:?}"
         );
     }
 }
