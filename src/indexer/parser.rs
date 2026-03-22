@@ -3905,4 +3905,95 @@ pub fn caller(db: &Database) -> Result<(), String> {
             "db.file_count() should have Database context"
         );
     }
+
+    #[test]
+    fn test_super_ref_produces_high_confidence_in_store() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        let mod_file_id = db.insert_file("src/tools/mod.rs", "h1").unwrap();
+        let impact_file_id = db.insert_file("src/tools/impact.rs", "h2").unwrap();
+
+        let mod_source = r"
+pub fn resolve_symbol() {}
+";
+        let impact_source = r"
+pub fn handle_impact() {
+    super::resolve_symbol();
+}
+";
+        let (mod_syms, _) = parse_rust_source(mod_source, "src/tools/mod.rs").unwrap();
+        let (impact_syms, _) = parse_rust_source(impact_source, "src/tools/impact.rs").unwrap();
+        crate::indexer::store::store_symbols(&db, mod_file_id, &mod_syms).unwrap();
+        crate::indexer::store::store_symbols(&db, impact_file_id, &impact_syms).unwrap();
+
+        let known: std::collections::HashSet<String> = ["resolve_symbol", "handle_impact"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            impact_source,
+            "src/tools/impact.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+
+        let map = db.build_symbol_id_map().unwrap();
+        let count = db.store_symbol_refs_fast(&refs, &map).unwrap();
+        assert!(count > 0, "should store at least one ref");
+
+        let callers = db
+            .get_callers("resolve_symbol", "src/tools/mod.rs", false, Some("high"))
+            .unwrap();
+        assert!(
+            callers.iter().any(|c| c.name == "handle_impact"),
+            "handle_impact should be a HIGH confidence caller via super::, got: {callers:?}"
+        );
+    }
+
+    #[test]
+    fn test_local_shadow_method_produces_ref_in_store() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        let db_file_id = db.insert_file("src/db.rs", "h1").unwrap();
+        let caller_file_id = db.insert_file("src/caller.rs", "h2").unwrap();
+
+        let db_source = r"
+pub struct Database;
+impl Database {
+    pub fn file_count(&self) -> i64 { 0 }
+}
+";
+        let caller_source = r"
+pub fn caller(db: &Database) {
+    let file_count = db.file_count();
+    let _ = file_count;
+}
+";
+        let (db_syms, _) = parse_rust_source(db_source, "src/db.rs").unwrap();
+        let (caller_syms, _) = parse_rust_source(caller_source, "src/caller.rs").unwrap();
+        crate::indexer::store::store_symbols(&db, db_file_id, &db_syms).unwrap();
+        crate::indexer::store::store_symbols(&db, caller_file_id, &caller_syms).unwrap();
+
+        let known: std::collections::HashSet<String> = ["Database", "file_count", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            caller_source,
+            "src/caller.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+
+        let map = db.build_symbol_id_map().unwrap();
+        db.store_symbol_refs_fast(&refs, &map).unwrap();
+
+        let callers = db
+            .get_callers("file_count", "src/db.rs", false, Some("high"))
+            .unwrap();
+        assert!(
+            callers.iter().any(|c| c.name == "caller"),
+            "caller should reference Database::file_count despite local shadowing, got: {callers:?}"
+        );
+    }
 }
