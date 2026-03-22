@@ -191,9 +191,7 @@ fn render_diff_output(
     let mut current_file = String::new();
     for (file, sym) in changed_symbols {
         // Skip structural containers — only show functions, structs, enums, etc.
-        if sym.kind == crate::indexer::parser::SymbolKind::Mod
-            || sym.kind == crate::indexer::parser::SymbolKind::Impl
-        {
+        if super::is_structural_kind(&sym.kind) {
             continue;
         }
         if *file != current_file {

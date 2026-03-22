@@ -35,14 +35,45 @@ pub mod tree;
 pub mod type_usage;
 pub mod unused;
 
-pub(crate) use crate::truncate_at as truncate_snippet;
-
 use crate::db::{Database, StoredSymbol, TestEntry};
 use crate::indexer::parser::SymbolKind;
 use rmcp::schemars;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
+
+/// Truncate a string at a char boundary, appending "..." if truncated.
+#[must_use]
+pub(crate) fn truncate_at(s: &str, max_len: usize) -> std::borrow::Cow<'_, str> {
+    if s.len() <= max_len {
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        let end = s.floor_char_boundary(max_len);
+        std::borrow::Cow::Owned(format!("{}...", &s[..end]))
+    }
+}
+
+pub(crate) use truncate_at as truncate_snippet;
+
+/// Returns true for symbol kinds that represent structural containers
+/// (Mod, Impl), not callable/nameable symbols.
+#[must_use]
+pub fn is_structural_kind(kind: &SymbolKind) -> bool {
+    match kind {
+        SymbolKind::Mod | SymbolKind::Impl => true,
+        SymbolKind::Function
+        | SymbolKind::Struct
+        | SymbolKind::Enum
+        | SymbolKind::EnumVariant
+        | SymbolKind::Trait
+        | SymbolKind::Use
+        | SymbolKind::Const
+        | SymbolKind::Static
+        | SymbolKind::TypeAlias
+        | SymbolKind::Macro
+        | SymbolKind::Union => false,
+    }
+}
 
 /// Direction for graph traversal in neighborhood and `graph_export` tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]

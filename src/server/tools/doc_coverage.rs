@@ -14,8 +14,7 @@ pub fn handle_doc_coverage(
     // Filter out non-documentable kinds
     symbols.retain(|s| {
         s.kind != SymbolKind::Use
-            && s.kind != SymbolKind::Mod
-            && s.kind != SymbolKind::Impl
+            && !super::is_structural_kind(&s.kind)
             && s.kind != SymbolKind::EnumVariant
     });
 

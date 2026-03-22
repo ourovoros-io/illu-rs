@@ -211,16 +211,18 @@ fn extract_attributes(node: &Node, source: &str) -> Option<String> {
     Some(attrs.join(", "))
 }
 
+const BODY_TRUNCATION_THRESHOLD: usize = 100;
+const BODY_HEAD_LINES: usize = 50;
+const BODY_TAIL_LINES: usize = 10;
+
 fn extract_body(node: &Node, source: &str) -> String {
     let text = &source[node.start_byte()..node.end_byte()];
     let line_count = text.lines().count();
-    if line_count > 100 {
+    if line_count > BODY_TRUNCATION_THRESHOLD {
         let lines: Vec<&str> = text.lines().collect();
-        let head_count = 50;
-        let tail_count = 10;
-        let omitted = line_count - head_count - tail_count;
-        let head: String = lines[..head_count].join("\n");
-        let tail: String = lines[line_count - tail_count..].join("\n");
+        let omitted = line_count - BODY_HEAD_LINES - BODY_TAIL_LINES;
+        let head: String = lines[..BODY_HEAD_LINES].join("\n");
+        let tail: String = lines[line_count - BODY_TAIL_LINES..].join("\n");
         format!("{head}\n// ... {omitted} lines omitted ...\n{tail}")
     } else {
         text.to_string()

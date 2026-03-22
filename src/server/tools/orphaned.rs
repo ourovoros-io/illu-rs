@@ -14,8 +14,7 @@ pub fn handle_orphaned(
     unused.retain(|s| {
         s.kind != SymbolKind::EnumVariant
             && s.kind != SymbolKind::Use
-            && s.kind != SymbolKind::Mod
-            && s.kind != SymbolKind::Impl
+            && !super::is_structural_kind(&s.kind)
     });
     unused.retain(|s| !super::is_entry_point(s));
 

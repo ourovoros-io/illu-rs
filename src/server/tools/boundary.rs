@@ -17,9 +17,8 @@ pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std:
 
     for sym in &symbols {
         if sym.kind == SymbolKind::Use
-            || sym.kind == SymbolKind::Mod
+            || super::is_structural_kind(&sym.kind)
             || sym.kind == SymbolKind::EnumVariant
-            || sym.kind == SymbolKind::Impl
         {
             continue;
         }
