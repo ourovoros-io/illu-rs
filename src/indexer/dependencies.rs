@@ -48,8 +48,13 @@ pub fn parse_cargo_toml(content: &str) -> Result<Vec<DirectDep>, toml::de::Error
     };
     let mut result = Vec::new();
     for (name, value) in &deps {
-        if !matches!(value, toml::Value::String(_) | toml::Value::Table(_)) {
-            continue;
+        match value {
+            toml::Value::String(_) | toml::Value::Table(_) => {}
+            toml::Value::Integer(_)
+            | toml::Value::Float(_)
+            | toml::Value::Boolean(_)
+            | toml::Value::Datetime(_)
+            | toml::Value::Array(_) => continue,
         }
         let (version_req, features) = crate::indexer::workspace::extract_version_features(value);
         result.push(DirectDep {
@@ -79,7 +84,7 @@ pub(crate) fn parse_cargo_lock(content: &str) -> Result<Vec<LockedDep>, toml::de
 
 /// Extract a repository URL from a Cargo.lock `source` field.
 /// Git sources look like `git+https://github.com/user/repo?branch=main#commit`.
-fn repo_url_from_lock_source(source: Option<&String>) -> Option<String> {
+fn repo_url_from_lock_source(source: Option<&str>) -> Option<String> {
     let source = source?;
     let url = source.strip_prefix("git+")?;
     // Strip fragment (#commit) and query (?branch=...)
@@ -104,7 +109,7 @@ pub fn resolve_dependencies(direct: &[DirectDep], locked: &[LockedDep]) -> Vec<R
             name: lock.name.clone(),
             version: lock.version.clone(),
             is_direct,
-            repository_url: repo_url_from_lock_source(lock.source.as_ref()),
+            repository_url: repo_url_from_lock_source(lock.source.as_deref()),
             features,
         });
     }

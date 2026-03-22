@@ -343,10 +343,18 @@ fn render_related(
     sym: &StoredSymbol,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let siblings = db.get_symbols_by_path_prefix(&sym.file_path)?;
-    let is_type_def = matches!(
-        sym.kind,
-        SymbolKind::Struct | SymbolKind::Enum | SymbolKind::Trait
-    );
+    let is_type_def = match sym.kind {
+        SymbolKind::Struct | SymbolKind::Enum | SymbolKind::Trait | SymbolKind::Union => true,
+        SymbolKind::Function
+        | SymbolKind::EnumVariant
+        | SymbolKind::Impl
+        | SymbolKind::Use
+        | SymbolKind::Mod
+        | SymbolKind::Const
+        | SymbolKind::Static
+        | SymbolKind::TypeAlias
+        | SymbolKind::Macro => false,
+    };
     let related: Vec<_> = siblings
         .iter()
         .filter(|s| s.name != sym.name || s.line_start != sym.line_start)

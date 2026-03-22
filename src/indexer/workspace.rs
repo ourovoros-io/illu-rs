@@ -52,7 +52,7 @@ pub fn parse_workspace_toml(content: &str) -> Result<WorkspaceInfo, toml::de::Er
 
 /// Iterate over all `(name, value)` pairs from dependencies,
 /// dev-dependencies, and build-dependencies tables.
-fn iter_dep_entries(parsed: &toml::Value) -> Vec<(&String, &toml::Value)> {
+fn iter_dep_entries(parsed: &toml::Value) -> Vec<(&str, &toml::Value)> {
     let tables = [
         parsed.get("dependencies"),
         parsed.get("dev-dependencies"),
@@ -64,7 +64,7 @@ fn iter_dep_entries(parsed: &toml::Value) -> Vec<(&String, &toml::Value)> {
             continue;
         };
         for (name, value) in deps {
-            entries.push((name, value));
+            entries.push((name.as_str(), value));
         }
     }
     entries
@@ -84,7 +84,7 @@ pub fn resolve_member_deps(parsed: &toml::Value, ws_deps: &[DirectDep]) -> Vec<D
         }
 
         if is_workspace_dep(value) {
-            if let Some(ws_dep) = ws_lookup.get(name.as_str()) {
+            if let Some(ws_dep) = ws_lookup.get(name) {
                 let mut resolved = (*ws_dep).clone();
                 if let Some(member_features) = value.get("features").and_then(toml::Value::as_array)
                 {
@@ -103,7 +103,7 @@ pub fn resolve_member_deps(parsed: &toml::Value, ws_deps: &[DirectDep]) -> Vec<D
 
         let (version_req, features) = extract_version_features(value);
         result.push(DirectDep {
-            name: name.clone(),
+            name: name.to_string(),
             version_req,
             features,
         });
@@ -120,7 +120,7 @@ pub fn extract_path_deps(parsed: &toml::Value) -> Vec<PathDep> {
     for (name, value) in iter_dep_entries(parsed) {
         if let Some(path) = get_path_value(value) {
             result.push(PathDep {
-                name: name.clone(),
+                name: name.to_string(),
                 path,
             });
         }

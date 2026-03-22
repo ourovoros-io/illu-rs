@@ -123,7 +123,7 @@ fn render_shared_deps(out: &mut String, repo_deps: &HashMap<String, HashSet<Stri
         return;
     }
 
-    let all_dep_names: HashSet<&String> = repo_deps.values().flatten().collect();
+    let all_dep_names: HashSet<&str> = repo_deps.values().flatten().map(String::as_str).collect();
     let mut shared: Vec<(String, Vec<String>)> = Vec::new();
     for dep in &all_dep_names {
         let users: Vec<String> = repo_deps
@@ -132,7 +132,7 @@ fn render_shared_deps(out: &mut String, repo_deps: &HashMap<String, HashSet<Stri
             .map(|(name, _)| name.clone())
             .collect();
         if users.len() >= 2 {
-            shared.push(((*dep).clone(), users));
+            shared.push(((*dep).to_string(), users));
         }
     }
 
