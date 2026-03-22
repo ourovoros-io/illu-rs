@@ -64,13 +64,54 @@ pub(crate) fn resolve_symbol(
     Ok(db.search_symbols(name)?)
 }
 
-/// Standard "symbol not found" message with hint text.
-pub(crate) fn symbol_not_found(name: &str) -> String {
-    format!(
-        "No symbol found matching '{name}'.\n\
-         Try `Type::method` syntax for methods \
-         (e.g. `Database::new`), or use `query` to search."
-    )
+/// "Symbol not found" message with fuzzy "did you mean?" suggestions.
+pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
+    let mut suggestions = Vec::new();
+
+    // Try FTS search on the full name
+    if let Ok(results) = db.search_symbols(name) {
+        suggestions.extend(results);
+    }
+
+    // For Type::method names, also try the method part alone
+    if suggestions.is_empty()
+        && let Some((_, method)) = name.split_once("::")
+        && let Ok(results) = db.search_symbols(method)
+    {
+        suggestions.extend(results);
+    }
+
+    // Deduplicate by qualified name, take top 3
+    let mut seen = std::collections::HashSet::new();
+    let suggestions: Vec<_> = suggestions
+        .into_iter()
+        .filter(|s| {
+            let key = qualified_name(s);
+            seen.insert(key)
+        })
+        .take(3)
+        .collect();
+
+    if suggestions.is_empty() {
+        format!(
+            "No symbol found matching '{name}'.\n\
+             Try `Type::method` syntax for methods \
+             (e.g. `Database::new`), or use `query` to search."
+        )
+    } else {
+        use std::fmt::Write;
+        let mut out = format!("No symbol found matching '{name}'.\n\nDid you mean:\n");
+        for s in &suggestions {
+            let qname = qualified_name(s);
+            let _ = writeln!(
+                out,
+                "- `{qname}` ({} at {}:{})",
+                s.kind, s.file_path, s.line_start
+            );
+        }
+        let _ = write!(out, "\nUse `query` to search more broadly.");
+        out
+    }
 }
 
 /// Extract the base (method) name from a possibly qualified symbol name.

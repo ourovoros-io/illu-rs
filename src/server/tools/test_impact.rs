@@ -9,7 +9,7 @@ pub fn handle_test_impact(
     let max_depth = depth.unwrap_or(5);
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(super::symbol_not_found(symbol_name));
+        return Ok(super::symbol_not_found(db, symbol_name));
     }
 
     let mut output = String::new();

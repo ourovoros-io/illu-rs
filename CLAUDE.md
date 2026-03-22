@@ -108,7 +108,7 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **Qualified caller/callee names** — Context callers/callees show `ImplType::method` format when impl_type is available, preventing ambiguity.
 - **Macro body ref extraction** — `collect_body_refs()` descends into `macro_invocation` token trees to extract potential symbol references.
 - **Module body ref extraction** — `collect_refs()` recurses into `mod_item` nodes to extract refs from functions inside modules (e.g. `#[cfg(test)] mod tests { ... }`).
-- **Calls-only graph traversal** — `get_callees_by_name` and `get_callers_by_name` filter to `sr.kind = 'call'` and exclude `Const`/`Static` target kinds, keeping call graphs focused on function calls.
+- **Calls-only graph traversal** — `get_callees_by_name` and `get_callers_by_name` filter to `sr.kind = 'call'` and exclude `Const`/`Static`/`EnumVariant` target kinds, keeping call graphs focused on function calls.
 - **Cargo test cap** — When >20 tests are related, impact/diff_impact/test_impact suggest `cargo test` without filter names instead of an unusably long command.
 - **FTS name-only for short queries** — `search_symbols` uses FTS column filter `name:"query"*` for queries <= 5 chars to prevent doc_comment noise. Longer queries still search across all FTS columns.
 - **Ref line tracking** — `symbol_refs` has a `ref_line` column storing the 1-based line where each reference occurs (captured from tree-sitter node positions). Callers in `context` and `references` show the call-site line, not the calling function's definition line. `CalleeInfo.ref_line` is `Option<i64>`; display falls back to `line_start` when NULL.
@@ -160,6 +160,10 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - **cross_impact tool** — Name-based impact search across other repos' `symbol_refs`. Shows which code in other repos references the given symbol.
 - **cross_deps tool** — Scans `Cargo.toml` across repos for path dependencies (direct source links) and shared crate dependencies.
 - **cross_callpath tool** — Finds bridge symbols between repos: callees of `from` in primary that also exist in target repo.
+- **Refresh detects committed changes** — `refresh_index` compares stored commit hash to HEAD. If they differ, runs `git diff --name-only <stored>..HEAD` to find committed .rs changes and merges them into the candidate list from `git status`. Always updates metadata (commit hash) after refresh, even when no .rs files changed.
+- **"Did you mean?" suggestions** — `symbol_not_found(db, name)` runs FTS fuzzy search and suggests top 3 matches. For `Type::method` names, also searches the method part alone. All tool handlers pass `db` to `symbol_not_found`.
+- **Boundary uses all confidence levels** — `get_callers` accepts `min_confidence: Option<&str>`. `handle_boundary` passes `None` (all confidences) for inclusive external-caller detection. `render_callers` (context) and `render_call_sites` (references) pass `Some("high")` for precision.
+- **Hotspots exclude_tests on all sections** — `get_most_referencing_symbols` accepts `exclude_tests: bool`. When true, filters `ss.is_test = 0` so test functions don't dominate "Most Referencing".
 
 ## Lint Configuration
 

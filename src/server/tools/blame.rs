@@ -10,7 +10,7 @@ pub fn handle_blame(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(super::symbol_not_found(symbol_name));
+        return Ok(super::symbol_not_found(db, symbol_name));
     }
 
     let sym = &symbols[0];

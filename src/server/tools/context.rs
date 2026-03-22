@@ -19,7 +19,7 @@ pub fn handle_context(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = resolve_symbols(db, symbol_name, file)?;
     if symbols.is_empty() {
-        return Ok(super::symbol_not_found(symbol_name));
+        return Ok(super::symbol_not_found(db, symbol_name));
     }
 
     let show =
@@ -217,7 +217,7 @@ fn render_callers(
 ) -> Result<(), Box<dyn std::error::Error>> {
     const MAX_CALLERS: usize = 30;
 
-    let mut callers = db.get_callers(&sym.name, &sym.file_path, exclude_tests)?;
+    let mut callers = db.get_callers(&sym.name, &sym.file_path, exclude_tests, Some("high"))?;
     if let Some(p) = callers_path {
         callers.retain(|c| c.file_path.starts_with(p));
     }

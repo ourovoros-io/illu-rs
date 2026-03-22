@@ -1192,10 +1192,7 @@ impl IlluServer {
 #[tool_handler]
 impl ServerHandler for IlluServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
-            ServerCapabilities::builder().enable_tools().build(),
-        )
-        .with_instructions(
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "illu-rs: Code intelligence server for Rust projects. \
              Use 'query' to search (supports attribute and signature filters), \
              'context' for symbol details (includes source body, doc comments, \

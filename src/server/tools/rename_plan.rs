@@ -9,7 +9,7 @@ pub fn handle_rename_plan(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(super::symbol_not_found(symbol_name));
+        return Ok(super::symbol_not_found(db, symbol_name));
     }
 
     let base_name = super::base_name(symbol_name);
@@ -52,7 +52,7 @@ fn write_call_sites(
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for sym in symbols {
-        let callers = db.get_callers(&sym.name, &sym.file_path, false)?;
+        let callers = db.get_callers(&sym.name, &sym.file_path, false, Some("high"))?;
         for c in callers {
             let key = (c.name.clone(), c.file_path.clone());
             if seen.insert(key) {
