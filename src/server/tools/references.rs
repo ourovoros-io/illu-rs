@@ -9,10 +9,7 @@ pub fn handle_references(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!(
-            "No symbol found matching '{symbol_name}'.\n\
-            Try `Type::method` syntax for methods, a partial name, or use `query` to search."
-        ));
+        return Ok(super::symbol_not_found(symbol_name));
     }
 
     let mut output = String::new();

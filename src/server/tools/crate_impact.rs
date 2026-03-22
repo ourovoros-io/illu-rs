@@ -13,10 +13,7 @@ pub fn handle_crate_impact(
 
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!(
-            "No symbol found matching '{symbol_name}'.\n\
-            Try `Type::method` syntax for methods (e.g. `Database::new`)."
-        ));
+        return Ok(super::symbol_not_found(symbol_name));
     }
 
     let mut output = String::new();

@@ -105,10 +105,9 @@ fn format_symbols(
         all_symbols.retain(|s| s.file_path.starts_with(p));
     }
     let mut symbols: Vec<_> = if let Some(k) = kind {
-        let k_lower = k.to_lowercase();
         all_symbols
             .into_iter()
-            .filter(|s| s.kind.to_string().to_lowercase() == k_lower)
+            .filter(|s| super::kind_matches(&s.kind, k))
             .collect()
     } else {
         all_symbols
@@ -230,10 +229,9 @@ fn format_doc_comments(
         symbols.retain(|s| s.file_path.starts_with(p));
     }
     let mut symbols: Vec<_> = if let Some(k) = kind {
-        let k_lower = k.to_lowercase();
         symbols
             .into_iter()
-            .filter(|s| s.kind.to_string().to_lowercase() == k_lower)
+            .filter(|s| super::kind_matches(&s.kind, k))
             .collect()
     } else {
         symbols
@@ -283,10 +281,9 @@ fn format_body_search(
         symbols.retain(|s| s.file_path.starts_with(p));
     }
     let mut symbols: Vec<_> = if let Some(k) = kind {
-        let k_lower = k.to_lowercase();
         symbols
             .into_iter()
-            .filter(|s| s.kind.to_string().to_lowercase() == k_lower)
+            .filter(|s| super::kind_matches(&s.kind, k))
             .collect()
     } else {
         symbols

@@ -38,6 +38,7 @@ pub mod unused;
 pub(crate) use crate::truncate_at as truncate_snippet;
 
 use crate::db::{Database, StoredSymbol, TestEntry};
+use crate::indexer::parser::SymbolKind;
 
 /// Resolve a symbol name supporting `Type::method` syntax.
 /// Falls back to plain `search_symbols` if `::` lookup yields nothing.
@@ -63,13 +64,36 @@ pub(crate) fn resolve_symbol(
     Ok(db.search_symbols(name)?)
 }
 
+/// Standard "symbol not found" message with hint text.
+pub(crate) fn symbol_not_found(name: &str) -> String {
+    format!(
+        "No symbol found matching '{name}'.\n\
+         Try `Type::method` syntax for methods \
+         (e.g. `Database::new`), or use `query` to search."
+    )
+}
+
+/// Extract the base (method) name from a possibly qualified symbol name.
+pub(crate) fn base_name(name: &str) -> &str {
+    name.split_once("::").map_or(name, |(_, m)| m)
+}
+
+/// Format a qualified name from parts.
+pub(crate) fn format_qualified(name: &str, impl_type: Option<&str>) -> String {
+    match impl_type {
+        Some(it) => format!("{it}::{name}"),
+        None => name.to_string(),
+    }
+}
+
 /// Format a symbol's qualified name (e.g. `Database::open` for methods).
 pub(crate) fn qualified_name(sym: &StoredSymbol) -> String {
-    if let Some(impl_type) = &sym.impl_type {
-        format!("{impl_type}::{}", sym.name)
-    } else {
-        sym.name.clone()
-    }
+    format_qualified(&sym.name, sym.impl_type.as_deref())
+}
+
+/// Check if a `SymbolKind` matches a user-provided kind filter string.
+pub(crate) fn kind_matches(kind: &SymbolKind, filter: &str) -> bool {
+    kind.to_string().eq_ignore_ascii_case(filter)
 }
 
 pub(crate) const NOISY_CALLEES: &[&str] = &[
@@ -182,17 +206,9 @@ pub(crate) fn render_test_list(output: &mut String, tests: &[&TestEntry]) {
             output.push('\n');
         }
     } else {
-        let _ = writeln!(
-            output,
-            "{count} tests across {} files:\n",
-            by_file.len()
-        );
+        let _ = writeln!(output, "{count} tests across {} files:\n", by_file.len());
         for (file, file_tests) in &by_file {
-            let _ = writeln!(
-                output,
-                "- **{file}** — {} tests",
-                file_tests.len()
-            );
+            let _ = writeln!(output, "- **{file}** — {} tests", file_tests.len());
         }
         let _ = writeln!(
             output,
@@ -209,7 +225,7 @@ pub(crate) fn is_entry_point(sym: &StoredSymbol) -> bool {
     }
     sym.attributes
         .as_deref()
-        .is_some_and(|a| a.contains("test"))
+        .is_some_and(crate::indexer::store::is_test_attribute)
 }
 
 #[cfg(test)]

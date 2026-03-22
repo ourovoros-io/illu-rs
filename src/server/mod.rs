@@ -11,12 +11,15 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::{Mutex, MutexGuard};
 
+const REFRESH_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[derive(Clone)]
 pub struct IlluServer {
     db: std::sync::Arc<Mutex<Database>>,
     config: std::sync::Arc<IndexConfig>,
     registry: std::sync::Arc<crate::registry::Registry>,
     tool_router: ToolRouter<Self>,
+    last_refresh: std::sync::Arc<Mutex<std::time::Instant>>,
 }
 
 impl IlluServer {
@@ -27,6 +30,11 @@ impl IlluServer {
             config: std::sync::Arc::new(config),
             registry: std::sync::Arc::new(registry),
             tool_router: Self::tool_router(),
+            last_refresh: std::sync::Arc::new(Mutex::new(
+                std::time::Instant::now()
+                    .checked_sub(REFRESH_COOLDOWN)
+                    .unwrap_or(std::time::Instant::now()),
+            )),
         }
     }
 
@@ -42,6 +50,16 @@ impl IlluServer {
     }
 
     fn refresh(&self) -> Result<(), McpError> {
+        {
+            let last = self
+                .last_refresh
+                .lock()
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            if last.elapsed() < REFRESH_COOLDOWN {
+                tracing::debug!("Refresh: skipping (within cooldown)");
+                return Ok(());
+            }
+        }
         tracing::debug!("Refresh: checking for changed files");
         let pending_docs = {
             let db = self.lock_db()?;
@@ -51,6 +69,10 @@ impl IlluServer {
             }
             crate::indexer::docs::pending_docs(&db).map_err(to_mcp_err)?
         }; // lock dropped
+
+        if let Ok(mut last) = self.last_refresh.lock() {
+            *last = std::time::Instant::now();
+        }
 
         // Fetch docs in background — don't block tool responses
         if !pending_docs.is_empty() {

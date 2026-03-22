@@ -66,19 +66,18 @@ enum Command {
     Install,
 }
 
-fn write_mcp_server_config(
-    repo_path: &Path,
+fn write_mcp_config_to(
     config_path: &Path,
+    args: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let binary = std::env::current_exe()?
         .canonicalize()?
         .to_string_lossy()
         .into_owned();
-    let repo = repo_path.canonicalize()?.to_string_lossy().into_owned();
 
     let illu_entry = serde_json::json!({
         "command": binary,
-        "args": ["--repo", repo, "serve"],
+        "args": args,
         "env": { "RUST_LOG": "warn" }
     });
 
@@ -96,6 +95,14 @@ fn write_mcp_server_config(
     std::fs::write(config_path, serde_json::to_string_pretty(&config)?)?;
     tracing::info!("Wrote MCP config to {}", config_path.display());
     Ok(())
+}
+
+fn write_mcp_server_config(
+    repo_path: &Path,
+    config_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let repo = repo_path.canonicalize()?.to_string_lossy().into_owned();
+    write_mcp_config_to(config_path, &["--repo", &repo, "serve"])
 }
 
 fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -305,24 +312,25 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    let gitignore_path = repo_path.join(".gitignore");
-    let content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
-
+fn append_gitignore_entry(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    let content = std::fs::read_to_string(path).unwrap_or_default();
     if content
         .lines()
         .any(|l| l.trim() == ".illu/" || l.trim() == ".illu")
     {
         return Ok(false);
     }
-
-    let mut new_content = content;
-    if !new_content.is_empty() && !new_content.ends_with('\n') {
-        new_content.push('\n');
+    let mut out = content;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
     }
-    new_content.push_str(".illu/\n");
-    std::fs::write(&gitignore_path, new_content)?;
+    out.push_str(".illu/\n");
+    std::fs::write(path, out)?;
     Ok(true)
+}
+
+fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    append_gitignore_entry(&repo_path.join(".gitignore"))
 }
 
 fn register_repo(repo_path: &Path) {
@@ -357,29 +365,7 @@ fn register_repo(repo_path: &Path) {
 }
 
 fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let binary = std::env::current_exe()?
-        .canonicalize()?
-        .to_string_lossy()
-        .into_owned();
-
-    let illu_entry = serde_json::json!({
-        "command": binary,
-        "args": ["serve"],
-        "env": { "RUST_LOG": "warn" }
-    });
-
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut config: serde_json::Value = std::fs::read_to_string(config_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
-
-    config["mcpServers"]["illu"] = illu_entry;
-    std::fs::write(config_path, serde_json::to_string_pretty(&config)?)?;
-    Ok(())
+    write_mcp_config_to(config_path, &["serve"])
 }
 
 const STATUSLINE_SH: &str = include_str!("../assets/statusline.sh");
@@ -435,19 +421,7 @@ fn ensure_global_gitignore(home: &Path) -> Result<(), Box<dyn std::error::Error>
     if let Some(parent) = gitignore_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
-    if content
-        .lines()
-        .any(|l| l.trim() == ".illu/" || l.trim() == ".illu")
-    {
-        return Ok(());
-    }
-    let mut new_content = content;
-    if !new_content.is_empty() && !new_content.ends_with('\n') {
-        new_content.push('\n');
-    }
-    new_content.push_str(".illu/\n");
-    std::fs::write(&gitignore_path, new_content)?;
+    append_gitignore_entry(&gitignore_path)?;
     Ok(())
 }
 

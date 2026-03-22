@@ -14,7 +14,7 @@ pub fn handle_history(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!("Symbol '{symbol_name}' not found."));
+        return Ok(super::symbol_not_found(symbol_name));
     }
 
     let sym = &symbols[0];
@@ -348,7 +348,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let repo_path = Path::new("/tmp");
         let result = handle_history(&db, repo_path, "nonexistent", None, false).unwrap();
-        assert!(result.contains("not found"));
+        assert!(result.contains("No symbol found"));
     }
 
     #[test]

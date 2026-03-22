@@ -307,8 +307,8 @@ impl Database {
                 ON dependencies(name);
             CREATE INDEX IF NOT EXISTS idx_docs_dep_id
                 ON docs(dependency_id);
-            CREATE INDEX IF NOT EXISTS idx_symbol_refs_confidence
-                ON symbol_refs(confidence);
+            CREATE INDEX IF NOT EXISTS idx_symbols_name_file
+                ON symbols(name, file_id);
             CREATE INDEX IF NOT EXISTS idx_files_crate_id
                 ON files(crate_id);
             CREATE INDEX IF NOT EXISTS idx_symbols_name_impl
@@ -801,8 +801,8 @@ impl Database {
     pub fn delete_stale_refs(&self) -> SqlResult<u64> {
         let deleted = self.conn.execute(
             "DELETE FROM symbol_refs \
-             WHERE source_symbol_id NOT IN (SELECT id FROM symbols) \
-                OR target_symbol_id NOT IN (SELECT id FROM symbols)",
+             WHERE NOT EXISTS (SELECT 1 FROM symbols WHERE id = symbol_refs.source_symbol_id) \
+                OR NOT EXISTS (SELECT 1 FROM symbols WHERE id = symbol_refs.target_symbol_id)",
             [],
         )?;
         Ok(u64::try_from(deleted).unwrap_or(0))
