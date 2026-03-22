@@ -1481,7 +1481,7 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
         let noisy = target_context.is_none() && is_noisy_symbol(name);
         if name != self.fn_name
             && !noisy
-            && !self.locals.contains(name)
+            && (target_context.is_some() || !self.locals.contains(name))
             && self.ctx.known_symbols.contains(name)
             && self.seen.insert(match &target_context {
                 Some(ctx) => format!("{ctx}::{name}"),
@@ -3861,6 +3861,48 @@ pub fn caller() {
             helper_ref.unwrap().target_file.as_deref(),
             Some("src/server/tools/mod.rs"),
             "self:: should resolve to the current file"
+        );
+    }
+
+    #[test]
+    fn test_refs_local_var_does_not_shadow_method_call() {
+        // let file_count = db.file_count()?; — the local "file_count"
+        // should NOT prevent tracking the db.file_count() method call
+        let source = r"
+pub struct Database;
+
+impl Database {
+    pub fn file_count(&self) -> Result<i64, String> { Ok(0) }
+}
+
+pub fn caller(db: &Database) -> Result<(), String> {
+    let file_count = db.file_count()?;
+    let _ = file_count + 1;
+    Ok(())
+}
+";
+        let known: std::collections::HashSet<String> = ["caller", "file_count", "Database"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let fc_ref = refs
+            .iter()
+            .find(|r| r.target_name == "file_count" && r.source_name == "caller");
+        assert!(
+            fc_ref.is_some(),
+            "db.file_count() should be tracked even when 'file_count' is a local var, refs: {refs:?}"
+        );
+        assert_eq!(
+            fc_ref.unwrap().target_context.as_deref(),
+            Some("Database"),
+            "db.file_count() should have Database context"
         );
     }
 }
