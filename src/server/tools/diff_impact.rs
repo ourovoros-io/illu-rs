@@ -189,6 +189,12 @@ fn render_diff_output(
     let _ = writeln!(output, "## Changed Symbols\n");
     let mut current_file = String::new();
     for (file, sym) in changed_symbols {
+        // Skip structural containers — only show functions, structs, enums, etc.
+        if sym.kind == crate::indexer::parser::SymbolKind::Mod
+            || sym.kind == crate::indexer::parser::SymbolKind::Impl
+        {
+            continue;
+        }
         if *file != current_file {
             current_file.clone_from(file);
             let _ = writeln!(output, "### {file}");
@@ -672,6 +678,74 @@ diff --git a/src/lib.rs b/src/lib.rs
         assert!(
             compact.contains("test_target"),
             "compact should show related test: {compact}"
+        );
+    }
+
+    #[test]
+    fn test_diff_output_filters_mod_and_impl() {
+        let db = Database::open_in_memory().unwrap();
+        let changed = vec![
+            (
+                "src/lib.rs".to_string(),
+                crate::db::StoredSymbol {
+                    name: "tests".into(),
+                    kind: SymbolKind::Mod,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 100,
+                    line_end: 200,
+                    signature: "mod tests".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ),
+            (
+                "src/lib.rs".to_string(),
+                crate::db::StoredSymbol {
+                    name: "MyStruct".into(),
+                    kind: SymbolKind::Impl,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 10,
+                    line_end: 90,
+                    signature: "impl MyStruct".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ),
+            (
+                "src/lib.rs".to_string(),
+                crate::db::StoredSymbol {
+                    name: "do_thing".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 20,
+                    line_end: 30,
+                    signature: "pub fn do_thing()".into(),
+                    doc_comment: None,
+                    body: Some("pub fn do_thing() {}".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ),
+        ];
+        let result = render_diff_output(&db, &changed, false, false, "").unwrap();
+        assert!(result.contains("do_thing"), "Should include function, got:\n{result}");
+        assert!(
+            !result.contains("**tests** (mod"),
+            "Should filter out mod, got:\n{result}"
+        );
+        assert!(
+            !result.contains("**MyStruct** (impl"),
+            "Should filter out impl, got:\n{result}"
         );
     }
 

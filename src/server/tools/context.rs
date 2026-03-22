@@ -120,7 +120,7 @@ fn render_symbol_details(
     }
 
     if let Some(body) = &sym.body {
-        let is_truncated = body.ends_with("// ... truncated");
+        let is_truncated = body.contains("// ... ") && body.contains("lines omitted ...");
         if is_truncated
             && full_body
             && let Some(full) =

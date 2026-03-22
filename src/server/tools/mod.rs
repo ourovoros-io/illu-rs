@@ -64,6 +64,54 @@ pub(crate) fn resolve_symbol(
     Ok(db.search_symbols(name)?)
 }
 
+/// Simple Levenshtein edit distance (no external dependency).
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0; b.len() + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = usize::from(!ca.eq_ignore_ascii_case(&cb));
+            curr[j + 1] = (prev[j] + cost)
+                .min(prev[j + 1] + 1)
+                .min(curr[j] + 1);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
+}
+
+/// Fuzzy-match a query against all symbol names using edit distance.
+/// Returns top 3 matches within a reasonable distance threshold.
+fn levenshtein_suggestions(
+    db: &Database,
+    query: &str,
+) -> Vec<(String, Option<String>)> {
+    let all_names = db.get_all_distinct_symbol_names().unwrap_or_default();
+    let max_dist = (query.len() * 2 / 5).max(2);
+    let mut scored: Vec<(usize, String, Option<String>)> = all_names
+        .into_iter()
+        .map(|(name, impl_type)| {
+            let qname = if let Some(ref it) = impl_type {
+                format!("{it}::{name}")
+            } else {
+                name.clone()
+            };
+            let dist = levenshtein(query, &qname);
+            (dist, name, impl_type)
+        })
+        .filter(|(dist, _, _)| *dist <= max_dist)
+        .collect();
+    scored.sort_by_key(|(dist, _, _)| *dist);
+    scored.truncate(3);
+    scored
+        .into_iter()
+        .map(|(_, name, impl_type)| (name, impl_type))
+        .collect()
+}
+
 /// "Symbol not found" message with fuzzy "did you mean?" suggestions.
 pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
     // Reuse resolve_symbol which already tries Type::method, exact, and FTS
@@ -87,13 +135,7 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
         .take(3)
         .collect();
 
-    if suggestions.is_empty() {
-        format!(
-            "No symbol found matching '{name}'.\n\
-             Try `Type::method` syntax for methods \
-             (e.g. `Database::new`), or use `query` to search."
-        )
-    } else {
+    if !suggestions.is_empty() {
         use std::fmt::Write;
         let mut out = format!("No symbol found matching '{name}'.\n\nDid you mean:\n");
         for s in &suggestions {
@@ -105,8 +147,33 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
             );
         }
         let _ = write!(out, "\nUse `query` to search more broadly.");
-        out
+        return out;
     }
+
+    // FTS returned nothing — fall back to Levenshtein edit distance
+    let lev_matches = levenshtein_suggestions(db, name);
+    if !lev_matches.is_empty() {
+        use std::fmt::Write;
+        let mut out = format!(
+            "No symbol found matching '{name}'.\n\nDid you mean:\n",
+        );
+        for (sym_name, impl_type) in &lev_matches {
+            let qname = if let Some(it) = impl_type {
+                format!("{it}::{sym_name}")
+            } else {
+                sym_name.clone()
+            };
+            let _ = writeln!(out, "- `{qname}`");
+        }
+        let _ = write!(out, "\nUse `query` to search more broadly.");
+        return out;
+    }
+
+    format!(
+        "No symbol found matching '{name}'.\n\
+         Try `Type::method` syntax for methods \
+         (e.g. `Database::new`), or use `query` to search."
+    )
 }
 
 /// Extract the base (method) name from a possibly qualified symbol name.
@@ -403,5 +470,71 @@ mod tests {
         let result = symbol_not_found(&db, "zzz_nonexistent_zzz");
         assert!(result.contains("No symbol found"));
         assert!(!result.contains("Did you mean"));
+    }
+
+    #[test]
+    fn test_symbol_not_found_typo_suggests_levenshtein() {
+        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+        use crate::indexer::store::store_symbols;
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "h1").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "open_database".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "fn open_database()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+        let result = symbol_not_found(&db, "open_databse");
+        assert!(
+            result.contains("open_database"),
+            "Should suggest 'open_database' for typo 'open_databse', \
+             got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_symbol_not_found_typo_qualified() {
+        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+        use crate::indexer::store::store_symbols;
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/db.rs", "h1").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "open".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/db.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "fn open()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: Some("Database".into()),
+            }],
+        )
+        .unwrap();
+        let result = symbol_not_found(&db, "Databse::opn");
+        assert!(
+            result.contains("Database::open"),
+            "Should suggest 'Database::open' for typo 'Databse::opn', \
+             got: {result}"
+        );
     }
 }

@@ -183,7 +183,7 @@ fn line_numbers_survive_body_truncation() {
     // Verify the body IS truncated
     let body = sym.body.as_deref().unwrap();
     assert!(
-        body.contains("// ... truncated"),
+        body.contains("// ... ") && body.contains("lines omitted ..."),
         "body should be truncated"
     );
 }
@@ -1553,13 +1553,13 @@ fn context_full_body_returns_untruncated_source() {
 
     let result = context::handle_context(&db, "big_fn", false, None, None, None, false).unwrap();
     assert!(
-        result.contains("truncated"),
+        result.contains("lines omitted ..."),
         "should be truncated without full_body: {result}"
     );
 
     let result = context::handle_context(&db, "big_fn", true, None, None, None, false).unwrap();
     assert!(
-        !result.contains("truncated"),
+        !result.contains("lines omitted ..."),
         "should NOT be truncated with full_body: {result}"
     );
     assert!(

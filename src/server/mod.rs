@@ -99,7 +99,7 @@ impl IlluServer {
 struct QueryParams {
     /// Search term. Use `*` to match all names when filtering by signature, path, or attribute.
     query: String,
-    /// Search scope: symbols (default), docs, files, all, `doc_comments`, bodies
+    /// Search scope: symbols (default), docs, files, all, `doc_comments`, bodies, strings
     scope: Option<String>,
     kind: Option<String>,
     /// Filter by attribute/derive (e.g. "test", "derive(Serialize)")
@@ -369,6 +369,9 @@ struct GraphExportParams {
     /// Direction for symbol graph: "down" (callees only), "up" (callers only),
     /// "both" (default). Only applies to symbol graphs, not file graphs.
     direction: Option<String>,
+    /// Output format: "dot" (Graphviz, default), "edges" (compact edge list for AI),
+    /// "summary" (node/edge counts, roots, leaves).
+    format: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -420,7 +423,7 @@ fn text_result(text: String) -> CallToolResult {
 impl IlluServer {
     #[tool(
         name = "query",
-        description = "Search the codebase for symbols, documentation, or files. Scope: symbols (default), docs, files, all, doc_comments, bodies. Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results). Use query='*' with signature/path/attribute filters to search without a name."
+        description = "Search the codebase for symbols, documentation, or files. Scope: symbols (default), docs, files, all, doc_comments, bodies, strings. Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results). Use query='*' with signature/path/attribute filters to search without a name."
     )]
     async fn query(
         &self,
@@ -1025,13 +1028,13 @@ impl IlluServer {
 
     #[tool(
         name = "graph_export",
-        description = "Export a call graph or file dependency graph in DOT/Graphviz format. Provide `symbol_name` for a symbol call graph, or `path` for a file dependency graph."
+        description = "Export a call graph or file dependency graph. Provide `symbol_name` for a symbol call graph, or `path` for a file dependency graph. Format: \"dot\" (Graphviz, default), \"edges\" (compact A -> B lines for AI), \"summary\" (node/edge counts with roots and leaves)."
     )]
     async fn graph_export(
         &self,
         Parameters(params): Parameters<GraphExportParams>,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!(symbol = ?params.symbol_name, path = ?params.path, "Tool call: graph_export");
+        tracing::info!(symbol = ?params.symbol_name, path = ?params.path, format = ?params.format, "Tool call: graph_export");
         let _guard = crate::status::StatusGuard::new("graph_export");
         self.refresh()?;
         let db = self.lock_db()?;
@@ -1041,6 +1044,7 @@ impl IlluServer {
             params.path.as_deref(),
             params.depth,
             params.direction.as_deref(),
+            params.format.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))

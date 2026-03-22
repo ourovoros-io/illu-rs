@@ -99,6 +99,7 @@ pub fn handle_overview(
             let _ = writeln!(output);
 
             render_same_file_callees(db, &mut output, sym);
+            render_external_callers(db, &mut output, sym);
         }
     }
 
@@ -124,6 +125,35 @@ pub fn handle_overview(
     );
 
     Ok(output)
+}
+
+fn render_external_callers(db: &Database, output: &mut String, sym: &crate::db::StoredSymbol) {
+    if sym.kind != SymbolKind::Function {
+        return;
+    }
+    // get_callers_by_name returns Vec<(name, file_path)> — no target_file needed
+    let Ok(callers) = db.get_callers_by_name(&sym.name, Some("high"), false) else {
+        return;
+    };
+    let external: Vec<&str> = callers
+        .iter()
+        .filter(|(_, file)| *file != sym.file_path)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    if external.is_empty() {
+        return;
+    }
+    let shown: Vec<&str> = external.iter().take(3).copied().collect();
+    let overflow = external.len().saturating_sub(3);
+    if overflow > 0 {
+        let _ = writeln!(
+            output,
+            "    called by: {} (+{overflow} more)",
+            shown.join(", ")
+        );
+    } else {
+        let _ = writeln!(output, "    called by: {}", shown.join(", "));
+    }
 }
 
 fn render_same_file_callees(db: &Database, output: &mut String, sym: &crate::db::StoredSymbol) {
@@ -581,6 +611,61 @@ mod tests {
         assert!(
             !result.contains("use std::io"),
             "use entries should be filtered from overview: {result}"
+        );
+    }
+
+    #[test]
+    fn test_overview_shows_external_callers() {
+        let db = Database::open_in_memory().unwrap();
+        let lib_id = db.insert_file("src/lib.rs", "h1").unwrap();
+        let main_id = db.insert_file("src/main.rs", "h2").unwrap();
+        store_symbols(
+            &db,
+            lib_id,
+            &[Symbol {
+                name: "do_work".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 10,
+                signature: "pub fn do_work()".into(),
+                doc_comment: None,
+                body: Some("pub fn do_work() { }".into()),
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+        store_symbols(
+            &db,
+            main_id,
+            &[Symbol {
+                name: "main".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/main.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "fn main()".into(),
+                doc_comment: None,
+                body: Some("fn main() { do_work(); }".into()),
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+        let do_work_id = db.get_symbol_id("do_work", "src/lib.rs").unwrap().unwrap();
+        let main_sym_id = db.get_symbol_id("main", "src/main.rs").unwrap().unwrap();
+        db.insert_symbol_ref(main_sym_id, do_work_id, "call", "high", Some(3))
+            .unwrap();
+
+        let result = handle_overview(&db, "src/lib.rs", false, None).unwrap();
+        assert!(
+            result.contains("called by:") && result.contains("main"),
+            "Should show 'called by: main' for do_work, got:\n{result}"
         );
     }
 }
