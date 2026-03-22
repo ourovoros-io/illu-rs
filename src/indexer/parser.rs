@@ -196,7 +196,7 @@ fn extract_attributes(node: &Node, source: &str) -> Option<String> {
                 let inner = text
                     .strip_prefix("#[")
                     .and_then(|s| s.strip_suffix(']'))
-                    .unwrap_or(&text);
+                    .unwrap_or(text);
                 attrs.push(inner.trim().to_string());
             }
             "line_comment" | "block_comment" => {}
@@ -323,7 +323,7 @@ fn extract_symbols(
                 extract_impl_block(&child, source, file_path, symbols, trait_impls);
             }
             "use_declaration" => {
-                let text = node_text(&child, source);
+                let text = node_text(&child, source).to_owned();
                 let (line_start, line_end) = line_range(&child);
                 symbols.push(Symbol {
                     name: text.clone(),
@@ -368,7 +368,7 @@ fn extract_symbols(
 
 fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
     let name = find_child_by_kind(node, "identifier")?;
-    let name_text = node_text(&name, source);
+    let name_text = node_text(&name, source).to_owned();
     let vis = get_visibility(node, source);
     let sig = get_signature(node, source);
     let (line_start, line_end) = line_range(node);
@@ -391,7 +391,7 @@ fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol
 
 fn extract_function_signature(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
     let name = find_child_by_kind(node, "identifier")?;
-    let name_text = node_text(&name, source);
+    let name_text = node_text(&name, source).to_owned();
     let vis = get_visibility(node, source);
     let sig = get_signature(node, source);
     let (line_start, line_end) = line_range(node);
@@ -419,9 +419,7 @@ fn extract_struct_details(node: &Node, source: &str) -> Option<String> {
         let mut cursor = list.walk();
         for child in list.children(&mut cursor) {
             if child.kind() == "field_declaration" {
-                let text = node_text(&child, source).trim_end().to_string();
-                let text = text.strip_suffix(',').unwrap_or(&text).to_string();
-                fields.push(text);
+                fields.push(normalize_field_text(&child, source));
             }
         }
         if !fields.is_empty() {
@@ -435,7 +433,7 @@ fn extract_struct_details(node: &Node, source: &str) -> Option<String> {
         let inner = text
             .strip_prefix('(')
             .and_then(|s| s.strip_suffix(')'))
-            .unwrap_or(&text);
+            .unwrap_or(text);
         let fields: Vec<&str> = inner
             .split(',')
             .map(str::trim)
@@ -459,9 +457,7 @@ fn extract_enum_details(node: &Node, source: &str) -> Option<String> {
     let mut cursor = list.walk();
     for child in list.children(&mut cursor) {
         if child.kind() == "enum_variant" {
-            let text = node_text(&child, source).trim_end().to_string();
-            let text = text.strip_suffix(',').unwrap_or(&text).to_string();
-            variants.push(text);
+            variants.push(normalize_field_text(&child, source));
         }
     }
     if variants.is_empty() {
@@ -487,9 +483,8 @@ fn extract_enum_variants(
             let Some(name_node) = find_child_by_kind(&child, "identifier") else {
                 continue;
             };
-            let variant_name = node_text(&name_node, source);
-            let text = node_text(&child, source).trim_end().to_string();
-            let text = text.strip_suffix(',').unwrap_or(&text).to_string();
+            let variant_name = node_text(&name_node, source).to_owned();
+            let text = normalize_field_text(&child, source);
             let (line_start, line_end) = line_range(&child);
             symbols.push(Symbol {
                 name: variant_name,
@@ -542,7 +537,7 @@ fn extract_named_item(
 ) -> Option<Symbol> {
     let name_node = find_child_by_kind(node, "type_identifier")
         .or_else(|| find_child_by_kind(node, "identifier"))?;
-    let name = node_text(&name_node, source);
+    let name = node_text(&name_node, source).to_owned();
     let vis = get_visibility(node, source);
     let sig = get_signature(node, source);
 
@@ -572,7 +567,7 @@ fn extract_named_item(
 
 fn extract_macro_def(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
     let name = find_child_by_kind(node, "identifier")?;
-    let name_text = node_text(&name, source);
+    let name_text = node_text(&name, source).to_owned();
     let sig = get_signature(node, source);
     let (line_start, line_end) = line_range(node);
 
@@ -596,7 +591,7 @@ fn extract_impl_type(node: &Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     node.children(&mut cursor)
         .find(|child| child.kind() == "type_identifier" || child.kind() == "generic_type")
-        .map(|child| node_text(&child, source))
+        .map(|child| node_text(&child, source).to_owned())
 }
 
 fn is_type_node(kind: &str) -> bool {
@@ -607,9 +602,9 @@ fn extract_type_name(node: &Node, source: &str) -> String {
     if node.kind() == "generic_type"
         && let Some(base) = find_child_by_kind(node, "type_identifier")
     {
-        return node_text(&base, source);
+        return node_text(&base, source).to_owned();
     }
-    node_text(node, source)
+    node_text(node, source).to_owned()
 }
 
 fn extract_trait_impl_info(node: &Node, source: &str, file_path: &str) -> Option<TraitImpl> {
@@ -726,8 +721,14 @@ fn find_child_by_kind<'a>(node: &'a Node, kind: &str) -> Option<Node<'a>> {
         .find(|child| child.kind() == kind)
 }
 
-fn node_text(node: &Node, source: &str) -> String {
-    source[node.byte_range()].to_string()
+fn node_text<'a>(node: &Node, source: &'a str) -> &'a str {
+    &source[node.byte_range()]
+}
+
+/// Normalize a struct/enum field declaration: trim trailing whitespace and comma.
+fn normalize_field_text(node: &Node, source: &str) -> String {
+    let text = node_text(node, source).trim_end();
+    text.strip_suffix(',').unwrap_or(text).to_owned()
 }
 
 fn get_signature(node: &Node, source: &str) -> String {
@@ -875,7 +876,7 @@ fn extract_scoped_context(node: &Node, source: &str) -> Option<String> {
     let first = node.child(0)?;
     let kind = first.kind();
     if kind == "identifier" || kind == "type_identifier" {
-        Some(node_text(&first, source))
+        Some(node_text(&first, source).to_owned())
     } else {
         None
     }
@@ -1004,7 +1005,7 @@ fn collect_use_entries(
             let path_text = if let Some(first) = children.first() {
                 let text = node_text(first, source);
                 if prefix.is_empty() {
-                    text
+                    text.to_owned()
                 } else {
                     format!("{prefix}::{text}")
                 }
@@ -1016,7 +1017,7 @@ fn collect_use_entries(
             {
                 let alias = node_text(alias_node, source);
                 map.insert(
-                    alias,
+                    alias.to_owned(),
                     ImportInfo {
                         qualified_path: path_text,
                     },
@@ -1027,7 +1028,7 @@ fn collect_use_entries(
             // Direct import like `use crate::config::Config;`
             let text = node_text(node, source);
             let full_path = if prefix.is_empty() {
-                text.clone()
+                text.to_owned()
             } else {
                 format!("{prefix}::{text}")
             };
@@ -1044,12 +1045,12 @@ fn collect_use_entries(
             // Bare identifier (inside a use_list or standalone)
             let name = node_text(node, source);
             let full_path = if prefix.is_empty() {
-                name.clone()
+                name.to_owned()
             } else {
                 format!("{prefix}::{name}")
             };
             map.insert(
-                name,
+                name.to_owned(),
                 ImportInfo {
                     qualified_path: full_path,
                 },
@@ -1066,7 +1067,7 @@ fn collect_use_entries(
                     "identifier" | "scoped_identifier" | "self" => {
                         let seg = node_text(c, source);
                         path_prefix = if prefix.is_empty() {
-                            seg
+                            seg.to_owned()
                         } else {
                             format!("{prefix}::{seg}")
                         };
@@ -1149,7 +1150,7 @@ fn collect_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                     continue;
                 };
                 let fn_name = node_text(&name_node, ctx.source);
-                collect_body_refs(&child, &fn_name, impl_type, ctx, refs);
+                collect_body_refs(&child, fn_name, impl_type, ctx, refs);
             }
             "impl_item" => {
                 let type_name = extract_impl_type(&child, ctx.source);
@@ -1178,7 +1179,7 @@ fn collect_derive_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     let name_node = find_child_by_kind(node, "type_identifier")
         .or_else(|| find_child_by_kind(node, "identifier"));
     let Some(name_node) = name_node else { return };
-    let source_name = node_text(&name_node, ctx.source);
+    let source_name = node_text(&name_node, ctx.source).to_owned();
 
     let Some(attrs) = extract_attributes(node, ctx.source) else {
         return;
@@ -1221,7 +1222,7 @@ fn collect_pattern_identifiers(
         let mut cursor = n.walk();
         for child in n.children(&mut cursor) {
             if child.kind() == "identifier" {
-                locals.insert(node_text(&child, source));
+                locals.insert(node_text(&child, source).to_owned());
             } else {
                 stack.push(child);
             }
@@ -1239,7 +1240,7 @@ fn collect_locals(node: &Node, source: &str) -> HashSet<String> {
             match child.kind() {
                 "parameter" | "self_parameter" | "let_declaration" | "for_expression" => {
                     if let Some(pat) = find_child_by_kind(&child, "identifier") {
-                        locals.insert(node_text(&pat, source));
+                        locals.insert(node_text(&pat, source).to_owned());
                     }
                 }
                 "closure_parameters" => {
@@ -1263,11 +1264,11 @@ fn collect_locals(node: &Node, source: &str) -> HashSet<String> {
 /// `Vec<String>` → `Vec`, `Option<&str>` → `Option`.
 fn extract_type_from_node(node: &Node, source: &str) -> Option<String> {
     match node.kind() {
-        "type_identifier" => Some(node_text(node, source)),
+        "type_identifier" => Some(node_text(node, source).to_owned()),
         "scoped_type_identifier" => {
             // e.g. std::io::Result → last segment
             let text = node_text(node, source);
-            text.rsplit("::").next().map(String::from)
+            text.rsplit("::").next().map(str::to_owned)
         }
         "reference_type" => {
             // &T or &mut T → recurse to find the inner type
@@ -1281,7 +1282,7 @@ fn extract_type_from_node(node: &Node, source: &str) -> Option<String> {
         }
         "generic_type" => {
             // Vec<T> → "Vec" (the outer type)
-            find_child_by_kind(node, "type_identifier").map(|n| node_text(&n, source))
+            find_child_by_kind(node, "type_identifier").map(|n| node_text(&n, source).to_owned())
         }
         "pointer_type" => {
             // *mut T or *const T → recurse to inner type
@@ -1305,7 +1306,7 @@ fn extract_type_from_node(node: &Node, source: &str) -> Option<String> {
         }
         "dynamic_type" => {
             // dyn Trait → extract the trait name
-            find_child_by_kind(node, "type_identifier").map(|n| node_text(&n, source))
+            find_child_by_kind(node, "type_identifier").map(|n| node_text(&n, source).to_owned())
         }
         _ => None,
     }
@@ -1348,13 +1349,13 @@ fn infer_type_from_call_func(node: &Node, source: &str) -> Option<String> {
         // Type::method — first child is the type
         let first = node.child(0)?;
         match first.kind() {
-            "type_identifier" => Some(node_text(&first, source)),
+            "type_identifier" => Some(node_text(&first, source).to_owned()),
             "identifier" => {
                 // Could be a module path like `module::func`,
                 // only treat as type if it looks like UpperCamelCase
                 let name = node_text(&first, source);
                 if name.chars().next().is_some_and(char::is_uppercase) {
-                    Some(name)
+                    Some(name.to_owned())
                 } else {
                     None
                 }
@@ -1404,7 +1405,7 @@ fn collect_local_types(
                 let mut inner = param.walk();
                 for child in param.children(&mut inner) {
                     if let Some(t) = extract_type_from_node(&child, source) {
-                        types.insert(name, t);
+                        types.insert(name.to_owned(), t);
                         break;
                     }
                 }
@@ -1426,7 +1427,7 @@ fn collect_local_types(
                 let mut inner = child.walk();
                 for c in child.children(&mut inner) {
                     if let Some(t) = extract_type_from_node(&c, source) {
-                        types.insert(name.clone(), t);
+                        types.insert(name.to_owned(), t);
                         found = true;
                         break;
                     }
@@ -1441,7 +1442,7 @@ fn collect_local_types(
                             || c.kind() == "try_expression"
                         {
                             if let Some(t) = infer_type_from_value(&c, source) {
-                                types.insert(name.clone(), t);
+                                types.insert(name.to_owned(), t);
                             }
                             break;
                         }
@@ -1560,7 +1561,7 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
             return true;
         };
         let line = i64::try_from(child.start_position().row + 1).ok();
-        let target_file = qualified_path_to_files_with_crates(&text, self.ctx.crate_map)
+        let target_file = qualified_path_to_files_with_crates(text, self.ctx.crate_map)
             .into_iter()
             .next();
 
@@ -1616,7 +1617,7 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
                         super_to_file(self.ctx.file_path)
                     };
                     self.try_add_qualified(
-                        &method_name,
+                        method_name,
                         RefKind::Call,
                         None,
                         target_file,
@@ -1639,11 +1640,11 @@ impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_,
             let is_module = qualifier.starts_with(|c: char| c.is_lowercase());
             if is_module {
                 let target_file = module_to_file(self.ctx.file_path, &qualifier);
-                self.try_add_qualified(&method_name, RefKind::Call, None, target_file, line, refs);
+                self.try_add_qualified(method_name, RefKind::Call, None, target_file, line, refs);
             } else if self.ctx.known_symbols.contains(&qualifier)
-                || !is_constructor_name(&method_name)
+                || !is_constructor_name(method_name)
             {
-                self.try_add(&method_name, RefKind::Call, Some(qualifier), line, refs);
+                self.try_add(method_name, RefKind::Call, Some(qualifier), line, refs);
             }
         }
         true
@@ -1679,7 +1680,7 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                         RefKind::Call
                     };
                     let line = i64::try_from(child.start_position().row + 1).ok();
-                    col.try_add(&name, ref_kind, None, line, refs);
+                    col.try_add(name, ref_kind, None, line, refs);
                 }
                 "field_identifier" => {
                     let name = node_text(&child, ctx.source);
@@ -1692,13 +1693,13 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                             "self" => impl_type.map(String::from),
                             "identifier" => {
                                 let var_name = node_text(&receiver, ctx.source);
-                                local_types.get(&var_name).cloned()
+                                local_types.get(var_name).cloned()
                             }
                             _ => None,
                         }
                     });
                     let line = i64::try_from(child.start_position().row + 1).ok();
-                    col.try_add(&name, RefKind::Call, target_context, line, refs);
+                    col.try_add(name, RefKind::Call, target_context, line, refs);
                 }
                 "scoped_identifier" => {
                     if !col.handle_crate_path(&child, refs) && !col.handle_scoped_call(&child, refs)
@@ -1720,7 +1721,7 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                                     RefKind::Call
                                 };
                                 let line = i64::try_from(mchild.start_position().row + 1).ok();
-                                col.try_add(&name, ref_kind, None, line, refs);
+                                col.try_add(name, ref_kind, None, line, refs);
                             } else {
                                 macro_stack.push(mchild);
                             }
