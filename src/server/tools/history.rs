@@ -5,48 +5,69 @@ use std::path::Path;
 const MAX_OUTPUT_CHARS: usize = 4000;
 const MAX_DIFF_LINES_PER_COMMIT: usize = 60;
 
-pub fn handle_history(
+/// Data extracted from the DB needed to run git history.
+pub struct HistoryTarget {
+    pub qname: String,
+    pub file_path: String,
+    pub line_start: i64,
+    pub line_end: i64,
+}
+
+/// Resolve the symbol from the database, returning the target info
+/// needed for git history. Returns `None` (with a not-found message)
+/// if the symbol cannot be resolved.
+pub fn resolve_history_target(
     db: &Database,
-    repo_path: &Path,
     symbol_name: &str,
+) -> Result<Result<HistoryTarget, String>, Box<dyn std::error::Error>> {
+    let symbols = super::resolve_symbol(db, symbol_name)?;
+    if symbols.is_empty() {
+        return Ok(Err(super::symbol_not_found(db, symbol_name)));
+    }
+    let sym = &symbols[0];
+    Ok(Ok(HistoryTarget {
+        qname: super::qualified_name(sym),
+        file_path: sym.file_path.clone(),
+        line_start: sym.line_start,
+        line_end: sym.line_end,
+    }))
+}
+
+/// Run git log and format the output. Does not require DB access.
+pub fn run_and_format_history(
+    repo_path: &Path,
+    target: &HistoryTarget,
     max_commits: Option<i64>,
     show_diff: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let symbols = super::resolve_symbol(db, symbol_name)?;
-    if symbols.is_empty() {
-        return Ok(super::symbol_not_found(db, symbol_name));
-    }
-
-    let sym = &symbols[0];
-    let qname = super::qualified_name(sym);
     let limit = max_commits.unwrap_or(10);
 
     if show_diff {
         return format_diff_history(
             repo_path,
-            &qname,
-            &sym.file_path,
-            sym.line_start,
-            sym.line_end,
+            &target.qname,
+            &target.file_path,
+            target.line_start,
+            target.line_end,
             limit,
         );
     }
 
     let log_output = run_git_log(
         repo_path,
-        &sym.file_path,
-        sym.line_start,
-        sym.line_end,
+        &target.file_path,
+        target.line_start,
+        target.line_end,
         limit,
     )?;
 
     let commits = parse_log_output(&log_output);
     let mut output = String::new();
-    let _ = writeln!(output, "## History: {qname}\n");
+    let _ = writeln!(output, "## History: {}\n", target.qname);
     let _ = writeln!(
         output,
         "- **File:** {}:{}-{}",
-        sym.file_path, sym.line_start, sym.line_end
+        target.file_path, target.line_start, target.line_end
     );
 
     if commits.is_empty() {
@@ -67,6 +88,20 @@ pub fn handle_history(
     }
 
     Ok(output)
+}
+
+pub fn handle_history(
+    db: &Database,
+    repo_path: &Path,
+    symbol_name: &str,
+    max_commits: Option<i64>,
+    show_diff: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let target = match resolve_history_target(db, symbol_name)? {
+        Ok(t) => t,
+        Err(msg) => return Ok(msg),
+    };
+    run_and_format_history(repo_path, &target, max_commits, show_diff)
 }
 
 fn format_diff_history(

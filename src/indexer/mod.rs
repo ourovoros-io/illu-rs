@@ -291,6 +291,12 @@ fn index_workspace(
         for pd in pds {
             let target_toml_path = member_dir.join(&pd.path).join("Cargo.toml");
             let resolved_name = std::fs::read_to_string(&target_toml_path)
+                .inspect_err(|e| {
+                    tracing::debug!(
+                        "Could not read {}: {e}",
+                        target_toml_path.display()
+                    );
+                })
                 .ok()
                 .and_then(|content| extract_package_name(&content))
                 .unwrap_or(pd.name);
@@ -448,8 +454,9 @@ fn generate_skill_file(
 pub const INDEX_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn update_metadata(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let commit_hash =
-        get_current_commit_hash(&config.repo_path).unwrap_or_else(|_| "unknown".to_string());
+    let commit_hash = get_current_commit_hash(&config.repo_path)
+        .inspect_err(|e| tracing::debug!("Could not get commit hash: {e}"))
+        .unwrap_or_else(|_| "unknown".to_string());
     db.set_metadata(
         &config.repo_path.display().to_string(),
         &commit_hash,
@@ -469,7 +476,9 @@ fn parse_cargo_lock(
 }
 
 fn extract_package_name(cargo_toml: &str) -> Option<String> {
-    let parsed: toml::Value = toml::from_str(cargo_toml).ok()?;
+    let parsed: toml::Value = toml::from_str(cargo_toml)
+        .inspect_err(|e| tracing::debug!("Failed to parse Cargo.toml: {e}"))
+        .ok()?;
     parsed
         .get("package")?
         .get("name")?

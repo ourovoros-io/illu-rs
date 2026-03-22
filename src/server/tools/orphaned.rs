@@ -14,8 +14,7 @@ pub fn handle_orphaned(
     unused.retain(|s| {
         s.kind != SymbolKind::EnumVariant
             && s.kind != SymbolKind::Use
-            && s.kind != SymbolKind::Mod
-            && s.kind != SymbolKind::Impl
+            && !super::is_structural_kind(&s.kind)
     });
     unused.retain(|s| !super::is_entry_point(s));
 
@@ -77,7 +76,7 @@ pub fn handle_orphaned(
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn setup_db() -> Database {
@@ -178,7 +177,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let test_id = db.symbol_id("test_db", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(test_id, open_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, open_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_orphaned(&db, None, None).unwrap();

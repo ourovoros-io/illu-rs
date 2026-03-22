@@ -3,27 +3,53 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::Path;
 
-pub fn handle_blame(
+/// Data extracted from the DB needed to run git blame.
+pub struct BlameTarget {
+    pub qname: String,
+    pub file_path: String,
+    pub line_start: i64,
+    pub line_end: i64,
+}
+
+/// Resolve the symbol from the database, returning the target info
+/// needed for git blame. Returns `None` (with a not-found message)
+/// if the symbol cannot be resolved.
+pub fn resolve_blame_target(
     db: &Database,
-    repo_path: &Path,
     symbol_name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<Result<BlameTarget, String>, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(super::symbol_not_found(db, symbol_name));
+        return Ok(Err(super::symbol_not_found(db, symbol_name)));
     }
-
     let sym = &symbols[0];
-    let qname = super::qualified_name(sym);
+    Ok(Ok(BlameTarget {
+        qname: super::qualified_name(sym),
+        file_path: sym.file_path.clone(),
+        line_start: sym.line_start,
+        line_end: sym.line_end,
+    }))
+}
+
+/// Run git blame and format the output. Does not require DB access.
+pub fn run_and_format_blame(
+    repo_path: &Path,
+    target: &BlameTarget,
+) -> Result<String, Box<dyn std::error::Error>> {
     let mut output = String::new();
-    let _ = writeln!(output, "## Blame: {qname}\n");
+    let _ = writeln!(output, "## Blame: {}\n", target.qname);
     let _ = writeln!(
         output,
         "- **File:** {}:{}-{}",
-        sym.file_path, sym.line_start, sym.line_end
+        target.file_path, target.line_start, target.line_end
     );
 
-    let blame_output = run_git_blame(repo_path, &sym.file_path, sym.line_start, sym.line_end)?;
+    let blame_output = run_git_blame(
+        repo_path,
+        &target.file_path,
+        target.line_start,
+        target.line_end,
+    )?;
 
     let entries = parse_blame_output(&blame_output);
     if entries.is_empty() {
@@ -69,6 +95,18 @@ pub fn handle_blame(
     }
 
     Ok(output)
+}
+
+pub fn handle_blame(
+    db: &Database,
+    repo_path: &Path,
+    symbol_name: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let target = match resolve_blame_target(db, symbol_name)? {
+        Ok(t) => t,
+        Err(msg) => return Ok(msg),
+    };
+    run_and_format_blame(repo_path, &target)
 }
 
 struct BlameEntry {

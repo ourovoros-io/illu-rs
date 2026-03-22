@@ -41,6 +41,7 @@ pub fn handle_file_graph(db: &Database, path: &str) -> Result<String, Box<dyn st
 mod tests {
     use super::*;
     use crate::db::SymbolId;
+    use crate::indexer::parser::{Confidence, RefKind};
     use rusqlite::params;
 
     fn setup_two_file_db() -> Database {
@@ -70,7 +71,7 @@ mod tests {
             .unwrap();
         let tgt_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(src_id, tgt_id, "call", "high", None)
+        db.insert_symbol_ref(src_id, tgt_id, RefKind::Call, Confidence::High, None)
             .unwrap();
         db
     }
@@ -121,7 +122,7 @@ mod tests {
             .unwrap();
         let s2 = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(s1, s2, "call", "high", None).unwrap();
+        db.insert_symbol_ref(s1, s2, RefKind::Call, Confidence::High, None).unwrap();
 
         let result = handle_file_graph(&db, "src/").unwrap();
         assert!(result.contains("No file dependencies found"));

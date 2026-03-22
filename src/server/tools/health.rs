@@ -51,7 +51,7 @@ pub fn handle_health(db: &Database) -> Result<String, Box<dyn std::error::Error>
 mod tests {
     use super::*;
     use crate::db::SymbolId;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn make_sym(name: &str, kind: SymbolKind, file: &str) -> Symbol {
@@ -116,13 +116,13 @@ mod tests {
         let baz_id = sym_id(&db, "baz");
 
         // High-confidence refs
-        db.insert_symbol_ref(bar_id, foo_id, "call", "high", None)
+        db.insert_symbol_ref(bar_id, foo_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(baz_id, foo_id, "call", "high", None)
+        db.insert_symbol_ref(baz_id, foo_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Low-confidence ref
-        db.insert_symbol_ref(baz_id, bar_id, "call", "low", None)
+        db.insert_symbol_ref(baz_id, bar_id, RefKind::Call, Confidence::Low, None)
             .unwrap();
 
         let result = handle_health(&db).unwrap();

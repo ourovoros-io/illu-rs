@@ -180,7 +180,7 @@ fn write_doc_mentions(
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn make_symbol(name: &str, kind: SymbolKind, file: &str, line: usize) -> Symbol {
@@ -228,9 +228,9 @@ mod tests {
         let caller_a_id = db.symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
         let caller_b_id = db.symbol_id("caller_b", "src/lib.rs").unwrap().unwrap();
 
-        db.insert_symbol_ref(caller_a_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(caller_a_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(caller_b_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(caller_b_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_rename_plan(&db, "do_work").unwrap();

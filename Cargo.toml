@@ -2,6 +2,9 @@
 name = "illu-rs"
 version = "0.1.0"
 edition = "2024"
+description = "MCP server for Rust code intelligence"
+repository = "https://github.com/GeorgiosDelkos/illu-rs"
+license = "MIT"
 
 [dependencies]
 rmcp = { version = "1.2.0", features = ["server", "transport-io"] }

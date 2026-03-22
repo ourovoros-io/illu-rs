@@ -176,7 +176,7 @@ fn render_same_file_callees(db: &Database, output: &mut String, sym: &crate::db:
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     #[test]
@@ -423,9 +423,9 @@ mod tests {
             .unwrap();
         let a_id = db.symbol_id("helper_a", "src/lib.rs").unwrap().unwrap();
         let b_id = db.symbol_id("helper_b", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(src_id, a_id, "call", "high", None)
+        db.insert_symbol_ref(src_id, a_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(src_id, b_id, "call", "high", None)
+        db.insert_symbol_ref(src_id, b_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_overview(&db, "src/", true, None).unwrap();
@@ -660,7 +660,7 @@ mod tests {
         .unwrap();
         let do_work_id = db.symbol_id("do_work", "src/lib.rs").unwrap().unwrap();
         let main_sym_id = db.symbol_id("main", "src/main.rs").unwrap().unwrap();
-        db.insert_symbol_ref(main_sym_id, do_work_id, "call", "high", Some(3))
+        db.insert_symbol_ref(main_sym_id, do_work_id, RefKind::Call, Confidence::High, Some(3))
             .unwrap();
 
         let result = handle_overview(&db, "src/lib.rs", false, None).unwrap();

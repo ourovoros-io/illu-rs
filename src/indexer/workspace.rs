@@ -1,7 +1,7 @@
 use crate::indexer::dependencies::DirectDep;
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct WorkspaceInfo {
     pub is_workspace: bool,
     pub members: Vec<String>,
@@ -20,11 +20,7 @@ pub fn parse_workspace_toml(content: &str) -> Result<WorkspaceInfo, toml::de::Er
     let parsed: toml::Value = toml::from_str(content)?;
 
     let Some(workspace) = parsed.get("workspace") else {
-        return Ok(WorkspaceInfo {
-            is_workspace: false,
-            members: vec![],
-            workspace_deps: vec![],
-        });
+        return Ok(WorkspaceInfo::default());
     };
 
     let members = workspace

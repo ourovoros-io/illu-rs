@@ -67,8 +67,7 @@ fn handle_untested(
     symbols.retain(|s| {
         s.kind != SymbolKind::EnumVariant
             && s.kind != SymbolKind::Use
-            && s.kind != SymbolKind::Mod
-            && s.kind != SymbolKind::Impl
+            && !super::is_structural_kind(&s.kind)
     });
 
     // Filter to symbols with no related tests
