@@ -369,6 +369,9 @@ struct GraphExportParams {
     /// Direction for symbol graph: "down" (callees only), "up" (callers only),
     /// "both" (default). Only applies to symbol graphs, not file graphs.
     direction: Option<String>,
+    /// Output format: "dot" (Graphviz, default), "edges" (compact edge list for AI),
+    /// "summary" (node/edge counts, roots, leaves).
+    format: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1025,13 +1028,13 @@ impl IlluServer {
 
     #[tool(
         name = "graph_export",
-        description = "Export a call graph or file dependency graph in DOT/Graphviz format. Provide `symbol_name` for a symbol call graph, or `path` for a file dependency graph."
+        description = "Export a call graph or file dependency graph. Provide `symbol_name` for a symbol call graph, or `path` for a file dependency graph. Format: \"dot\" (Graphviz, default), \"edges\" (compact A -> B lines for AI), \"summary\" (node/edge counts with roots and leaves)."
     )]
     async fn graph_export(
         &self,
         Parameters(params): Parameters<GraphExportParams>,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!(symbol = ?params.symbol_name, path = ?params.path, "Tool call: graph_export");
+        tracing::info!(symbol = ?params.symbol_name, path = ?params.path, format = ?params.format, "Tool call: graph_export");
         let _guard = crate::status::StatusGuard::new("graph_export");
         self.refresh()?;
         let db = self.lock_db()?;
@@ -1041,6 +1044,7 @@ impl IlluServer {
             params.path.as_deref(),
             params.depth,
             params.direction.as_deref(),
+            params.format.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))

@@ -1,4 +1,5 @@
-use crate::db::Database;
+use crate::db::{Database, StoredSymbol};
+use std::collections::HashSet;
 use std::fmt::Write;
 
 pub fn handle_graph_export(
@@ -7,112 +8,196 @@ pub fn handle_graph_export(
     path: Option<&str>,
     depth: Option<i64>,
     direction: Option<&str>,
+    format: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    let fmt = format.unwrap_or("dot");
+
     if let Some(sym) = symbol_name {
-        return export_symbol_graph(db, sym, depth.unwrap_or(2), direction.unwrap_or("both"));
+        let symbols = super::resolve_symbol(db, sym)?;
+        if symbols.is_empty() {
+            return Ok(super::symbol_not_found(db, sym));
+        }
+        let max_depth = depth.unwrap_or(2);
+        let dir = direction.unwrap_or("both");
+        let edges = collect_symbol_edges(db, &symbols[0], max_depth, dir)?;
+        return Ok(render_edges(&edges, fmt, "call_graph"));
     }
+
     if let Some(p) = path {
-        return export_file_graph(db, p);
+        let edges = collect_file_edges(db, p)?;
+        return Ok(render_edges(&edges, fmt, "file_deps"));
     }
+
     Ok(
         "Provide either `symbol_name` for a call graph or `path` for a file dependency graph."
             .into(),
     )
 }
 
-fn export_symbol_graph(
+fn collect_symbol_edges(
     db: &Database,
-    symbol_name: &str,
+    symbol: &StoredSymbol,
     max_depth: i64,
     direction: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let symbols = super::resolve_symbol(db, symbol_name)?;
-    if symbols.is_empty() {
-        return Ok(super::symbol_not_found(db, symbol_name));
-    }
-
-    let base_name = &symbols[0].name;
-    let base_file = &symbols[0].file_path;
-    let mut output = String::new();
-    let _ = writeln!(output, "digraph call_graph {{");
-    let _ = writeln!(output, "  rankdir=LR;");
-    let _ = writeln!(output, "  node [shape=box, fontname=\"monospace\"];");
-
+) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let include_down = direction == "both" || direction == "down";
     let include_up = direction == "both" || direction == "up";
 
-    let mut seen = std::collections::HashSet::new();
-    seen.insert((base_name.clone(), base_file.clone()));
+    let mut edges = Vec::new();
+    let mut seen = HashSet::new();
+    seen.insert((symbol.name.clone(), symbol.file_path.clone()));
 
     if include_down {
-        let mut queue = vec![(base_name.clone(), base_file.clone(), 0i64)];
-        while let Some((name, file, depth)) = queue.pop() {
-            if depth >= max_depth {
+        let mut queue = vec![(symbol.name.clone(), symbol.file_path.clone(), 0i64)];
+        while let Some((name, file, d)) = queue.pop() {
+            if d >= max_depth {
                 continue;
             }
             let callees = db.get_callees(&name, &file, false)?;
             for c in &callees {
-                let _ = writeln!(output, "  \"{name}\" -> \"{}\";", c.name);
+                edges.push((name.clone(), c.name.clone()));
                 if seen.insert((c.name.clone(), c.file_path.clone())) {
-                    queue.push((c.name.clone(), c.file_path.clone(), depth + 1));
+                    queue.push((c.name.clone(), c.file_path.clone(), d + 1));
                 }
             }
         }
     }
 
     if include_up {
-        let mut queue = vec![(base_name.clone(), 0i64)];
-        let mut seen_up = std::collections::HashSet::new();
-        seen_up.insert(base_name.clone());
-        while let Some((name, depth)) = queue.pop() {
-            if depth >= max_depth {
+        let mut queue = vec![(symbol.name.clone(), 0i64)];
+        let mut seen_up = HashSet::new();
+        seen_up.insert(symbol.name.clone());
+        while let Some((name, d)) = queue.pop() {
+            if d >= max_depth {
                 continue;
             }
             let callers = db.get_callers_by_name(&name, Some("high"), false)?;
             for (caller, _path) in &callers {
-                let _ = writeln!(output, "  \"{caller}\" -> \"{name}\";");
+                edges.push((caller.clone(), name.clone()));
                 if seen_up.insert(caller.clone()) {
-                    queue.push((caller.clone(), depth + 1));
+                    queue.push((caller.clone(), d + 1));
                 }
             }
         }
     }
 
-    let _ = writeln!(output, "}}");
-    Ok(output)
+    Ok(edges)
 }
 
-fn export_file_graph(
+fn collect_file_edges(
     db: &Database,
     path_prefix: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let deps = db.get_file_dependencies(path_prefix, Some("high"))?;
+    let edges: Vec<(String, String)> = deps
+        .into_iter()
+        .map(|(src, tgt)| {
+            let short_src = src
+                .strip_prefix(path_prefix)
+                .unwrap_or(&src)
+                .to_owned();
+            let short_tgt = tgt
+                .strip_prefix(path_prefix)
+                .unwrap_or(&tgt)
+                .to_owned();
+            (short_src, short_tgt)
+        })
+        .collect();
+    Ok(edges)
+}
 
-    let mut output = String::new();
-    let _ = writeln!(output, "digraph file_deps {{");
-    let _ = writeln!(output, "  rankdir=TB;");
-    let _ = writeln!(output, "  node [shape=box, fontname=\"monospace\"];");
+fn render_edges(edges: &[(String, String)], format: &str, graph_name: &str) -> String {
+    let mut nodes = HashSet::new();
+    for (src, tgt) in edges {
+        nodes.insert(src.as_str());
+        nodes.insert(tgt.as_str());
+    }
+    let node_count = nodes.len();
+    let edge_count = edges.len();
 
-    for (source, target) in &deps {
-        let short_src = source.strip_prefix(path_prefix).unwrap_or(source);
-        let short_tgt = target.strip_prefix(path_prefix).unwrap_or(target);
-        let _ = writeln!(output, "  \"{short_src}\" -> \"{short_tgt}\";");
+    match format {
+        "edges" => render_edges_format(edges, node_count, edge_count),
+        "summary" => render_summary(edges, node_count, edge_count),
+        _ => render_dot(edges, graph_name, node_count, edge_count),
+    }
+}
+
+fn render_dot(
+    edges: &[(String, String)],
+    graph_name: &str,
+    node_count: usize,
+    edge_count: usize,
+) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "digraph {graph_name} {{");
+    let _ = writeln!(out, "  rankdir=LR;");
+    let _ = writeln!(out, "  node [shape=box, fontname=\"monospace\"];");
+    for (src, tgt) in edges {
+        let _ = writeln!(out, "  \"{src}\" -> \"{tgt}\";");
+    }
+    let _ = writeln!(out, "}}");
+    let _ = writeln!(out, "\n// {node_count} nodes, {edge_count} edges");
+    out
+}
+
+fn render_edges_format(
+    edges: &[(String, String)],
+    node_count: usize,
+    edge_count: usize,
+) -> String {
+    let mut out = String::new();
+    for (src, tgt) in edges {
+        let _ = writeln!(out, "{src} -> {tgt}");
+    }
+    let _ = writeln!(out, "// {node_count} nodes, {edge_count} edges");
+    out
+}
+
+fn render_summary(
+    edges: &[(String, String)],
+    node_count: usize,
+    edge_count: usize,
+) -> String {
+    let mut sources = HashSet::new();
+    let mut targets = HashSet::new();
+    for (src, tgt) in edges {
+        sources.insert(src.as_str());
+        targets.insert(tgt.as_str());
     }
 
-    let _ = writeln!(output, "}}");
-
-    let file_count = deps
+    let all_nodes: HashSet<&str> = sources.union(&targets).copied().collect();
+    let mut roots: Vec<&str> = all_nodes
         .iter()
-        .flat_map(|(s, t)| [s.as_str(), t.as_str()])
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-    let _ = writeln!(
-        output,
-        "\n// {file_count} files, {} dependency edges",
-        deps.len()
-    );
+        .filter(|n| !targets.contains(**n))
+        .copied()
+        .collect();
+    roots.sort_unstable();
+    let mut leaves: Vec<&str> = all_nodes
+        .iter()
+        .filter(|n| !sources.contains(**n))
+        .copied()
+        .collect();
+    leaves.sort_unstable();
 
-    Ok(output)
+    let mut out = String::new();
+    let _ = writeln!(out, "## Graph Summary\n");
+    let _ = writeln!(out, "- **Nodes:** {node_count}");
+    let _ = writeln!(out, "- **Edges:** {edge_count}");
+    let _ = writeln!(out, "- **Roots (no incoming):** {}", format_list(&roots));
+    let _ = writeln!(out, "- **Leaves (no outgoing):** {}", format_list(&leaves));
+    out
+}
+
+fn format_list(items: &[&str]) -> String {
+    const MAX_SHOW: usize = 5;
+    if items.is_empty() {
+        return "(none)".to_owned();
+    }
+    if items.len() <= MAX_SHOW {
+        return items.join(", ");
+    }
+    let shown: Vec<&str> = items[..MAX_SHOW].to_vec();
+    format!("{} (+{} more)", shown.join(", "), items.len() - MAX_SHOW)
 }
 
 #[cfg(test)]
@@ -123,22 +208,91 @@ mod tests {
     #[test]
     fn test_graph_export_needs_params() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_graph_export(&db, None, None, None, None).unwrap();
+        let result = handle_graph_export(&db, None, None, None, None, None).unwrap();
         assert!(result.contains("Provide either"));
     }
 
     #[test]
     fn test_graph_export_symbol_not_found() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_graph_export(&db, Some("nonexistent"), None, None, None).unwrap();
+        let result = handle_graph_export(&db, Some("nonexistent"), None, None, None, None).unwrap();
         assert!(result.contains("No symbol found"));
     }
 
     #[test]
     fn test_graph_export_file_empty() {
         let db = Database::open_in_memory().unwrap();
-        let result = handle_graph_export(&db, None, Some("src/"), None, None).unwrap();
+        let result = handle_graph_export(&db, None, Some("src/"), None, None, None).unwrap();
         assert!(result.contains("digraph"));
-        assert!(result.contains("0 files"));
+        assert!(result.contains("0 nodes"));
+    }
+
+    #[test]
+    fn test_graph_export_edges_format() {
+        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+        use crate::indexer::store::store_symbols;
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "h1").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "foo".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 1,
+                    line_end: 3,
+                    signature: "fn foo()".into(),
+                    doc_comment: None,
+                    body: Some("fn foo() { bar(); }".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "bar".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 5,
+                    line_end: 7,
+                    signature: "fn bar()".into(),
+                    doc_comment: None,
+                    body: Some("fn bar() {}".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+        let foo_id = db.get_symbol_id("foo", "src/lib.rs").unwrap().unwrap();
+        let bar_id = db.get_symbol_id("bar", "src/lib.rs").unwrap().unwrap();
+        db.insert_symbol_ref(foo_id, bar_id, "call", "high", Some(2))
+            .unwrap();
+
+        let result =
+            handle_graph_export(&db, Some("foo"), None, Some(2), None, Some("edges")).unwrap();
+        assert!(
+            result.contains("foo -> bar"),
+            "Edges format should show 'foo -> bar', got:\n{result}"
+        );
+        assert!(
+            !result.contains("digraph"),
+            "Edges format should NOT contain DOT syntax, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_graph_export_summary_format() {
+        let db = Database::open_in_memory().unwrap();
+        let result =
+            handle_graph_export(&db, None, Some("src/"), None, None, Some("summary")).unwrap();
+        assert!(
+            result.contains("Nodes") && result.contains("Edges"),
+            "Summary should mention Nodes and Edges, got:\n{result}"
+        );
     }
 }
