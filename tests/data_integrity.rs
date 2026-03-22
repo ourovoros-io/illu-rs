@@ -13,7 +13,7 @@
 
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo, refresh_index};
-use illu_rs::server::tools::{context, docs, impact, overview, query, tree};
+use illu_rs::server::tools::{QueryScope, context, docs, impact, overview, query, tree};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -636,7 +636,7 @@ pub fn use_config() -> AppConfig {
     let query_result = query::handle_query(
         &db,
         "AppConfig",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -705,8 +705,17 @@ pub trait MyTrait { fn method(&self); }
 pub enum MyEnum { A, B }
 ",
     );
-    let result =
-        query::handle_query(&db, "My", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "My",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Every symbol in query results must have kind and signature
     for name in &["my_func", "MyStruct", "MyTrait", "MyEnum"] {
@@ -768,8 +777,17 @@ edition = "2021"
     );
 
     // Both Error structs should appear, disambiguated by file path
-    let result =
-        query::handle_query(&db, "Error", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "Error",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("core/src/lib.rs"),
         "should show core's Error: {result}"
@@ -887,8 +905,17 @@ pub struct ConfigLoader;
 pub struct Config;
 ",
     );
-    let result =
-        query::handle_query(&db, "Config", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "Config",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Find positions of exact match vs others
     let exact_pos = result.find("**Config** (struct)");
@@ -1679,8 +1706,17 @@ fn refresh_handles_new_file_added() {
 
     refresh_index(&db, &config).unwrap();
 
-    let result =
-        query::handle_query(&db, "bonus", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "bonus",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("bonus"),
         "refresh should pick up new file's symbols"
@@ -1722,7 +1758,7 @@ fn refresh_handles_file_content_change() {
     let new_result = query::handle_query(
         &db,
         "version_two",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -2087,8 +2123,17 @@ pub fn beta_fn() -> i32 { 2 }
 ",
     );
 
-    let result =
-        query::handle_query(&db, "fn", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "fn",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Must start with ## Symbols header
     assert!(
@@ -2205,7 +2250,7 @@ fn query_with_dot_does_not_crash() {
     let result = query::handle_query(
         &db,
         "self.method",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -2218,7 +2263,16 @@ fn query_with_dot_does_not_crash() {
 #[test]
 fn query_with_colon_does_not_crash() {
     let (_dir, db) = index_source("pub fn hello() {}\n");
-    let result = query::handle_query(&db, "a:b", Some("symbols"), None, None, None, None, None);
+    let result = query::handle_query(
+        &db,
+        "a:b",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     assert!(result.is_ok(), "colon in query must not crash: {result:?}");
 }
 
@@ -2233,7 +2287,16 @@ fn query_with_fts_operators_does_not_crash() {
         "a&b",
         "\"quoted\"",
     ] {
-        let result = query::handle_query(&db, q, Some("symbols"), None, None, None, None, None);
+        let result = query::handle_query(
+            &db,
+            q,
+            Some(QueryScope::Symbols),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(result.is_ok(), "query '{q}' must not crash: {result:?}");
     }
 }
@@ -2245,7 +2308,7 @@ fn query_with_special_chars_falls_back_to_like() {
     let result = query::handle_query(
         &db,
         "config.parser",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,

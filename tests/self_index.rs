@@ -11,7 +11,8 @@ use illu_rs::db::Database;
 use illu_rs::indexer::parser::{SymbolKind, Visibility};
 use illu_rs::indexer::{IndexConfig, index_repo};
 use illu_rs::server::tools::{
-    context, doc_coverage, graph_export, impact, orphaned, overview, query, references, test_impact,
+    QueryScope, context, doc_coverage, graph_export, impact, orphaned, overview, query, references,
+    test_impact,
 };
 
 // ---------------------------------------------------------------------------
@@ -42,7 +43,7 @@ fn self_index_finds_database_struct() {
     let result = query::handle_query(
         &db,
         "Database",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -68,7 +69,7 @@ fn self_index_finds_index_repo_function() {
     let result = query::handle_query(
         &db,
         "index_repo",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -94,7 +95,7 @@ fn self_index_finds_illu_server() {
     let result = query::handle_query(
         &db,
         "IlluServer",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -231,7 +232,7 @@ fn self_query_and_context_agree_on_file_path() {
     let query_result = query::handle_query(
         &db,
         "extract_refs",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -519,7 +520,8 @@ fn self_graph_export_produces_dot() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let result =
-        graph_export::handle_graph_export(&db, Some("Database"), None, Some(1), None, None).unwrap();
+        graph_export::handle_graph_export(&db, Some("Database"), None, Some(1), None, None)
+            .unwrap();
     assert!(
         result.contains("digraph"),
         "should produce DOT format: {result}"

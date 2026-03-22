@@ -6,13 +6,15 @@ pub fn handle_neighborhood(
     db: &Database,
     symbol_name: &str,
     depth: Option<i64>,
-    direction: Option<&str>,
-    format: Option<&str>,
+    direction: Option<super::Direction>,
+    format: Option<super::NeighborhoodFormat>,
     exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    use super::{Direction, NeighborhoodFormat};
+
     let max_depth = usize::try_from(depth.unwrap_or(2).max(1)).unwrap_or(2);
-    let dir = direction.unwrap_or("both");
-    let fmt = format.unwrap_or("list");
+    let dir = direction.unwrap_or(Direction::Both);
+    let fmt = format.unwrap_or(NeighborhoodFormat::List);
 
     let syms = super::resolve_symbol(db, symbol_name)?;
     if syms.is_empty() {
@@ -21,18 +23,32 @@ pub fn handle_neighborhood(
 
     let base = super::base_name(symbol_name);
 
-    if fmt == "tree" {
-        if dir == "both" {
+    if fmt == NeighborhoodFormat::Tree {
+        if dir == Direction::Both {
             let mut output = String::new();
             let _ = writeln!(output, "## Neighborhood: {symbol_name}\n");
             let _ = writeln!(output, "### Callers (upstream)\n");
-            let up = render_tree_output(db, symbol_name, base, "up", max_depth, exclude_tests)?;
+            let up = render_tree_output(
+                db,
+                symbol_name,
+                base,
+                Direction::Up,
+                max_depth,
+                exclude_tests,
+            )?;
             // Skip the header from render_tree_output
             if let Some(body) = up.split_once("\n\n") {
                 output.push_str(body.1);
             }
             let _ = writeln!(output, "### Callees (downstream)\n");
-            let down = render_tree_output(db, symbol_name, base, "down", max_depth, exclude_tests)?;
+            let down = render_tree_output(
+                db,
+                symbol_name,
+                base,
+                Direction::Down,
+                max_depth,
+                exclude_tests,
+            )?;
             if let Some(body) = down.split_once("\n\n") {
                 output.push_str(body.1);
             }
@@ -41,17 +57,17 @@ pub fn handle_neighborhood(
         return render_tree_output(db, symbol_name, base, dir, max_depth, exclude_tests);
     }
 
-    let include_down = dir == "both" || dir == "down";
-    let include_up = dir == "both" || dir == "up";
+    let include_down = dir == Direction::Both || dir == Direction::Down;
+    let include_up = dir == Direction::Both || dir == Direction::Up;
 
     let outward = if include_down {
-        bfs_collect(db, base, max_depth, Direction::Down, exclude_tests)?
+        bfs_collect(db, base, max_depth, BfsDir::Down, exclude_tests)?
     } else {
         BTreeMap::new()
     };
 
     let inward = if include_up {
-        bfs_collect(db, base, max_depth, Direction::Up, exclude_tests)?
+        bfs_collect(db, base, max_depth, BfsDir::Up, exclude_tests)?
     } else {
         BTreeMap::new()
     };
@@ -67,7 +83,7 @@ pub fn handle_neighborhood(
 }
 
 #[derive(Clone, Copy)]
-enum Direction {
+enum BfsDir {
     Up,
     Down,
 }
@@ -78,7 +94,7 @@ fn bfs_collect(
     db: &Database,
     base: &str,
     max_depth: usize,
-    direction: Direction,
+    direction: BfsDir,
     exclude_tests: bool,
 ) -> Result<BTreeMap<String, BfsEntry>, Box<dyn std::error::Error>> {
     let mut visited: BTreeMap<String, BfsEntry> = BTreeMap::new();
@@ -99,7 +115,7 @@ fn bfs_collect(
             continue;
         }
         let neighbors: Vec<(String, String)> = match direction {
-            Direction::Down => {
+            BfsDir::Down => {
                 let callees = db.get_callees(&current_name, &current_file, exclude_tests)?;
                 callees
                     .into_iter()
@@ -107,7 +123,7 @@ fn bfs_collect(
                     .map(|c| (c.name, c.file_path))
                     .collect()
             }
-            Direction::Up => db.get_callers_by_name(&current_name, Some("high"), exclude_tests)?,
+            BfsDir::Up => db.get_callers_by_name(&current_name, Some("high"), exclude_tests)?,
         };
         for (neighbor, file_path) in neighbors {
             if super::NOISY_CALLEES.contains(&neighbor.as_str()) {
@@ -249,16 +265,16 @@ fn render_tree_output(
     db: &Database,
     symbol_name: &str,
     base: &str,
-    dir: &str,
+    dir: super::Direction,
     max_depth: usize,
     exclude_tests: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let label = if dir == "down" {
+    let label = if dir == super::Direction::Down {
         "Call Tree"
     } else {
         "Caller Tree"
     };
-    let mut renderer = TreeRenderer::new(db, max_depth, dir == "up", exclude_tests);
+    let mut renderer = TreeRenderer::new(db, max_depth, dir == super::Direction::Up, exclude_tests);
     let _ = writeln!(
         renderer.output,
         "## {label}: {symbol_name} (depth {max_depth})\n"
@@ -270,6 +286,7 @@ fn render_tree_output(
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
+    use super::super::{Direction, NeighborhoodFormat};
     use super::*;
     use crate::db::SymbolId;
     use rusqlite::params;
@@ -348,7 +365,8 @@ mod tests {
     #[test]
     fn test_neighborhood_direction_down() {
         let db = setup_db_with_chain();
-        let result = handle_neighborhood(&db, "center", None, Some("down"), None, false).unwrap();
+        let result =
+            handle_neighborhood(&db, "center", None, Some(Direction::Down), None, false).unwrap();
 
         assert!(result.contains("### Callees (downstream)"));
         assert!(result.contains("**beta** (src/lib.rs)"));
@@ -359,7 +377,8 @@ mod tests {
     #[test]
     fn test_neighborhood_direction_up() {
         let db = setup_db_with_chain();
-        let result = handle_neighborhood(&db, "center", None, Some("up"), None, false).unwrap();
+        let result =
+            handle_neighborhood(&db, "center", None, Some(Direction::Up), None, false).unwrap();
 
         assert!(result.contains("### Callers (upstream)"));
         assert!(result.contains("**alpha** (src/lib.rs)"));
@@ -370,8 +389,15 @@ mod tests {
     #[test]
     fn test_neighborhood_tree_format() {
         let db = setup_db_with_chain();
-        let result =
-            handle_neighborhood(&db, "center", Some(2), Some("down"), Some("tree"), false).unwrap();
+        let result = handle_neighborhood(
+            &db,
+            "center",
+            Some(2),
+            Some(Direction::Down),
+            Some(NeighborhoodFormat::Tree),
+            false,
+        )
+        .unwrap();
 
         assert!(result.contains("## Call Tree: center"));
         assert!(result.contains("**center**"));
@@ -381,8 +407,15 @@ mod tests {
     #[test]
     fn test_neighborhood_tree_format_up() {
         let db = setup_db_with_chain();
-        let result =
-            handle_neighborhood(&db, "center", Some(2), Some("up"), Some("tree"), false).unwrap();
+        let result = handle_neighborhood(
+            &db,
+            "center",
+            Some(2),
+            Some(Direction::Up),
+            Some(NeighborhoodFormat::Tree),
+            false,
+        )
+        .unwrap();
 
         assert!(result.contains("## Caller Tree: center"));
         assert!(result.contains("**center**"));
@@ -407,8 +440,15 @@ mod tests {
         db.insert_symbol_ref(child_a_id, grandchild_id, "call", "high", None)
             .unwrap();
 
-        let result =
-            handle_neighborhood(&db, "root", Some(2), Some("down"), Some("tree"), false).unwrap();
+        let result = handle_neighborhood(
+            &db,
+            "root",
+            Some(2),
+            Some(Direction::Down),
+            Some(NeighborhoodFormat::Tree),
+            false,
+        )
+        .unwrap();
 
         assert!(result.contains("**root**"));
         assert!(result.contains("├── "));
@@ -454,12 +494,14 @@ mod tests {
             .unwrap();
 
         // Without exclude_tests: both callers visible
-        let result = handle_neighborhood(&db, "target", None, Some("up"), None, false).unwrap();
+        let result =
+            handle_neighborhood(&db, "target", None, Some(Direction::Up), None, false).unwrap();
         assert!(result.contains("prod_caller"), "prod caller present");
         assert!(result.contains("test_caller"), "test caller present");
 
         // With exclude_tests: only production caller visible
-        let result = handle_neighborhood(&db, "target", None, Some("up"), None, true).unwrap();
+        let result =
+            handle_neighborhood(&db, "target", None, Some(Direction::Up), None, true).unwrap();
         assert!(result.contains("prod_caller"), "prod caller still present");
         assert!(
             !result.contains("test_caller"),
@@ -516,8 +558,15 @@ mod tests {
         db.insert_symbol_ref(caller_id, fn_id, "call", "high", None)
             .unwrap();
 
-        let result =
-            handle_neighborhood(&db, "caller_fn", Some(1), Some("down"), None, false).unwrap();
+        let result = handle_neighborhood(
+            &db,
+            "caller_fn",
+            Some(1),
+            Some(Direction::Down),
+            None,
+            false,
+        )
+        .unwrap();
         assert!(result.contains("real_fn"), "should show function callees");
         assert!(
             !result.contains("MY_CONST"),

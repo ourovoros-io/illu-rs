@@ -7,10 +7,12 @@ pub fn handle_graph_export(
     symbol_name: Option<&str>,
     path: Option<&str>,
     depth: Option<i64>,
-    direction: Option<&str>,
-    format: Option<&str>,
+    direction: Option<super::Direction>,
+    format: Option<super::ExportFormat>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let fmt = format.unwrap_or("dot");
+    use super::{Direction, ExportFormat};
+
+    let fmt = format.unwrap_or(ExportFormat::Dot);
 
     if let Some(sym) = symbol_name {
         let symbols = super::resolve_symbol(db, sym)?;
@@ -18,7 +20,7 @@ pub fn handle_graph_export(
             return Ok(super::symbol_not_found(db, sym));
         }
         let max_depth = depth.unwrap_or(2);
-        let dir = direction.unwrap_or("both");
+        let dir = direction.unwrap_or(Direction::Both);
         let edges = collect_symbol_edges(db, &symbols[0], max_depth, dir)?;
         return Ok(render_edges(&edges, fmt, "call_graph"));
     }
@@ -38,10 +40,11 @@ fn collect_symbol_edges(
     db: &Database,
     symbol: &StoredSymbol,
     max_depth: i64,
-    direction: &str,
+    direction: super::Direction,
 ) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
-    let include_down = direction == "both" || direction == "down";
-    let include_up = direction == "both" || direction == "up";
+    use super::Direction;
+    let include_down = direction == Direction::Both || direction == Direction::Down;
+    let include_up = direction == Direction::Both || direction == Direction::Up;
 
     let mut edges = Vec::new();
     let mut seen = HashSet::new();
@@ -92,21 +95,20 @@ fn collect_file_edges(
     let edges: Vec<(String, String)> = deps
         .into_iter()
         .map(|(src, tgt)| {
-            let short_src = src
-                .strip_prefix(path_prefix)
-                .unwrap_or(&src)
-                .to_owned();
-            let short_tgt = tgt
-                .strip_prefix(path_prefix)
-                .unwrap_or(&tgt)
-                .to_owned();
+            let short_src = src.strip_prefix(path_prefix).unwrap_or(&src).to_owned();
+            let short_tgt = tgt.strip_prefix(path_prefix).unwrap_or(&tgt).to_owned();
             (short_src, short_tgt)
         })
         .collect();
     Ok(edges)
 }
 
-fn render_edges(edges: &[(String, String)], format: &str, graph_name: &str) -> String {
+fn render_edges(
+    edges: &[(String, String)],
+    format: super::ExportFormat,
+    graph_name: &str,
+) -> String {
+    use super::ExportFormat;
     let mut nodes = HashSet::new();
     for (src, tgt) in edges {
         nodes.insert(src.as_str());
@@ -116,9 +118,9 @@ fn render_edges(edges: &[(String, String)], format: &str, graph_name: &str) -> S
     let edge_count = edges.len();
 
     match format {
-        "edges" => render_edges_format(edges, node_count, edge_count),
-        "summary" => render_summary(edges, node_count, edge_count),
-        _ => render_dot(edges, graph_name, node_count, edge_count),
+        ExportFormat::Edges => render_edges_format(edges, node_count, edge_count),
+        ExportFormat::Summary => render_summary(edges, node_count, edge_count),
+        ExportFormat::Dot => render_dot(edges, graph_name, node_count, edge_count),
     }
 }
 
@@ -140,11 +142,7 @@ fn render_dot(
     out
 }
 
-fn render_edges_format(
-    edges: &[(String, String)],
-    node_count: usize,
-    edge_count: usize,
-) -> String {
+fn render_edges_format(edges: &[(String, String)], node_count: usize, edge_count: usize) -> String {
     let mut out = String::new();
     for (src, tgt) in edges {
         let _ = writeln!(out, "{src} -> {tgt}");
@@ -153,11 +151,7 @@ fn render_edges_format(
     out
 }
 
-fn render_summary(
-    edges: &[(String, String)],
-    node_count: usize,
-    edge_count: usize,
-) -> String {
+fn render_summary(edges: &[(String, String)], node_count: usize, edge_count: usize) -> String {
     let mut sources = HashSet::new();
     let mut targets = HashSet::new();
     for (src, tgt) in edges {
@@ -203,6 +197,7 @@ fn format_list(items: &[&str]) -> String {
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
+    use super::super::ExportFormat;
     use super::*;
 
     #[test]
@@ -273,8 +268,15 @@ mod tests {
         db.insert_symbol_ref(foo_id, bar_id, "call", "high", Some(2))
             .unwrap();
 
-        let result =
-            handle_graph_export(&db, Some("foo"), None, Some(2), None, Some("edges")).unwrap();
+        let result = handle_graph_export(
+            &db,
+            Some("foo"),
+            None,
+            Some(2),
+            None,
+            Some(ExportFormat::Edges),
+        )
+        .unwrap();
         assert!(
             result.contains("foo -> bar"),
             "Edges format should show 'foo -> bar', got:\n{result}"
@@ -288,8 +290,15 @@ mod tests {
     #[test]
     fn test_graph_export_summary_format() {
         let db = Database::open_in_memory().unwrap();
-        let result =
-            handle_graph_export(&db, None, Some("src/"), None, None, Some("summary")).unwrap();
+        let result = handle_graph_export(
+            &db,
+            None,
+            Some("src/"),
+            None,
+            None,
+            Some(ExportFormat::Summary),
+        )
+        .unwrap();
         assert!(
             result.contains("Nodes") && result.contains("Edges"),
             "Summary should mention Nodes and Edges, got:\n{result}"

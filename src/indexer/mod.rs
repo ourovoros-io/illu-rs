@@ -585,10 +585,7 @@ const TOOL_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "repos",
                 "Dashboard of all registered repos with status and symbol counts.",
             ),
-            (
-                "cross_query",
-                "Search symbols across all registered repos.",
-            ),
+            ("cross_query", "Search symbols across all registered repos."),
             (
                 "cross_impact",
                 "Find references to a symbol in other repos.",

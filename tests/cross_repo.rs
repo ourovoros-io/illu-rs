@@ -3,7 +3,7 @@
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
 use illu_rs::registry::{Registry, RepoEntry};
-use illu_rs::server::tools::{cross_deps, cross_impact, cross_query, repos};
+use illu_rs::server::tools::{QueryScope, cross_deps, cross_impact, cross_query, repos};
 
 /// Create two indexed repos on disk with `.illu/index.db` files.
 ///
@@ -145,7 +145,7 @@ fn cross_query_finds_symbols_in_other_repos() {
 
     let opts = cross_query::CrossQueryOpts {
         query: "shared_helper",
-        scope: Some("symbols"),
+        scope: Some(QueryScope::Symbols),
         kind: None,
         attribute: None,
         signature: None,

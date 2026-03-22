@@ -39,6 +39,49 @@ pub(crate) use crate::truncate_at as truncate_snippet;
 
 use crate::db::{Database, StoredSymbol, TestEntry};
 use crate::indexer::parser::SymbolKind;
+use rmcp::schemars;
+use schemars::JsonSchema;
+use serde::Deserialize;
+
+/// Direction for graph traversal in neighborhood and `graph_export` tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Direction {
+    Both,
+    Down,
+    Up,
+}
+
+/// Display format for neighborhood tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum NeighborhoodFormat {
+    List,
+    Tree,
+}
+
+/// Output format for `graph_export` tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    Dot,
+    Edges,
+    Summary,
+}
+
+/// Scope for query tool search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum QueryScope {
+    Symbols,
+    All,
+    Docs,
+    Files,
+    Bodies,
+    Strings,
+    #[serde(rename = "doc_comments")]
+    DocComments,
+}
 
 /// Resolve a symbol name supporting `Type::method` syntax.
 /// Falls back to plain `search_symbols` if `::` lookup yields nothing.
@@ -74,9 +117,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i + 1;
         for (j, &cb) in b.iter().enumerate() {
             let cost = usize::from(!ca.eq_ignore_ascii_case(&cb));
-            curr[j + 1] = (prev[j] + cost)
-                .min(prev[j + 1] + 1)
-                .min(curr[j] + 1);
+            curr[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(curr[j] + 1);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -85,10 +126,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
 
 /// Fuzzy-match a query against all symbol names using edit distance.
 /// Returns top 3 matches within a reasonable distance threshold.
-fn levenshtein_suggestions(
-    db: &Database,
-    query: &str,
-) -> Vec<(String, Option<String>)> {
+fn levenshtein_suggestions(db: &Database, query: &str) -> Vec<(String, Option<String>)> {
     let all_names = db.get_all_distinct_symbol_names().unwrap_or_default();
     let max_dist = (query.len() * 2 / 5).max(2);
     let mut scored: Vec<(usize, String, Option<String>)> = all_names
@@ -154,9 +192,7 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
     let lev_matches = levenshtein_suggestions(db, name);
     if !lev_matches.is_empty() {
         use std::fmt::Write;
-        let mut out = format!(
-            "No symbol found matching '{name}'.\n\nDid you mean:\n",
-        );
+        let mut out = format!("No symbol found matching '{name}'.\n\nDid you mean:\n",);
         for (sym_name, impl_type) in &lev_matches {
             let qname = if let Some(it) = impl_type {
                 format!("{it}::{sym_name}")

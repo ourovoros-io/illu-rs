@@ -9,7 +9,7 @@
 
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{context, docs, impact, overview, query, tree};
+use illu_rs::server::tools::{QueryScope, context, docs, impact, overview, query, tree};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -236,7 +236,7 @@ pub static COUNTER: std::sync::atomic::AtomicU64 =
     let result = query::handle_query(
         &db,
         "MAX_RETRIES",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -252,7 +252,7 @@ pub static COUNTER: std::sync::atomic::AtomicU64 =
     let result = query::handle_query(
         &db,
         "COUNTER",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -302,7 +302,7 @@ macro_rules! hashmap {
     let result = query::handle_query(
         &db,
         "hashmap",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -540,8 +540,17 @@ pub fn configuration_manager() {}
 pub struct Config {}
 ",
     );
-    let result =
-        query::handle_query(&db, "Config", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "Config",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     let config_pos = result.find("**Config**");
     let configure_pos = result.find("configure");
     assert!(config_pos.is_some(), "exact match must appear: {result}");
@@ -565,7 +574,7 @@ pub trait Processable {}
     let result = query::handle_query(
         &db,
         "Process",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         Some("struct"),
         None,
         None,
@@ -591,8 +600,17 @@ fn query_files_scope_returns_unique_paths() {
         ("server.rs", "pub fn serve() {}\npub fn handle() {}\n"),
         ("db.rs", "pub fn query() {}\n"),
     ]);
-    let result =
-        query::handle_query(&db, "serve", Some("files"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "serve",
+        Some(QueryScope::Files),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("src/server.rs"),
         "should find file: {result}"
@@ -997,8 +1015,17 @@ fn workspace_context_shows_correct_file_paths() {
 #[test]
 fn workspace_query_finds_across_crates() {
     let (_dir, db) = index_workspace();
-    let result =
-        query::handle_query(&db, "user", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "user",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("User"),
         "should find User from core: {result}"
@@ -1079,8 +1106,17 @@ pub fn error() -> String {
 }
 "#,
     );
-    let result =
-        query::handle_query(&db, "Error", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "Error",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("struct") || result.contains("enum"),
         "should find both type definitions: {result}"
@@ -1089,7 +1125,7 @@ pub fn error() -> String {
     let result = query::handle_query(
         &db,
         "Error",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         Some("function"),
         None,
         None,
@@ -1151,7 +1187,7 @@ pub fn process<T>(item: T) -> String where T: std::fmt::Display + Clone {
     let result = query::handle_query(
         &db,
         "process",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -1247,8 +1283,17 @@ pub fn prod_only() {}
 pub fn always() {}
 ",
     );
-    let result =
-        query::handle_query(&db, "always", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "always",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("always"),
         "should find non-gated function: {result}"
@@ -1267,7 +1312,7 @@ pub unsafe fn dangerous(ptr: *const u8) -> u8 {
     let result = query::handle_query(
         &db,
         "dangerous",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -1294,8 +1339,17 @@ pub fn config_parser() {}
 pub fn parse_config_file() {}
 ",
     );
-    let result =
-        query::handle_query(&db, "config", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "config",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("config"),
         "exact match should appear in results: {result}"
@@ -1313,7 +1367,7 @@ pub struct Process {}
     let result = query::handle_query(
         &db,
         "process",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         Some("function"),
         None,
         None,
@@ -1344,7 +1398,7 @@ fn file_scope_handles_dots_in_filename() {
     let result = query::handle_query(
         &db,
         "server.rs",
-        Some("files"),
+        Some(QueryScope::Files),
         None,
         None,
         None,
@@ -1363,8 +1417,17 @@ fn default_query_excludes_use_and_mod() {
     let (_dir, db) = index_source(
         "use std::fmt::Write;\npub mod child;\npub fn real_fn() {}\npub struct RealStruct;\n",
     );
-    let result =
-        query::handle_query(&db, "real", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "real",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(result.contains("real_fn"), "should find function: {result}");
     assert!(
         !result.contains("(use)"),
@@ -1382,7 +1445,7 @@ fn kind_use_filter_still_works() {
     let result = query::handle_query(
         &db,
         "Write",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         Some("use"),
         None,
         None,
@@ -1566,8 +1629,17 @@ fn realistic_codebase_indexes_all_symbols() {
         "Handler",
         "Middleware",
     ] {
-        let result =
-            query::handle_query(&db, name, Some("symbols"), None, None, None, None, None).unwrap();
+        let result = query::handle_query(
+            &db,
+            name,
+            Some(QueryScope::Symbols),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(
             result.contains(name),
             "query for '{name}' should find it: {result}"
@@ -1654,8 +1726,17 @@ fn search_exact_name_beats_contains() {
          pub fn app_config() {}\n\
          pub struct ConfigManager {}\n",
     );
-    let result =
-        query::handle_query(&db, "Config", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "Config",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     let config_pos = result.find("**Config**");
     let config_manager_pos = result.find("ConfigManager");
     let configure_pos = result.find("configure");
@@ -1691,8 +1772,17 @@ fn search_common_name_new_returns_results() {
             "pub struct Beta {}\nimpl Beta { pub fn new() -> Self { Beta {} } }\n",
         ),
     ]);
-    let result =
-        query::handle_query(&db, "new", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "new",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("new"),
         "query for 'new' should find results: {result}"
@@ -1712,8 +1802,17 @@ fn search_by_doc_comment_content() {
          /// Serialize data to JSON format.\n\
          pub fn save_data() {}\n",
     );
-    let result =
-        query::handle_query(&db, "TOML", Some("all"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "TOML",
+        Some(QueryScope::All),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     // FTS indexes symbol names, not doc comments, so this may not find
     // results. The key assertion is no error or panic.
     assert!(
@@ -1725,8 +1824,17 @@ fn search_by_doc_comment_content() {
 #[test]
 fn search_short_query_works() {
     let (_dir, db) = index_source("pub fn go() {}\npub fn do_work() {}\n");
-    let result =
-        query::handle_query(&db, "go", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "go",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("go"),
         "short 2-char query should find 'go': {result}"
