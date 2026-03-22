@@ -91,6 +91,7 @@ pub fn refresh_index(
     }
 
     if dirty_files.is_empty() {
+        crate::status::set(crate::status::READY);
         return Ok(0);
     }
 
@@ -120,6 +121,7 @@ pub fn refresh_index(
         tracing::info!(deleted = stale, "Cleaned up stale symbol refs");
     }
 
+    crate::status::set(crate::status::READY);
     Ok(count)
 }
 
