@@ -648,13 +648,11 @@ impl Database {
         confidence: crate::indexer::parser::Confidence,
         ref_line: Option<i64>,
     ) -> SqlResult<()> {
-        let kind_str = kind.to_string();
-        let confidence_str = confidence.to_string();
         self.conn.execute(
             "INSERT OR IGNORE INTO symbol_refs \
              (source_symbol_id, target_symbol_id, kind, confidence, ref_line) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![source_id, target_id, kind_str, confidence_str, ref_line],
+            params![source_id, target_id, kind.as_str(), confidence.as_str(), ref_line],
         )?;
         Ok(())
     }
@@ -1576,8 +1574,9 @@ impl Database {
         symbol_name: &str,
         target_file: &str,
         exclude_tests: bool,
-        min_confidence: Option<&str>,
+        min_confidence: Option<crate::indexer::parser::Confidence>,
     ) -> SqlResult<Vec<CalleeInfo>> {
+        let conf_str = min_confidence.map(|c| c.as_str());
         let query = if exclude_tests {
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
              sr.ref_line, ss.is_test \
@@ -1599,7 +1598,7 @@ impl Database {
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name, target_file, min_confidence])?;
+        let mut rows = stmt.query(params![symbol_name, target_file, conf_str])?;
         while let Some(row) = rows.next()? {
             results.push(CalleeInfo {
                 name: row.get(0)?,
@@ -1618,9 +1617,10 @@ impl Database {
     pub fn callees_by_name(
         &self,
         symbol_name: &str,
-        min_confidence: Option<&str>,
+        min_confidence: Option<crate::indexer::parser::Confidence>,
         exclude_tests: bool,
     ) -> SqlResult<Vec<(String, String)>> {
+        let conf_str = min_confidence.map(|c| c.as_str());
         let query = if exclude_tests {
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
@@ -1642,7 +1642,7 @@ impl Database {
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name, min_confidence])?;
+        let mut rows = stmt.query(params![symbol_name, conf_str])?;
         while let Some(row) = rows.next()? {
             results.push((row.get(0)?, row.get(1)?));
         }
@@ -1652,9 +1652,10 @@ impl Database {
     pub fn callers_by_name(
         &self,
         symbol_name: &str,
-        min_confidence: Option<&str>,
+        min_confidence: Option<crate::indexer::parser::Confidence>,
         exclude_tests: bool,
     ) -> SqlResult<Vec<(String, String)>> {
+        let conf_str = min_confidence.map(|c| c.as_str());
         let query = if exclude_tests {
             "SELECT DISTINCT ss.name, sf.path \
              FROM symbol_refs sr \
@@ -1676,7 +1677,7 @@ impl Database {
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name, min_confidence])?;
+        let mut rows = stmt.query(params![symbol_name, conf_str])?;
         while let Some(row) = rows.next()? {
             results.push((row.get(0)?, row.get(1)?));
         }
@@ -1834,8 +1835,9 @@ impl Database {
     pub fn file_dependencies(
         &self,
         path_prefix: &str,
-        min_confidence: Option<&str>,
+        min_confidence: Option<crate::indexer::parser::Confidence>,
     ) -> SqlResult<Vec<(String, String)>> {
+        let conf_str = min_confidence.map(|c| c.as_str());
         let pattern = format!("{}%", escape_like(path_prefix));
         let mut stmt = self.conn.prepare_cached(
             "SELECT DISTINCT sf.path, tf.path \
@@ -1849,7 +1851,7 @@ impl Database {
              ORDER BY sf.path, tf.path",
         )?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![pattern, min_confidence])?;
+        let mut rows = stmt.query(params![pattern, conf_str])?;
         while let Some(row) = rows.next()? {
             results.push((row.get(0)?, row.get(1)?));
         }
@@ -1861,7 +1863,7 @@ impl Database {
         &self,
         limit: i64,
         path_prefix: &str,
-        min_confidence: Option<&str>,
+        min_confidence: Option<crate::indexer::parser::Confidence>,
     ) -> SqlResult<Vec<SymbolRefCount>> {
         self.most_referenced_symbols_filtered(limit, path_prefix, min_confidence, false)
     }
@@ -1870,9 +1872,10 @@ impl Database {
         &self,
         limit: i64,
         path_prefix: &str,
-        min_confidence: Option<&str>,
+        min_confidence: Option<crate::indexer::parser::Confidence>,
         exclude_test_sources: bool,
     ) -> SqlResult<Vec<SymbolRefCount>> {
+        let conf_str = min_confidence.map(|c| c.as_str());
         let pattern = format!("{}%", escape_like(path_prefix));
         let sql = if exclude_test_sources {
             "SELECT ts.name, f.path, \
@@ -1904,7 +1907,7 @@ impl Database {
         };
         let mut stmt = self.conn.prepare_cached(sql)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
+        let mut rows = stmt.query(params![pattern, limit, conf_str])?;
         while let Some(row) = rows.next()? {
             results.push(SymbolRefCount {
                 name: row.get(0)?,
@@ -1921,9 +1924,10 @@ impl Database {
         &self,
         limit: i64,
         path_prefix: &str,
-        min_confidence: Option<&str>,
+        min_confidence: Option<crate::indexer::parser::Confidence>,
         exclude_tests: bool,
     ) -> SqlResult<Vec<(String, String, i64)>> {
+        let conf_str = min_confidence.map(|c| c.as_str());
         let pattern = format!("{}%", escape_like(path_prefix));
         let sql = if exclude_tests {
             "SELECT ss.name, f.path, \
@@ -1951,7 +1955,7 @@ impl Database {
         };
         let mut stmt = self.conn.prepare_cached(sql)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
+        let mut rows = stmt.query(params![pattern, limit, conf_str])?;
         while let Some(row) = rows.next()? {
             results.push((row.get(0)?, row.get(1)?, row.get(2)?));
         }
@@ -3453,7 +3457,7 @@ mod tests {
         assert_eq!(all.len(), 2);
 
         // With high filter: only high-confidence edge
-        let high_only = db.file_dependencies("src/", Some("high")).unwrap();
+        let high_only = db.file_dependencies("src/", Some(Confidence::High)).unwrap();
         assert_eq!(high_only.len(), 1);
         assert_eq!(
             high_only[0],

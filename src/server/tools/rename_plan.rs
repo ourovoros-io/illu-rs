@@ -1,5 +1,5 @@
 use crate::db::{Database, StoredSymbol};
-use crate::indexer::parser::SymbolKind;
+use crate::indexer::parser::{Confidence, SymbolKind};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 
@@ -52,7 +52,7 @@ fn write_call_sites(
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for sym in symbols {
-        let callers = db.callers(&sym.name, &sym.file_path, false, Some("high"))?;
+        let callers = db.callers(&sym.name, &sym.file_path, false, Some(Confidence::High))?;
         for c in callers {
             let key = (c.name.clone(), c.file_path.clone());
             if seen.insert(key) {

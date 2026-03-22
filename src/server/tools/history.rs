@@ -1,42 +1,15 @@
 use crate::db::Database;
+use super::SymbolTarget;
 use std::fmt::Write;
 use std::path::Path;
 
 const MAX_OUTPUT_CHARS: usize = 4000;
 const MAX_DIFF_LINES_PER_COMMIT: usize = 60;
 
-/// Data extracted from the DB needed to run git history.
-pub struct HistoryTarget {
-    pub qname: String,
-    pub file_path: String,
-    pub line_start: i64,
-    pub line_end: i64,
-}
-
-/// Resolve the symbol from the database, returning the target info
-/// needed for git history. Returns `None` (with a not-found message)
-/// if the symbol cannot be resolved.
-pub fn resolve_history_target(
-    db: &Database,
-    symbol_name: &str,
-) -> Result<Result<HistoryTarget, String>, Box<dyn std::error::Error>> {
-    let symbols = super::resolve_symbol(db, symbol_name)?;
-    if symbols.is_empty() {
-        return Ok(Err(super::symbol_not_found(db, symbol_name)));
-    }
-    let sym = &symbols[0];
-    Ok(Ok(HistoryTarget {
-        qname: super::qualified_name(sym),
-        file_path: sym.file_path.clone(),
-        line_start: sym.line_start,
-        line_end: sym.line_end,
-    }))
-}
-
 /// Run git log and format the output. Does not require DB access.
 pub fn run_and_format_history(
     repo_path: &Path,
-    target: &HistoryTarget,
+    target: &SymbolTarget,
     max_commits: Option<i64>,
     show_diff: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
@@ -97,7 +70,7 @@ pub fn handle_history(
     max_commits: Option<i64>,
     show_diff: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let target = match resolve_history_target(db, symbol_name)? {
+    let target = match super::resolve_symbol_target(db, symbol_name)? {
         Ok(t) => t,
         Err(msg) => return Ok(msg),
     };

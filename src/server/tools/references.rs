@@ -1,4 +1,5 @@
 use crate::db::Database;
+use crate::indexer::parser::Confidence;
 use std::collections::HashSet;
 use std::fmt::Write;
 
@@ -59,7 +60,7 @@ fn render_call_sites(
     let mut prod = Vec::new();
     let mut test = Vec::new();
     for sym in symbols {
-        for c in db.callers(&sym.name, &sym.file_path, false, Some("high"))? {
+        for c in db.callers(&sym.name, &sym.file_path, false, Some(Confidence::High))? {
             if path.is_some_and(|p| !c.file_path.starts_with(p)) {
                 continue;
             }

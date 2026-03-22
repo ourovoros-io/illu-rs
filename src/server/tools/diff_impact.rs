@@ -188,7 +188,7 @@ fn check_staleness(db: &Database, repo_path: &Path) -> String {
             format!(
                 "> **Note:** Index is behind HEAD ({}{files_note}). \
                  Newly added symbols may be missing from results.\n\n",
-                &hd[..7.min(hd.len())]
+                super::short_hash(hd)
             )
         }
         _ => String::new(),
