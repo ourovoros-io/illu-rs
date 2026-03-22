@@ -223,4 +223,69 @@ mod tests {
 
         assert!(result.contains("No public symbols found under 'nonexistent/'."));
     }
+
+    #[test]
+    fn test_boundary_detects_low_confidence_external_callers() {
+        let db = Database::open_in_memory().unwrap();
+        let mod_file_id = db.insert_file("src/tools/context.rs", "hash1").unwrap();
+        store_symbols(
+            &db,
+            mod_file_id,
+            &[Symbol {
+                name: "handle_context".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/tools/context.rs".into(),
+                line_start: 1,
+                line_end: 10,
+                signature: "pub fn handle_context()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        let ext_file_id = db.insert_file("src/server.rs", "hash2").unwrap();
+        store_symbols(
+            &db,
+            ext_file_id,
+            &[Symbol {
+                name: "dispatch".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/server.rs".into(),
+                line_start: 1,
+                line_end: 5,
+                signature: "pub fn dispatch()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        // Low-confidence external ref (simulates module path resolution)
+        let dispatch_id = db
+            .get_symbol_id("dispatch", "src/server.rs")
+            .unwrap()
+            .unwrap();
+        let handle_id = db
+            .get_symbol_id("handle_context", "src/tools/context.rs")
+            .unwrap()
+            .unwrap();
+        db.insert_symbol_ref(dispatch_id, handle_id, "call", "low", None)
+            .unwrap();
+
+        let result = handle_boundary(&db, "src/tools/").unwrap();
+        assert!(
+            result.contains("Public API"),
+            "Low-confidence external caller should make symbol public: {result}"
+        );
+        assert!(result.contains("handle_context"));
+    }
 }

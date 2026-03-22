@@ -66,19 +66,14 @@ pub(crate) fn resolve_symbol(
 
 /// "Symbol not found" message with fuzzy "did you mean?" suggestions.
 pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
-    let mut suggestions = Vec::new();
+    // Reuse resolve_symbol which already tries Type::method, exact, and FTS
+    let mut suggestions = resolve_symbol(db, name).unwrap_or_default();
 
-    // Try FTS search on the full name
-    if let Ok(results) = db.search_symbols(name) {
-        suggestions.extend(results);
-    }
-
-    // For Type::method names, also try the method part alone
+    // For Type::method names where resolve found nothing, try the method part
     if suggestions.is_empty()
         && let Some((_, method)) = name.split_once("::")
-        && let Ok(results) = db.search_symbols(method)
     {
-        suggestions.extend(results);
+        suggestions = resolve_symbol(db, method).unwrap_or_default();
     }
 
     // Deduplicate by qualified name, take top 3
@@ -270,6 +265,7 @@ pub(crate) fn is_entry_point(sym: &StoredSymbol) -> bool {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
 
@@ -334,5 +330,78 @@ mod tests {
         let mut output = String::new();
         render_test_list(&mut output, &[]);
         assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_symbol_not_found_suggests_similar() {
+        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+        use crate::indexer::store::store_symbols;
+
+        let db = Database::open_in_memory().unwrap();
+        let fid = db.insert_file("src/lib.rs", "hash1").unwrap();
+        store_symbols(
+            &db,
+            fid,
+            &[Symbol {
+                name: "resolve_symbol".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 10,
+                line_end: 20,
+                signature: "fn resolve_symbol()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+
+        let result = symbol_not_found(&db, "resolve_sym");
+        assert!(result.contains("Did you mean"), "got: {result}");
+        assert!(result.contains("resolve_symbol"), "got: {result}");
+    }
+
+    #[test]
+    fn test_symbol_not_found_type_method_fallback() {
+        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+        use crate::indexer::store::store_symbols;
+
+        let db = Database::open_in_memory().unwrap();
+        let fid = db.insert_file("src/db.rs", "hash1").unwrap();
+        store_symbols(
+            &db,
+            fid,
+            &[Symbol {
+                name: "resolve".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/db.rs".into(),
+                line_start: 5,
+                line_end: 15,
+                signature: "fn resolve()".into(),
+                doc_comment: None,
+                body: None,
+                details: None,
+                attributes: None,
+                impl_type: Some("SymbolIdMap".into()),
+            }],
+        )
+        .unwrap();
+
+        // Full qualified name doesn't match, but method part "resolve" does
+        let result = symbol_not_found(&db, "Database::resolve");
+        assert!(result.contains("Did you mean"), "got: {result}");
+        assert!(result.contains("resolve"), "got: {result}");
+    }
+
+    #[test]
+    fn test_symbol_not_found_no_suggestions() {
+        let db = Database::open_in_memory().unwrap();
+        let result = symbol_not_found(&db, "zzz_nonexistent_zzz");
+        assert!(result.contains("No symbol found"));
+        assert!(!result.contains("Did you mean"));
     }
 }

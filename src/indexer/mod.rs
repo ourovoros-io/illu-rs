@@ -101,13 +101,13 @@ pub fn refresh_index(
 
     // Merge in committed changes not already in the candidate list
     if !committed_changes.is_empty() {
-        let candidate_set: std::collections::HashSet<String> =
-            candidate_files.iter().cloned().collect();
-        for path in committed_changes {
-            if !candidate_set.contains(&path) {
-                candidate_files.push(path);
-            }
-        }
+        let existing_set: std::collections::HashSet<&str> =
+            candidate_files.iter().map(String::as_str).collect();
+        let new: Vec<String> = committed_changes
+            .into_iter()
+            .filter(|p| !existing_set.contains(p.as_str()))
+            .collect();
+        candidate_files.extend(new);
         tracing::debug!("Merged committed changes into candidates");
     }
 
@@ -122,8 +122,7 @@ pub fn refresh_index(
     }
 
     if dirty_files.is_empty() {
-        // Still update metadata if HEAD changed (no .rs files changed
-        // but commit hash should be current for freshness reporting)
+        // Freshness compares stored hash to HEAD; keep it current
         if head_changed {
             update_metadata(db, config)?;
         }
@@ -618,9 +617,11 @@ fn committed_changed_rs_files(repo_path: &std::path::Path, since_hash: &str) -> 
         .current_dir(repo_path)
         .output();
     let Ok(output) = output else {
+        tracing::debug!("git diff --name-only failed to execute");
         return Vec::new();
     };
     if !output.status.success() {
+        tracing::debug!("git diff --name-only returned non-zero");
         return Vec::new();
     }
     String::from_utf8_lossy(&output.stdout)

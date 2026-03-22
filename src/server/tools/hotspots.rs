@@ -290,4 +290,69 @@ mod tests {
             "should count only prod references: {result}"
         );
     }
+
+    #[test]
+    fn test_hotspots_exclude_tests_most_referencing() {
+        let db = Database::open_in_memory().unwrap();
+        let f = db.insert_file("src/lib.rs", "h1").unwrap();
+
+        store_symbols(
+            &db,
+            f,
+            &[
+                make_fn("target_a", "src/lib.rs", 1, 5),
+                make_fn("target_b", "src/lib.rs", 7, 12),
+                make_fn("prod_complex", "src/lib.rs", 14, 20),
+                Symbol {
+                    name: "test_complex".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Private,
+                    file_path: "src/lib.rs".into(),
+                    line_start: 22,
+                    line_end: 30,
+                    signature: "fn test_complex()".into(),
+                    doc_comment: None,
+                    body: None,
+                    details: None,
+                    attributes: Some("test".into()),
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let target_a = sym_id(&db, "target_a");
+        let target_b = sym_id(&db, "target_b");
+        let prod_id = sym_id(&db, "prod_complex");
+        let test_id = sym_id(&db, "test_complex");
+
+        // test_complex calls both targets (2 outgoing)
+        db.insert_symbol_ref(test_id, target_a, "call", "high", None)
+            .unwrap();
+        db.insert_symbol_ref(test_id, target_b, "call", "high", None)
+            .unwrap();
+        // prod_complex calls one target (1 outgoing)
+        db.insert_symbol_ref(prod_id, target_a, "call", "high", None)
+            .unwrap();
+
+        // Without exclude: test_complex tops Most Referencing (2 callees)
+        let result = handle_hotspots(&db, None, None, false).unwrap();
+        let section = result.find("### Most Referencing").unwrap();
+        assert!(
+            result[section..].contains("test_complex"),
+            "test function should appear without exclude: {result}"
+        );
+
+        // With exclude: test_complex filtered out
+        let result = handle_hotspots(&db, None, None, true).unwrap();
+        let section = result.find("### Most Referencing").unwrap();
+        assert!(
+            !result[section..].contains("test_complex"),
+            "test function should be excluded from Most Referencing: {result}"
+        );
+        assert!(
+            result[section..].contains("prod_complex"),
+            "prod function should still appear: {result}"
+        );
+    }
 }
