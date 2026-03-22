@@ -270,8 +270,9 @@ fn render_callees(
     let _ = writeln!(output, "### Callees\n");
 
     let call_kind = crate::indexer::parser::RefKind::Call.to_string();
-    let calls: Vec<_> = callees.iter().filter(|c| c.ref_kind == call_kind).collect();
-    let type_refs: Vec<_> = callees.iter().filter(|c| c.ref_kind != call_kind).collect();
+    let (calls, type_refs): (Vec<_>, Vec<_>) = callees
+        .iter()
+        .partition(|c| c.ref_kind == call_kind);
 
     if !calls.is_empty() {
         let _ = writeln!(output, "**Calls:**");
