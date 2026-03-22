@@ -88,31 +88,34 @@ pub fn run_git_diff(
 
 const MAX_DIFF_OUTPUT: usize = 8000;
 
-/// Analyze the impact of changes from a git diff.
-pub fn handle_diff_impact(
-    db: &Database,
+/// Parsed diff data ready for DB queries. Produced without DB access.
+pub struct ParsedDiff {
+    pub file_ranges: BTreeMap<String, Vec<(i64, i64)>>,
+}
+
+/// Run git diff and parse hunks into file ranges. Does not require DB access.
+pub fn run_and_parse_diff(
     repo_path: &Path,
     git_ref: Option<&str>,
-    changes_only: bool,
-    compact: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<Result<ParsedDiff, String>, Box<dyn std::error::Error>> {
     let diff_output = run_git_diff(repo_path, git_ref)?;
     if diff_output.trim().is_empty() {
-        return Ok("No changes detected. Check the git ref format:\n\
+        return Ok(Err("No changes detected. Check the git ref format:\n\
              - Omit `git_ref` for unstaged changes\n\
              - `git_ref: \"HEAD~1\"` for last commit vs HEAD\n\
              - `git_ref: \"HEAD~3..HEAD\"` for last 3 commits\n\
              - `git_ref: \"main..feature\"` for branch diff\n\
              - `git_ref: \"abc1234\"` for diff from a specific commit to HEAD"
-            .to_string());
+            .to_string()));
     }
 
     let hunks = parse_diff(&diff_output);
     if hunks.is_empty() {
-        return Ok("No changed lines found in the diff.".to_string());
+        return Ok(Err(
+            "No changed lines found in the diff.".to_string()
+        ));
     }
 
-    // Group hunks by file path into line ranges
     let mut file_ranges: BTreeMap<String, Vec<(i64, i64)>> =
         BTreeMap::new();
     for hunk in &hunks {
@@ -123,9 +126,19 @@ pub fn handle_diff_impact(
             .push((hunk.new_start, end));
     }
 
-    // Map changed lines to symbols
+    Ok(Ok(ParsedDiff { file_ranges }))
+}
+
+/// Complete the diff impact analysis using parsed diff data and DB access.
+pub fn analyze_diff_impact(
+    db: &Database,
+    repo_path: &Path,
+    parsed: &ParsedDiff,
+    changes_only: bool,
+    compact: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
     let mut changed_symbols: Vec<(String, crate::db::StoredSymbol)> = Vec::new();
-    for (file, ranges) in &file_ranges {
+    for (file, ranges) in &parsed.file_ranges {
         let symbols = db.symbols_at_lines(file, ranges)?;
         for sym in symbols {
             changed_symbols.push((file.clone(), sym));
@@ -134,6 +147,21 @@ pub fn handle_diff_impact(
 
     let stale_warning = check_staleness(db, repo_path);
     render_diff_output(db, &changed_symbols, changes_only, compact, &stale_warning)
+}
+
+/// Analyze the impact of changes from a git diff.
+pub fn handle_diff_impact(
+    db: &Database,
+    repo_path: &Path,
+    git_ref: Option<&str>,
+    changes_only: bool,
+    compact: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let parsed = match run_and_parse_diff(repo_path, git_ref)? {
+        Ok(p) => p,
+        Err(msg) => return Ok(msg),
+    };
+    analyze_diff_impact(db, repo_path, &parsed, changes_only, compact)
 }
 
 fn check_staleness(db: &Database, repo_path: &Path) -> String {

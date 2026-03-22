@@ -3,15 +3,34 @@ use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
 
-pub fn handle_freshness(
+/// Data extracted from the DB needed for freshness check.
+pub struct FreshnessDbState {
+    pub indexed_hash: Option<String>,
+    pub stored_version: Option<String>,
+}
+
+/// Extract the stored index state from the database.
+pub fn get_freshness_db_state(
     db: &Database,
     repo_path: &Path,
+) -> Result<FreshnessDbState, Box<dyn std::error::Error>> {
+    let repo_str = repo_path.to_string_lossy();
+    let indexed_hash = db.commit_hash(&repo_str)?;
+    let stored_version = db.index_version(&repo_str)?;
+    Ok(FreshnessDbState {
+        indexed_hash,
+        stored_version,
+    })
+}
+
+/// Format the freshness report using stored DB state and live git data.
+/// Does not require DB access.
+pub fn format_freshness_report(
+    repo_path: &Path,
+    state: &FreshnessDbState,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut output = String::new();
     let _ = writeln!(output, "## Index Freshness\n");
-
-    let repo_str = repo_path.to_string_lossy();
-    let indexed_hash = db.commit_hash(&repo_str)?;
 
     let head_output = Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -21,21 +40,27 @@ pub fn handle_freshness(
         .trim()
         .to_string();
 
-    let indexed = indexed_hash.as_deref().unwrap_or("not indexed yet");
+    let indexed = state
+        .indexed_hash
+        .as_deref()
+        .unwrap_or("not indexed yet");
     let _ = writeln!(output, "- **Indexed commit:** `{indexed}`");
     let _ = writeln!(output, "- **Current HEAD:** `{current_head}`");
 
-    let stored_version = db.index_version(&repo_str)?;
     let current_version = crate::indexer::INDEX_VERSION;
     let _ = writeln!(
         output,
         "- **Index version:** {}",
-        stored_version.as_deref().unwrap_or("unknown")
+        state
+            .stored_version
+            .as_deref()
+            .unwrap_or("unknown")
     );
     let _ = writeln!(output, "- **Binary version:** {current_version}");
 
-    let version_current = stored_version.as_deref() == Some(current_version);
-    let commit_current = indexed_hash.as_deref() == Some(current_head.as_str());
+    let version_current = state.stored_version.as_deref() == Some(current_version);
+    let commit_current =
+        state.indexed_hash.as_deref() == Some(current_head.as_str());
     let is_current = commit_current && version_current;
 
     if version_current {
@@ -56,7 +81,7 @@ pub fn handle_freshness(
     }
 
     if !commit_current {
-        if let Some(hash) = &indexed_hash {
+        if let Some(hash) = &state.indexed_hash {
             let diff_output = Command::new("git")
                 .args(["diff", "--name-only", hash, "HEAD"])
                 .current_dir(repo_path)
@@ -90,4 +115,12 @@ pub fn handle_freshness(
     }
 
     Ok(output)
+}
+
+pub fn handle_freshness(
+    db: &Database,
+    repo_path: &Path,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let state = get_freshness_db_state(db, repo_path)?;
+    format_freshness_report(repo_path, &state)
 }

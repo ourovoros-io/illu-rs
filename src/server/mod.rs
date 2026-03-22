@@ -584,12 +584,20 @@ impl IlluServer {
         tracing::info!(git_ref = ?params.git_ref, "Tool call: diff_impact");
         let _guard = crate::status::StatusGuard::new("diff_impact");
         self.refresh()?;
-        let db = self.lock_db()?;
-        let repo_path = &self.config.repo_path;
-        let result = tools::diff_impact::handle_diff_impact(
-            &db,
-            repo_path,
+        let parsed = tools::diff_impact::run_and_parse_diff(
+            &self.config.repo_path,
             params.git_ref.as_deref(),
+        )
+        .map_err(to_mcp_err)?;
+        let parsed = match parsed {
+            Ok(p) => p,
+            Err(msg) => return Ok(text_result(msg)),
+        };
+        let db = self.lock_db()?;
+        let result = tools::diff_impact::analyze_diff_impact(
+            &db,
+            &self.config.repo_path,
+            &parsed,
             params.changes_only.unwrap_or(false),
             params.compact.unwrap_or(false),
         )
@@ -633,9 +641,13 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!("Tool call: freshness");
         let _guard = crate::status::StatusGuard::new("freshness");
-        let db = self.lock_db()?;
-        let repo_path = &self.config.repo_path;
-        let result = tools::freshness::handle_freshness(&db, repo_path).map_err(to_mcp_err)?;
+        let state = {
+            let db = self.lock_db()?;
+            tools::freshness::get_freshness_db_state(&db, &self.config.repo_path)
+                .map_err(to_mcp_err)?
+        };
+        let result = tools::freshness::format_freshness_report(&self.config.repo_path, &state)
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -888,10 +900,16 @@ impl IlluServer {
         let _guard =
             crate::status::StatusGuard::new(&format!("blame \u{25b8} {}", params.symbol_name));
         self.refresh()?;
-        let db = self.lock_db()?;
-        let repo_path = &self.config.repo_path;
-        let result =
-            tools::blame::handle_blame(&db, repo_path, &params.symbol_name).map_err(to_mcp_err)?;
+        let target = {
+            let db = self.lock_db()?;
+            tools::blame::resolve_blame_target(&db, &params.symbol_name).map_err(to_mcp_err)?
+        };
+        let target = match target {
+            Ok(t) => t,
+            Err(msg) => return Ok(text_result(msg)),
+        };
+        let result = tools::blame::run_and_format_blame(&self.config.repo_path, &target)
+            .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
@@ -907,12 +925,17 @@ impl IlluServer {
         let _guard =
             crate::status::StatusGuard::new(&format!("history \u{25b8} {}", params.symbol_name));
         self.refresh()?;
-        let db = self.lock_db()?;
-        let repo_path = &self.config.repo_path;
-        let result = tools::history::handle_history(
-            &db,
-            repo_path,
-            &params.symbol_name,
+        let target = {
+            let db = self.lock_db()?;
+            tools::history::resolve_history_target(&db, &params.symbol_name).map_err(to_mcp_err)?
+        };
+        let target = match target {
+            Ok(t) => t,
+            Err(msg) => return Ok(text_result(msg)),
+        };
+        let result = tools::history::run_and_format_history(
+            &self.config.repo_path,
+            &target,
             params.max_commits,
             params.show_diff.unwrap_or(false),
         )
