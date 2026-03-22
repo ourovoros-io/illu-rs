@@ -644,15 +644,17 @@ impl Database {
         &self,
         source_id: SymbolId,
         target_id: SymbolId,
-        kind: &str,
-        confidence: &str,
+        kind: crate::indexer::parser::RefKind,
+        confidence: crate::indexer::parser::Confidence,
         ref_line: Option<i64>,
     ) -> SqlResult<()> {
+        let kind_str = kind.to_string();
+        let confidence_str = confidence.to_string();
         self.conn.execute(
             "INSERT OR IGNORE INTO symbol_refs \
              (source_symbol_id, target_symbol_id, kind, confidence, ref_line) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![source_id, target_id, kind, confidence, ref_line],
+            params![source_id, target_id, kind_str, confidence_str, ref_line],
         )?;
         Ok(())
     }
@@ -1766,7 +1768,7 @@ impl Database {
                 r.target_context.as_deref(),
             );
             if let (Some((sid, _)), Some((tid, confidence))) = (source_id, target_id) {
-                self.insert_symbol_ref(sid, tid, &r.kind.to_string(), confidence, r.ref_line)?;
+                self.insert_symbol_ref(sid, tid, r.kind, confidence, r.ref_line)?;
                 count += 1;
             }
         }
@@ -2172,28 +2174,29 @@ impl SymbolIdMap {
         name: &str,
         target_file: Option<&str>,
         target_context: Option<&str>,
-    ) -> Option<(SymbolId, &'static str)> {
+    ) -> Option<(SymbolId, crate::indexer::parser::Confidence)> {
+        use crate::indexer::parser::Confidence;
         if let Some(ctx) = target_context
             && let Some(id) = self
                 .impl_qualified
                 .get(&(name.to_string(), ctx.to_string()))
         {
-            return Some((*id, "high"));
+            return Some((*id, Confidence::High));
         }
         if let Some(file) = target_file {
             let key = (name.to_string(), file.to_string());
             if let Some(id) = self.file_qualified.get(&key) {
-                return Some((*id, "high"));
+                return Some((*id, Confidence::High));
             }
             // Try mod.rs variant: src/foo/bar.rs → src/foo/bar/mod.rs
             if let Some(alt) = mod_rs_alternative(file) {
                 let alt_key = (name.to_string(), alt);
                 if let Some(id) = self.file_qualified.get(&alt_key) {
-                    return Some((*id, "high"));
+                    return Some((*id, Confidence::High));
                 }
             }
         }
-        self.name_only.get(name).map(|id| (*id, "low"))
+        self.name_only.get(name).map(|id| (*id, Confidence::Low))
     }
 }
 
@@ -2311,7 +2314,7 @@ pub struct CalleeInfo {
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::Symbol;
+    use crate::indexer::parser::{Confidence, RefKind, Symbol};
     use crate::indexer::store::store_symbols;
 
     #[test]
@@ -2715,9 +2718,9 @@ mod tests {
             .unwrap();
         let callee_b_id = SymbolId(db.conn.last_insert_rowid());
         // Insert refs
-        db.insert_symbol_ref(caller_id, callee_a_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, callee_a_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(caller_id, callee_b_id, "type_ref", "high", None)
+        db.insert_symbol_ref(caller_id, callee_b_id, RefKind::TypeRef, Confidence::High, None)
             .unwrap();
         let callees = db.callees("caller", "src/lib.rs", false).unwrap();
         assert_eq!(callees.len(), 2);
@@ -2776,7 +2779,7 @@ mod tests {
             )
             .unwrap();
         let main_id = SymbolId(db.conn.last_insert_rowid());
-        db.insert_symbol_ref(main_id, sym_id, "type_ref", "high", None)
+        db.insert_symbol_ref(main_id, sym_id, RefKind::TypeRef, Confidence::High, None)
             .unwrap();
 
         // Delete first file's data
@@ -3203,7 +3206,7 @@ mod tests {
             .unwrap();
         let beta_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(beta_id, alpha_id, "call", "high", None)
+        db.insert_symbol_ref(beta_id, alpha_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Verify the ref exists
@@ -3301,7 +3304,7 @@ mod tests {
             )
             .unwrap();
         let target_id = SymbolId(db.conn.last_insert_rowid());
-        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let callers = db.callers_by_name("target_fn", None, false).unwrap();
@@ -3314,7 +3317,7 @@ mod tests {
         assert!(empty.is_empty());
 
         // Type refs should be excluded
-        db.insert_symbol_ref(caller_id, target_id, "type_ref", "high", None)
+        db.insert_symbol_ref(caller_id, target_id, RefKind::TypeRef, Confidence::High, None)
             .unwrap();
         let callers = db.callers_by_name("target_fn", None, false).unwrap();
         assert_eq!(callers.len(), 1, "type_ref should not appear in callers");
@@ -3352,7 +3355,7 @@ mod tests {
             .unwrap();
         let tgt_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(src_id, tgt_id, "call", "high", None)
+        db.insert_symbol_ref(src_id, tgt_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let edges = db.file_dependencies("src/", None).unwrap();
@@ -3391,7 +3394,7 @@ mod tests {
             .unwrap();
         let s2 = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(s1, s2, "call", "high", None).unwrap();
+        db.insert_symbol_ref(s1, s2, RefKind::Call, Confidence::High, None).unwrap();
 
         let edges = db.file_dependencies("src/", None).unwrap();
         assert!(edges.is_empty());
@@ -3426,7 +3429,7 @@ mod tests {
         let target_id = SymbolId(db.conn.last_insert_rowid());
 
         // Insert a high-confidence ref
-        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Create another pair for a low-confidence ref
@@ -3442,7 +3445,7 @@ mod tests {
             .unwrap();
         let noise_id = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(noise_id, target_id, "call", "low", None)
+        db.insert_symbol_ref(noise_id, target_id, RefKind::Call, Confidence::Low, None)
             .unwrap();
 
         // Without filter: both edges
@@ -3492,10 +3495,10 @@ mod tests {
         let c = SymbolId(db.conn.last_insert_rowid());
 
         // b -> a, c -> a (a has 2 incoming refs)
-        db.insert_symbol_ref(b, a, "call", "high", None).unwrap();
-        db.insert_symbol_ref(c, a, "call", "high", None).unwrap();
+        db.insert_symbol_ref(b, a, RefKind::Call, Confidence::High, None).unwrap();
+        db.insert_symbol_ref(c, a, RefKind::Call, Confidence::High, None).unwrap();
         // b -> c (c has 1 incoming ref)
-        db.insert_symbol_ref(b, c, "call", "high", None).unwrap();
+        db.insert_symbol_ref(b, c, RefKind::Call, Confidence::High, None).unwrap();
 
         let results = db.most_referenced_symbols(10, "", None).unwrap();
         assert_eq!(results.len(), 2);
@@ -3537,9 +3540,9 @@ mod tests {
             .unwrap();
         let caller_b = SymbolId(db.conn.last_insert_rowid());
 
-        db.insert_symbol_ref(caller_a, target, "call", "high", None)
+        db.insert_symbol_ref(caller_a, target, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(caller_b, target, "call", "high", None)
+        db.insert_symbol_ref(caller_b, target, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let count = db.count_refs_for_symbol("target_fn", "src/lib.rs").unwrap();
@@ -3587,10 +3590,10 @@ mod tests {
         let c = SymbolId(db.conn.last_insert_rowid());
 
         // b -> a, b -> c (b has 2 outgoing refs)
-        db.insert_symbol_ref(b, a, "call", "high", None).unwrap();
-        db.insert_symbol_ref(b, c, "call", "high", None).unwrap();
+        db.insert_symbol_ref(b, a, RefKind::Call, Confidence::High, None).unwrap();
+        db.insert_symbol_ref(b, c, RefKind::Call, Confidence::High, None).unwrap();
         // a -> c (a has 1 outgoing ref)
-        db.insert_symbol_ref(a, c, "call", "high", None).unwrap();
+        db.insert_symbol_ref(a, c, RefKind::Call, Confidence::High, None).unwrap();
 
         let results = db
             .most_referencing_symbols(10, "", None, false)

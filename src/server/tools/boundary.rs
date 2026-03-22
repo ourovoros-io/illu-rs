@@ -94,7 +94,7 @@ pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std:
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn setup_db() -> Database {
@@ -176,7 +176,7 @@ mod tests {
             .symbol_id("public_fn", "src/mod/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, public_fn_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, public_fn_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Internal caller -> internal_fn
@@ -188,7 +188,7 @@ mod tests {
             .symbol_id("internal_fn", "src/mod/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(helper_id, internal_fn_id, "call", "high", None)
+        db.insert_symbol_ref(helper_id, internal_fn_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         db
@@ -278,7 +278,7 @@ mod tests {
             .symbol_id("handle_context", "src/tools/context.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(dispatch_id, handle_id, "call", "low", None)
+        db.insert_symbol_ref(dispatch_id, handle_id, RefKind::Call, Confidence::Low, None)
             .unwrap();
 
         let result = handle_boundary(&db, "src/tools/").unwrap();

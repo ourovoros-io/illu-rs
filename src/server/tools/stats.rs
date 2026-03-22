@@ -127,7 +127,7 @@ fn pluralize_kind(kind: &str, count: i64) -> String {
 mod tests {
     use super::*;
     use crate::db::SymbolId;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn make_sym(name: &str, kind: SymbolKind, file: &str, attrs: Option<&str>) -> Symbol {
@@ -171,7 +171,7 @@ mod tests {
         // test_foo calls foo (so foo is tested)
         let test_id = sym_id(&db, "test_foo");
         let foo_id = sym_id(&db, "foo");
-        db.insert_symbol_ref(test_id, foo_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, foo_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_stats(&db, None, false).unwrap();
@@ -217,17 +217,17 @@ mod tests {
         let c3 = sym_id(&db, "caller3");
 
         // real_fn: 2 high-confidence refs
-        db.insert_symbol_ref(c1, real_id, "call", "high", None)
+        db.insert_symbol_ref(c1, real_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(c2, real_id, "call", "high", None)
+        db.insert_symbol_ref(c2, real_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // noise_fn: 3 refs but all low-confidence
-        db.insert_symbol_ref(c1, noise_id, "call", "low", None)
+        db.insert_symbol_ref(c1, noise_id, RefKind::Call, Confidence::Low, None)
             .unwrap();
-        db.insert_symbol_ref(c2, noise_id, "call", "low", None)
+        db.insert_symbol_ref(c2, noise_id, RefKind::Call, Confidence::Low, None)
             .unwrap();
-        db.insert_symbol_ref(c3, noise_id, "call", "low", None)
+        db.insert_symbol_ref(c3, noise_id, RefKind::Call, Confidence::Low, None)
             .unwrap();
 
         let result = handle_stats(&db, None, false).unwrap();

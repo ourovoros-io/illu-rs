@@ -331,7 +331,7 @@ fn render_test_coverage(
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     #[test]
@@ -455,7 +455,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             .symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Simulate: lines 12-15 changed in src/lib.rs — overlaps target_fn
@@ -531,9 +531,9 @@ diff --git a/src/lib.rs b/src/lib.rs
             .unwrap()
             .unwrap();
         // shared_caller calls both fn_a and fn_b
-        db.insert_symbol_ref(caller_id, a_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, a_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(caller_id, b_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, b_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Both fn_a and fn_b changed — shared_caller is downstream of both
@@ -642,9 +642,9 @@ diff --git a/src/lib.rs b/src/lib.rs
             .symbol_id("test_target", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Build changed_symbols as if git diff found target_fn changed
@@ -801,7 +801,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             .symbol_id("test_target", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Verify get_related_tests finds the test

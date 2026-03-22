@@ -771,6 +771,32 @@ pub enum RefKind {
     Call,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Confidence {
+    High,
+    Low,
+}
+
+impl std::fmt::Display for Confidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::High => f.write_str("high"),
+            Self::Low => f.write_str("low"),
+        }
+    }
+}
+
+impl std::str::FromStr for Confidence {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "high" => Ok(Self::High),
+            "low" => Ok(Self::Low),
+            other => Err(format!("unknown confidence: {other}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitImpl {
     pub type_name: String,

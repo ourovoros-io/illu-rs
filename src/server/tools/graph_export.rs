@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_graph_export_edges_format() {
-        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+        use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
         use crate::indexer::store::store_symbols;
         let db = Database::open_in_memory().unwrap();
         let file_id = db.insert_file("src/lib.rs", "h1").unwrap();
@@ -265,7 +265,7 @@ mod tests {
         .unwrap();
         let foo_id = db.symbol_id("foo", "src/lib.rs").unwrap().unwrap();
         let bar_id = db.symbol_id("bar", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(foo_id, bar_id, "call", "high", Some(2))
+        db.insert_symbol_ref(foo_id, bar_id, RefKind::Call, Confidence::High, Some(2))
             .unwrap();
 
         let result = handle_graph_export(

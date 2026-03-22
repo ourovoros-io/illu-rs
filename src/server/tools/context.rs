@@ -428,7 +428,7 @@ fn render_related_docs(
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     #[test]
@@ -582,7 +582,7 @@ mod tests {
             .symbol_id("callee_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, callee_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, callee_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_context(&db, "caller_fn", false, None, None, None, false).unwrap();
@@ -671,7 +671,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let caller_id = db.symbol_id("caller_a", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_context(&db, "target_fn", false, None, None, None, false).unwrap();
@@ -813,7 +813,7 @@ mod tests {
 
         let my_fn_id = db.symbol_id("my_fn", "src/lib.rs").unwrap().unwrap();
         let helper_id = db.symbol_id("helper", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(my_fn_id, helper_id, "call", "high", None)
+        db.insert_symbol_ref(my_fn_id, helper_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let sections: &[&str] = &["source"];
@@ -865,7 +865,7 @@ mod tests {
 
         let invoker_id = db.symbol_id("invoker", "src/lib.rs").unwrap().unwrap();
         let target_id = db.symbol_id("target", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(invoker_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(invoker_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let sections: &[&str] = &["callers"];
@@ -917,7 +917,7 @@ mod tests {
 
         let all_fn_id = db.symbol_id("all_fn", "src/lib.rs").unwrap().unwrap();
         let dep_id = db.symbol_id("dep", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(all_fn_id, dep_id, "call", "high", None)
+        db.insert_symbol_ref(all_fn_id, dep_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_context(&db, "all_fn", false, None, None, None, false).unwrap();
@@ -997,9 +997,9 @@ mod tests {
             .symbol_id("test_caller", "tests/test.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(src_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(src_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Without callers_path: both callers shown
@@ -1305,7 +1305,7 @@ mod tests {
             .unwrap()
             .unwrap();
         // ref_line 42 = the line where caller_fn actually calls target_fn
-        db.insert_symbol_ref(caller_id, target_id, "call", "high", Some(42))
+        db.insert_symbol_ref(caller_id, target_id, RefKind::Call, Confidence::High, Some(42))
             .unwrap();
 
         let result = handle_context(&db, "target_fn", false, None, None, None, false).unwrap();
@@ -1388,10 +1388,10 @@ mod tests {
         let bad_id = db.symbol_id("bad_callee", "src/b.rs").unwrap().unwrap();
 
         // High confidence ref
-        db.insert_symbol_ref(caller_id, good_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, good_id, RefKind::Call, Confidence::High, None)
             .unwrap();
         // Low confidence ref (name-only fallback)
-        db.insert_symbol_ref(caller_id, bad_id, "call", "low", None)
+        db.insert_symbol_ref(caller_id, bad_id, RefKind::Call, Confidence::Low, None)
             .unwrap();
 
         let result = handle_context(
@@ -1493,9 +1493,9 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        db.insert_symbol_ref(prod_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(prod_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_context(

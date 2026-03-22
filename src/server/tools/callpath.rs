@@ -237,6 +237,7 @@ fn handle_all_paths(
 mod tests {
     use super::*;
     use crate::db::SymbolId;
+    use crate::indexer::parser::{Confidence, RefKind};
     use rusqlite::params;
 
     fn insert_symbol(db: &Database, file_id: crate::db::FileId, name: &str) -> SymbolId {
@@ -271,13 +272,13 @@ mod tests {
         let d_id = insert_symbol(&db, file_id, "d");
 
         // Diamond: a -> b -> d, a -> c -> d
-        db.insert_symbol_ref(a_id, b_id, "call", "high", None)
+        db.insert_symbol_ref(a_id, b_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(a_id, c_id, "call", "high", None)
+        db.insert_symbol_ref(a_id, c_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(b_id, d_id, "call", "high", None)
+        db.insert_symbol_ref(b_id, d_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(c_id, d_id, "call", "high", None)
+        db.insert_symbol_ref(c_id, d_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         db

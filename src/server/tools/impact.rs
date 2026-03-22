@@ -146,7 +146,7 @@ fn render_depth_entries(
 mod tests {
     use super::*;
     use crate::db::SymbolId;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn sym_id(db: &Database, name: &str, file: &str) -> SymbolId {
@@ -235,7 +235,7 @@ mod tests {
             .symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, base_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, base_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_impact(&db, "base_fn", None, false, false).unwrap();
@@ -299,9 +299,9 @@ mod tests {
         let base_id = db.symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
         let mid_id = db.symbol_id("mid_fn", "src/lib.rs").unwrap().unwrap();
         let top_id = db.symbol_id("top_fn", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(mid_id, base_id, "call", "high", None)
+        db.insert_symbol_ref(mid_id, base_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(top_id, mid_id, "call", "high", None)
+        db.insert_symbol_ref(top_id, mid_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_impact(&db, "base_fn", None, false, false).unwrap();
@@ -393,9 +393,9 @@ mod tests {
         let tax_id = sym_id(&db, "calculate_tax", "src/lib.rs");
         let test_basic_id = sym_id(&db, "test_tax_basic", "tests/calc.rs");
         let test_zero_id = sym_id(&db, "test_tax_zero", "tests/calc.rs");
-        db.insert_symbol_ref(test_basic_id, tax_id, "call", "high", None)
+        db.insert_symbol_ref(test_basic_id, tax_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_zero_id, tax_id, "call", "high", None)
+        db.insert_symbol_ref(test_zero_id, tax_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_impact(&db, "calculate_tax", None, false, false).unwrap();
@@ -489,9 +489,9 @@ mod tests {
             .symbol_id("test_via_wrapper", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(wrapper_id, inner_id, "call", "high", None)
+        db.insert_symbol_ref(wrapper_id, inner_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_id, wrapper_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, wrapper_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_impact(&db, "inner_fn", None, false, false).unwrap();
@@ -595,7 +595,7 @@ mod tests {
             .symbol_id("use_it", "app/src/main.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref", "high", None)
+        db.insert_symbol_ref(app_sym_id, shared_sym_id, RefKind::TypeRef, Confidence::High, None)
             .unwrap();
 
         let result = handle_impact(&db, "SharedType", None, false, false).unwrap();
@@ -652,7 +652,7 @@ mod tests {
             .symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(caller_id, open_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, open_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_impact(&db, "Database::open", None, false, false).unwrap();
@@ -707,7 +707,7 @@ mod tests {
             .symbol_id("test_open", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(test_id, open_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, open_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_impact(&db, "Database::open", None, false, false).unwrap();
@@ -779,9 +779,9 @@ mod tests {
         let base_id = db.symbol_id("base", "src/lib.rs").unwrap().unwrap();
         let mid_id = db.symbol_id("mid", "src/lib.rs").unwrap().unwrap();
         let top_id = db.symbol_id("top", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(mid_id, base_id, "call", "high", None)
+        db.insert_symbol_ref(mid_id, base_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(top_id, mid_id, "call", "high", None)
+        db.insert_symbol_ref(top_id, mid_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // depth=1: only direct callers
@@ -858,9 +858,9 @@ mod tests {
         let core_id = sym_id(&db, "core_fn", "src/lib.rs");
         let prod_id = sym_id(&db, "prod_caller", "src/lib.rs");
         let test_id = sym_id(&db, "test_core", "src/lib.rs");
-        db.insert_symbol_ref(prod_id, core_id, "call", "high", None)
+        db.insert_symbol_ref(prod_id, core_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_id, core_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, core_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Without exclude_tests: both callers appear

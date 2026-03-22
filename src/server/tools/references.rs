@@ -154,7 +154,7 @@ fn render_trait_impls(
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn setup_db() -> Database {
@@ -272,7 +272,7 @@ mod tests {
         // caller references both Status definitions
         let enum_id = db.symbol_id("Status", "src/lib.rs").unwrap().unwrap();
         let caller_id = db.symbol_id("caller", "src/lib.rs").unwrap().unwrap();
-        db.insert_symbol_ref(caller_id, enum_id, "call", "high", Some(22))
+        db.insert_symbol_ref(caller_id, enum_id, RefKind::Call, Confidence::High, Some(22))
             .unwrap();
 
         let result = handle_references(&db, "Status", None, false).unwrap();
@@ -343,9 +343,9 @@ mod tests {
             .symbol_id("test_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(prod_id, target_id, "call", "high", Some(8))
+        db.insert_symbol_ref(prod_id, target_id, RefKind::Call, Confidence::High, Some(8))
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call", "high", Some(13))
+        db.insert_symbol_ref(test_id, target_id, RefKind::Call, Confidence::High, Some(13))
             .unwrap();
 
         let result = handle_references(&db, "target", None, false).unwrap();
@@ -417,9 +417,9 @@ mod tests {
             .symbol_id("test_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
-        db.insert_symbol_ref(prod_id, target_id, "call", "high", Some(8))
+        db.insert_symbol_ref(prod_id, target_id, RefKind::Call, Confidence::High, Some(8))
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call", "high", Some(13))
+        db.insert_symbol_ref(test_id, target_id, RefKind::Call, Confidence::High, Some(13))
             .unwrap();
 
         let result = handle_references(&db, "target", None, true).unwrap();

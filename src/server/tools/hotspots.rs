@@ -71,7 +71,7 @@ pub fn handle_hotspots(
 mod tests {
     use super::*;
     use crate::db::SymbolId;
-    use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
+    use crate::indexer::parser::{Confidence, RefKind, Symbol, SymbolKind, Visibility};
     use crate::indexer::store::store_symbols;
 
     fn make_fn(name: &str, file: &str, start: usize, end: usize) -> Symbol {
@@ -117,16 +117,16 @@ mod tests {
         let complex_id = sym_id(&db, "complex");
 
         // caller_a -> hub, caller_b -> hub (hub has 2 incoming)
-        db.insert_symbol_ref(caller_a_id, hub_id, "call", "high", None)
+        db.insert_symbol_ref(caller_a_id, hub_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(caller_b_id, hub_id, "call", "high", None)
+        db.insert_symbol_ref(caller_b_id, hub_id, RefKind::Call, Confidence::High, None)
             .unwrap();
         // complex -> hub, caller_a, caller_b (3 outgoing)
-        db.insert_symbol_ref(complex_id, hub_id, "call", "high", None)
+        db.insert_symbol_ref(complex_id, hub_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(complex_id, caller_a_id, "call", "high", None)
+        db.insert_symbol_ref(complex_id, caller_a_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(complex_id, caller_b_id, "call", "high", None)
+        db.insert_symbol_ref(complex_id, caller_b_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         db
@@ -177,7 +177,7 @@ mod tests {
 
         let lib_id = sym_id(&db, "lib_fn");
         let server_id = sym_id(&db, "server_fn");
-        db.insert_symbol_ref(lib_id, server_id, "call", "high", None)
+        db.insert_symbol_ref(lib_id, server_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_hotspots(&db, Some("src/server/"), None, false).unwrap();
@@ -268,9 +268,9 @@ mod tests {
         let test_id = sym_id(&db, "test_caller");
 
         // 1 prod ref + 1 test ref
-        db.insert_symbol_ref(prod_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(prod_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_id, target_id, "call", "high", None)
+        db.insert_symbol_ref(test_id, target_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Without exclude: 2 references
@@ -321,12 +321,12 @@ mod tests {
         let test_id = sym_id(&db, "test_complex");
 
         // test_complex calls both targets (2 outgoing)
-        db.insert_symbol_ref(test_id, target_a, "call", "high", None)
+        db.insert_symbol_ref(test_id, target_a, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_id, target_b, "call", "high", None)
+        db.insert_symbol_ref(test_id, target_b, RefKind::Call, Confidence::High, None)
             .unwrap();
         // prod_complex calls one target (1 outgoing)
-        db.insert_symbol_ref(prod_id, target_a, "call", "high", None)
+        db.insert_symbol_ref(prod_id, target_a, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Without exclude: test_complex tops Most Referencing (2 callees)

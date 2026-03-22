@@ -289,6 +289,7 @@ mod tests {
     use super::super::{Direction, NeighborhoodFormat};
     use super::*;
     use crate::db::SymbolId;
+    use crate::indexer::parser::{Confidence, RefKind};
     use rusqlite::params;
 
     fn insert_symbol(db: &Database, file_id: crate::db::FileId, name: &str) -> SymbolId {
@@ -322,10 +323,10 @@ mod tests {
         let beta_id = insert_symbol(&db, file_id, "beta");
 
         // alpha -> center
-        db.insert_symbol_ref(alpha_id, center_id, "call", "high", None)
+        db.insert_symbol_ref(alpha_id, center_id, RefKind::Call, Confidence::High, None)
             .unwrap();
         // center -> beta
-        db.insert_symbol_ref(center_id, beta_id, "call", "high", None)
+        db.insert_symbol_ref(center_id, beta_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         db
@@ -433,11 +434,11 @@ mod tests {
         let grandchild_id = insert_symbol(&db, file_id, "grandchild");
 
         // root -> child_a, root -> child_b, child_a -> grandchild
-        db.insert_symbol_ref(root_id, child_a_id, "call", "high", None)
+        db.insert_symbol_ref(root_id, child_a_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(root_id, child_b_id, "call", "high", None)
+        db.insert_symbol_ref(root_id, child_b_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(child_a_id, grandchild_id, "call", "high", None)
+        db.insert_symbol_ref(child_a_id, grandchild_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_neighborhood(
@@ -488,9 +489,9 @@ mod tests {
         let test_caller = insert_test_symbol(&db, file_id, "test_caller");
 
         // prod_caller -> target, test_caller -> target
-        db.insert_symbol_ref(prod_caller, target, "call", "high", None)
+        db.insert_symbol_ref(prod_caller, target, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(test_caller, target, "call", "high", None)
+        db.insert_symbol_ref(test_caller, target, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         // Without exclude_tests: both callers visible
@@ -553,9 +554,9 @@ mod tests {
         let const_id = insert_symbol_with_kind(&db, file_id, "MY_CONST", "const", 7, 7);
         let fn_id = insert_symbol_with_kind(&db, file_id, "real_fn", "function", 9, 12);
 
-        db.insert_symbol_ref(caller_id, const_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, const_id, RefKind::Call, Confidence::High, None)
             .unwrap();
-        db.insert_symbol_ref(caller_id, fn_id, "call", "high", None)
+        db.insert_symbol_ref(caller_id, fn_id, RefKind::Call, Confidence::High, None)
             .unwrap();
 
         let result = handle_neighborhood(
