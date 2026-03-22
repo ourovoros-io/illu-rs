@@ -284,7 +284,7 @@ fn render_test_coverage(
                 let is_test = sym
                     .attributes
                     .as_deref()
-                    .is_some_and(|a| a.contains("test"));
+                    .is_some_and(crate::indexer::store::is_test_attribute);
                 if !is_test && sym.kind == crate::indexer::parser::SymbolKind::Function {
                     untested_symbols.push(sym);
                 }

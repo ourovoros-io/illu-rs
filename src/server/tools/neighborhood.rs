@@ -16,14 +16,10 @@ pub fn handle_neighborhood(
 
     let syms = super::resolve_symbol(db, symbol_name)?;
     if syms.is_empty() {
-        return Ok(format!(
-            "Symbol '{symbol_name}' not found.\n\
-            Try `Type::method` syntax for methods \
-            (e.g. `Database::new`), or use `query` to search."
-        ));
+        return Ok(super::symbol_not_found(symbol_name));
     }
 
-    let base = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);
+    let base = super::base_name(symbol_name);
 
     if fmt == "tree" {
         if dir == "both" {
@@ -335,7 +331,7 @@ mod tests {
     fn test_neighborhood_not_found() {
         let db = Database::open_in_memory().unwrap();
         let result = handle_neighborhood(&db, "nonexistent", None, None, None, false).unwrap();
-        assert!(result.contains("not found"));
+        assert!(result.contains("No symbol found"));
     }
 
     #[test]

@@ -2,11 +2,6 @@ use crate::db::Database;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
 
-/// Extract the base symbol name (without `Type::` prefix).
-fn base_name(name: &str) -> &str {
-    name.split_once("::").map_or(name, |(_, m)| m)
-}
-
 pub fn handle_callpath(
     db: &Database,
     from: &str,
@@ -20,14 +15,14 @@ pub fn handle_callpath(
 
     let from_syms = super::resolve_symbol(db, from)?;
     if from_syms.is_empty() {
-        return Ok(format!("Source symbol '{from}' not found."));
+        return Ok(super::symbol_not_found(from));
     }
     let to_syms = super::resolve_symbol(db, to)?;
     if to_syms.is_empty() {
-        return Ok(format!("Target symbol '{to}' not found."));
+        return Ok(super::symbol_not_found(to));
     }
 
-    let to_name = base_name(to);
+    let to_name = super::base_name(to);
 
     if all_paths {
         let max_paths = usize::try_from(max_paths.unwrap_or(5).max(1)).unwrap_or(5);
@@ -336,6 +331,9 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let result =
             handle_callpath(&db, "nonexistent", "other", None, false, None, false).unwrap();
-        assert!(result.contains("not found"), "missing symbol: {result}");
+        assert!(
+            result.contains("No symbol found"),
+            "missing symbol: {result}"
+        );
     }
 }

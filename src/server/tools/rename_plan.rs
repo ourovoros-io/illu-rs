@@ -9,10 +9,10 @@ pub fn handle_rename_plan(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!("Symbol '{symbol_name}' not found."));
+        return Ok(super::symbol_not_found(symbol_name));
     }
 
-    let base_name = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);
+    let base_name = super::base_name(symbol_name);
 
     let mut output = String::new();
     let _ = writeln!(output, "## Rename Plan: `{symbol_name}`\n");
@@ -246,7 +246,7 @@ mod tests {
     fn test_rename_plan_not_found() {
         let db = Database::open_in_memory().unwrap();
         let result = handle_rename_plan(&db, "nonexistent").unwrap();
-        assert!(result.contains("Symbol 'nonexistent' not found."));
+        assert!(result.contains("No symbol found"));
     }
 
     #[test]

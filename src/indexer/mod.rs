@@ -145,25 +145,6 @@ fn rebuild_refs_for_files(
         let refs = parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         db.store_symbol_refs_fast(&refs, &symbol_map)?;
-
-        // Re-extract and store trait impls for this file
-        let file_id: Option<crate::db::FileId> = db
-            .conn
-            .query_row(
-                "SELECT id FROM files WHERE path = ?1",
-                rusqlite::params![df.relative_path],
-                |row| row.get(0),
-            )
-            .ok();
-        if let Some(fid) = file_id {
-            db.conn.execute(
-                "DELETE FROM trait_impls WHERE file_id = ?1",
-                rusqlite::params![fid],
-            )?;
-            let (_symbols, trait_impls) = parser::parse_rust_source(&df.source, &df.relative_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-            store::store_trait_impls(db, fid, &trait_impls)?;
-        }
     }
     db.commit()?;
     Ok(())
@@ -637,8 +618,10 @@ fn git_changed_rs_files(
 
     // Also include files that are in our index but might have been modified
     // outside of git tracking (rare but possible)
+    let changed_set: std::collections::HashSet<String> =
+        changed.iter().cloned().collect();
     for path in existing.keys() {
-        if !changed.contains(path) {
+        if !changed_set.contains(path) {
             let full = repo_path.join(path);
             if !full.exists() {
                 changed.push(path.clone());

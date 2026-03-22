@@ -5,11 +5,7 @@ use std::path::Path;
 
 /// Format a callee/caller name as `ImplType::name` when `impl_type` is present.
 fn qualified_callee_name(c: &CalleeInfo) -> String {
-    if let Some(it) = &c.impl_type {
-        format!("{}::{}", it, c.name)
-    } else {
-        c.name.clone()
-    }
+    super::format_qualified(&c.name, c.impl_type.as_deref())
 }
 
 pub fn handle_context(
@@ -23,11 +19,7 @@ pub fn handle_context(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = resolve_symbols(db, symbol_name, file)?;
     if symbols.is_empty() {
-        return Ok(format!(
-            "No symbol found matching '{symbol_name}'.\n\
-            Try `Type::method` syntax for methods \
-            (e.g. `Database::new`), a partial name, or use `query` to search."
-        ));
+        return Ok(super::symbol_not_found(symbol_name));
     }
 
     let show =
@@ -59,7 +51,7 @@ pub fn handle_context(
     }
 
     if show("docs") {
-        let base_name = symbol_name.split_once("::").map_or(symbol_name, |(_, m)| m);
+        let base_name = super::base_name(symbol_name);
         render_related_docs(db, &mut output, base_name)?;
     }
 

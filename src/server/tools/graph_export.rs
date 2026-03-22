@@ -28,7 +28,7 @@ fn export_symbol_graph(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!("Symbol '{symbol_name}' not found."));
+        return Ok(super::symbol_not_found(symbol_name));
     }
 
     let base_name = &symbols[0].name;
@@ -131,7 +131,7 @@ mod tests {
     fn test_graph_export_symbol_not_found() {
         let db = Database::open_in_memory().unwrap();
         let result = handle_graph_export(&db, Some("nonexistent"), None, None, None).unwrap();
-        assert!(result.contains("not found"));
+        assert!(result.contains("No symbol found"));
     }
 
     #[test]

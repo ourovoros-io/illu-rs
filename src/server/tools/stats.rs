@@ -48,14 +48,7 @@ pub fn handle_stats(
     // Untested function count
     let mut untested = 0;
     for sym in &functions {
-        if sym
-            .attributes
-            .as_deref()
-            .is_some_and(|a| a.contains("test"))
-        {
-            continue;
-        }
-        if sym.name == "main" {
+        if super::is_entry_point(sym) {
             continue;
         }
         let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;

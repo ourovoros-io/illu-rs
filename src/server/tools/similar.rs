@@ -13,7 +13,7 @@ pub fn handle_similar(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(format!("Symbol '{symbol_name}' not found."));
+        return Ok(super::symbol_not_found(symbol_name));
     }
 
     let target = &symbols[0];
@@ -298,7 +298,7 @@ mod tests {
         let db = setup_db();
         let result = handle_similar(&db, "nonexistent", None).unwrap();
 
-        assert!(result.contains("Symbol 'nonexistent' not found."));
+        assert!(result.contains("No symbol found"));
     }
 
     #[test]
