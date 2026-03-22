@@ -1,6 +1,6 @@
 use crate::db::{Database, StoredSymbol};
 use crate::indexer::parser::SymbolKind;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 
 pub fn handle_rename_plan(
@@ -49,7 +49,7 @@ fn write_call_sites(
     symbols: &[StoredSymbol],
 ) -> Result<usize, Box<dyn std::error::Error>> {
     // Collect all callers across definitions, deduplicating by (name, file)
-    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for sym in symbols {
         let callers = db.get_callers(&sym.name, &sym.file_path, false, Some("high"))?;

@@ -6,6 +6,7 @@ pub mod store;
 pub mod workspace;
 
 use crate::db::Database;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -85,7 +86,7 @@ pub fn refresh_index(
         return Ok(usize::try_from(new_count).unwrap_or(0));
     }
 
-    let existing: std::collections::HashMap<String, (String, Option<crate::db::CrateId>)> = db
+    let existing: HashMap<String, (String, Option<crate::db::CrateId>)> = db
         .get_all_files_with_hashes()?
         .into_iter()
         .map(|f| (f.path, (f.content_hash, f.crate_id)))
@@ -116,7 +117,7 @@ pub fn refresh_index(
 
     // Merge in committed changes not already in the candidate list
     if !committed_changes.is_empty() {
-        let existing_set: std::collections::HashSet<&str> =
+        let existing_set: HashSet<&str> =
             candidate_files.iter().map(String::as_str).collect();
         let new: Vec<String> = committed_changes
             .into_iter()
@@ -188,7 +189,7 @@ fn rebuild_refs_for_files(
     }
 
     let all_crates = db.get_all_crates()?;
-    let crate_map: std::collections::HashMap<String, String> = all_crates
+    let crate_map: HashMap<String, String> = all_crates
         .iter()
         .map(|c| (c.name.replace('-', "_"), c.path.clone()))
         .collect();
@@ -242,8 +243,8 @@ fn index_workspace(
     let mut all_direct = Vec::new();
 
     // Register each member crate
-    let mut crate_ids: std::collections::HashMap<String, crate::db::CrateId> =
-        std::collections::HashMap::new();
+    let mut crate_ids: HashMap<String, crate::db::CrateId> =
+        HashMap::new();
 
     // Collect path deps per crate to record after all crates are registered
     let mut path_deps_by_crate: Vec<(String, Vec<String>)> = Vec::new();
@@ -389,7 +390,7 @@ fn extract_all_symbol_refs(
     }
 
     let all_crates = db.get_all_crates()?;
-    let crate_map: std::collections::HashMap<String, String> = all_crates
+    let crate_map: HashMap<String, String> = all_crates
         .iter()
         .map(|c| (c.name.replace('-', "_"), c.path.clone()))
         .collect();
@@ -684,7 +685,7 @@ fn committed_changed_rs_files(repo_path: &std::path::Path, since_hash: &str) -> 
 /// indexed files plus walks for new ones (full scan fallback).
 fn git_changed_rs_files(
     repo_path: &std::path::Path,
-    existing: &std::collections::HashMap<String, (String, Option<crate::db::CrateId>)>,
+    existing: &HashMap<String, (String, Option<crate::db::CrateId>)>,
 ) -> Vec<String> {
     let output = std::process::Command::new("git")
         .args([
@@ -727,7 +728,7 @@ fn git_changed_rs_files(
 
     // Also include files that are in our index but might have been modified
     // outside of git tracking (rare but possible)
-    let changed_set: std::collections::HashSet<String> = changed.iter().cloned().collect();
+    let changed_set: HashSet<String> = changed.iter().cloned().collect();
     for path in existing.keys() {
         if !changed_set.contains(path) {
             let full = repo_path.join(path);
@@ -773,7 +774,7 @@ fn full_scan_rs_files(repo_path: &std::path::Path) -> Vec<String> {
 fn collect_dirty_files(
     repo_path: &std::path::Path,
     candidates: &[String],
-    existing: &std::collections::HashMap<String, (String, Option<crate::db::CrateId>)>,
+    existing: &HashMap<String, (String, Option<crate::db::CrateId>)>,
 ) -> Vec<DirtyFile> {
     let mut dirty = Vec::new();
     for relative in candidates {

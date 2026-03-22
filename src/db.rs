@@ -1,6 +1,7 @@
 use crate::indexer::parser::{SymbolKind, Visibility};
 use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Connection, Result as SqlResult, params};
+use std::collections::{HashMap, HashSet};
 
 macro_rules! newtype_id {
     ($name:ident) => {
@@ -566,11 +567,11 @@ impl Database {
     }
 
     /// Get all distinct symbol names (for ref extraction matching).
-    pub fn get_all_symbol_names(&self) -> SqlResult<std::collections::HashSet<String>> {
+    pub fn get_all_symbol_names(&self) -> SqlResult<HashSet<String>> {
         let mut stmt = self
             .conn
             .prepare("SELECT DISTINCT name FROM symbols WHERE kind != 'use' AND kind != 'mod'")?;
-        let mut names = std::collections::HashSet::new();
+        let mut names = HashSet::new();
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
@@ -1383,7 +1384,7 @@ impl Database {
         if line_ranges.is_empty() {
             return Ok(Vec::new());
         }
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         let mut results = Vec::new();
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
@@ -1718,9 +1719,9 @@ impl Database {
     /// Build an in-memory lookup table mapping symbol names to their DB IDs.
     /// Three tiers: (name, file), (name, impl type), and name-only.
     pub fn build_symbol_id_map(&self) -> SqlResult<SymbolIdMap> {
-        let mut file_qualified = std::collections::HashMap::new();
-        let mut impl_qualified = std::collections::HashMap::new();
-        let mut name_only = std::collections::HashMap::new();
+        let mut file_qualified = HashMap::new();
+        let mut impl_qualified = HashMap::new();
+        let mut name_only = HashMap::new();
 
         let mut stmt = self.conn.prepare(
             "SELECT s.id, s.name, f.path, s.impl_type \
@@ -2155,9 +2156,9 @@ pub struct CrossRef {
 }
 
 pub struct SymbolIdMap {
-    file_qualified: std::collections::HashMap<(String, String), SymbolId>,
-    impl_qualified: std::collections::HashMap<(String, String), SymbolId>,
-    name_only: std::collections::HashMap<String, SymbolId>,
+    file_qualified: HashMap<(String, String), SymbolId>,
+    impl_qualified: HashMap<(String, String), SymbolId>,
+    name_only: HashMap<String, SymbolId>,
 }
 
 impl SymbolIdMap {

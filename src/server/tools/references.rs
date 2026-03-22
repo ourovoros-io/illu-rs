@@ -1,4 +1,5 @@
 use crate::db::Database;
+use std::collections::HashSet;
 use std::fmt::Write;
 
 pub fn handle_references(
@@ -53,8 +54,8 @@ fn render_call_sites(
     output: &mut String,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let _ = writeln!(output, "\n### Call Sites\n");
-    let mut seen: std::collections::HashSet<(String, String, i64)> =
-        std::collections::HashSet::new();
+    let mut seen: HashSet<(String, String, i64)> =
+        HashSet::new();
     let mut prod = Vec::new();
     let mut test = Vec::new();
     for sym in symbols {
@@ -99,7 +100,7 @@ fn render_type_usage(
     let _ = writeln!(output, "\n### Type Usage in Signatures\n");
     let sig_results = db.search_symbols_by_signature(base_name)?;
     let mut entries = Vec::new();
-    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
     for s in &sig_results {
         if s.name == base_name
             || s.kind == crate::indexer::parser::SymbolKind::Use

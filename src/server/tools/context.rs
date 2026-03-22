@@ -1,5 +1,6 @@
 use crate::db::{CalleeInfo, Database, StoredSymbol};
 use crate::indexer::parser::SymbolKind;
+use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::Path;
 
@@ -315,8 +316,8 @@ fn render_tested_by(
             );
         }
     } else {
-        let mut file_counts: std::collections::BTreeMap<&str, usize> =
-            std::collections::BTreeMap::new();
+        let mut file_counts: BTreeMap<&str, usize> =
+            BTreeMap::new();
         for t in &tests {
             *file_counts.entry(&t.file_path).or_default() += 1;
         }

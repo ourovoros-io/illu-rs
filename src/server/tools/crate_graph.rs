@@ -1,5 +1,5 @@
 use crate::db::Database;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 pub fn handle_crate_graph(db: &Database) -> Result<String, Box<dyn std::error::Error>> {
@@ -35,10 +35,10 @@ pub fn handle_crate_graph(db: &Database) -> Result<String, Box<dyn std::error::E
         let _ = writeln!(output, "- **{source}** → {targets_str}");
     }
 
-    let all_names: std::collections::BTreeSet<&str> =
+    let all_names: BTreeSet<&str> =
         crates.iter().map(|c| c.name.as_str()).collect();
-    let sources: std::collections::BTreeSet<&str> = deps.iter().map(|(s, _)| s.as_str()).collect();
-    let targets: std::collections::BTreeSet<&str> = deps.iter().map(|(_, t)| t.as_str()).collect();
+    let sources: BTreeSet<&str> = deps.iter().map(|(s, _)| s.as_str()).collect();
+    let targets: BTreeSet<&str> = deps.iter().map(|(_, t)| t.as_str()).collect();
 
     let leaves: Vec<&&str> = all_names
         .iter()

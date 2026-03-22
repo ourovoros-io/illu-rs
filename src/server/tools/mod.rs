@@ -42,6 +42,7 @@ use crate::indexer::parser::SymbolKind;
 use rmcp::schemars;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::collections::{BTreeMap, HashSet};
 
 /// Direction for graph traversal in neighborhood and `graph_export` tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -159,7 +160,7 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
     }
 
     // Deduplicate by qualified name, take top 3
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     let suggestions: Vec<_> = suggestions
         .into_iter()
         .filter(|s| {
@@ -328,8 +329,8 @@ pub(crate) fn render_test_list(output: &mut String, tests: &[&TestEntry]) {
     }
 
     // Group tests by file
-    let mut by_file: std::collections::BTreeMap<&str, Vec<&TestEntry>> =
-        std::collections::BTreeMap::new();
+    let mut by_file: BTreeMap<&str, Vec<&TestEntry>> =
+        BTreeMap::new();
     for t in tests {
         by_file.entry(&t.file_path).or_default().push(t);
     }

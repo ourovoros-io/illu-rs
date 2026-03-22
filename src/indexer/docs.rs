@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 #[must_use]
 fn docs_rs_url(name: &str, version: &str) -> String {
     format!("https://docs.rs/{name}/{version}/{name}/")
@@ -239,7 +241,7 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
     }
 
     // Phase 2: Network fetch for any deps cargo doc missed
-    let covered: std::collections::HashSet<&str> = results
+    let covered: HashSet<&str> = results
         .iter()
         .filter_map(|r| pending.iter().find(|p| p.dep_id == r.dep_id))
         .map(|p| p.name.as_str())

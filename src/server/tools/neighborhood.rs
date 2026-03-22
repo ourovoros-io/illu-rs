@@ -99,7 +99,7 @@ fn bfs_collect(
 ) -> Result<BTreeMap<String, BfsEntry>, Box<dyn std::error::Error>> {
     let mut visited: BTreeMap<String, BfsEntry> = BTreeMap::new();
     // Track (name, file) for file-qualified BFS to avoid name collisions
-    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut queue: VecDeque<(String, String, usize)> = VecDeque::new();
 
     // Seed with all definitions of the base symbol

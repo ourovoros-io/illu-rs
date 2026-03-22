@@ -1,4 +1,5 @@
 use crate::db::Database;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -112,8 +113,8 @@ pub fn handle_diff_impact(
     }
 
     // Group hunks by file path into line ranges
-    let mut file_ranges: std::collections::BTreeMap<String, Vec<(i64, i64)>> =
-        std::collections::BTreeMap::new();
+    let mut file_ranges: BTreeMap<String, Vec<(i64, i64)>> =
+        BTreeMap::new();
     for hunk in &hunks {
         let end = hunk.new_start + hunk.new_count - 1;
         file_ranges
@@ -237,8 +238,8 @@ fn render_downstream_impact(
 
     let _ = writeln!(output, "\n### Downstream Impact\n");
     let mut truncated = false;
-    let mut seen_deps: std::collections::HashSet<(&str, &str, i64)> =
-        std::collections::HashSet::new();
+    let mut seen_deps: HashSet<(&str, &str, i64)> =
+        HashSet::new();
     for (name, dependents) in &impact_sections {
         if output.len() > MAX_DIFF_OUTPUT {
             truncated = true;
@@ -282,7 +283,7 @@ fn render_test_coverage(
     changed_symbols: &[(String, crate::db::StoredSymbol)],
 ) {
     let mut all_tests = Vec::new();
-    let mut seen_tests = std::collections::HashSet::new();
+    let mut seen_tests = HashSet::new();
     let mut untested_symbols = Vec::new();
     for (_file, sym) in changed_symbols {
         if let Ok(tests) = db.get_related_tests(&sym.name, sym.impl_type.as_deref()) {
@@ -549,8 +550,8 @@ diff --git a/src/lib.rs b/src/lib.rs
 
         // Render with cross-seed dedup
         let mut output = String::new();
-        let mut seen_deps: std::collections::HashSet<(String, String, i64)> =
-            std::collections::HashSet::new();
+        let mut seen_deps: HashSet<(String, String, i64)> =
+            HashSet::new();
         for (name, dependents) in &impact_sections {
             let new_deps: Vec<_> = dependents
                 .iter()

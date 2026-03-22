@@ -1,4 +1,5 @@
 use crate::db::Database;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 
 pub fn handle_impact(
@@ -49,7 +50,7 @@ pub fn handle_impact(
 
     let mut current_depth: i64 = -1;
     let mut depth_buf: Vec<&crate::db::ImpactEntry> = Vec::new();
-    let mut seen_in_impact: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut seen_in_impact: HashSet<&str> = HashSet::new();
 
     for dep in &dependents {
         if dep.depth != current_depth {
@@ -109,8 +110,8 @@ fn render_depth_entries(
 
     if should_summarize {
         // Group by file
-        let mut file_counts: std::collections::BTreeMap<&str, usize> =
-            std::collections::BTreeMap::new();
+        let mut file_counts: BTreeMap<&str, usize> =
+            BTreeMap::new();
         for dep in entries {
             *file_counts.entry(&dep.file_path).or_default() += 1;
         }

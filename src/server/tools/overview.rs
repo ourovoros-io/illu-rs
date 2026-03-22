@@ -1,5 +1,6 @@
 use crate::db::Database;
 use crate::indexer::parser::SymbolKind;
+use std::collections::HashMap;
 use std::fmt::Write;
 
 pub fn handle_overview(
@@ -24,7 +25,7 @@ pub fn handle_overview(
     let max_symbols = limit.map(|l| usize::try_from(l.max(1)).unwrap_or(usize::MAX));
     let mut output = String::new();
     let mut file_count = 0u32;
-    let mut kind_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut kind_counts: HashMap<String, u32> = HashMap::new();
     let mut shown = 0usize;
 
     // Group symbols by file, preserving order, filtering out EnumVariant
