@@ -214,8 +214,13 @@ fn extract_body(node: &Node, source: &str) -> String {
     let text = &source[node.start_byte()..node.end_byte()];
     let line_count = text.lines().count();
     if line_count > 100 {
-        let truncated: String = text.lines().take(100).collect::<Vec<_>>().join("\n");
-        format!("{truncated}\n// ... truncated")
+        let lines: Vec<&str> = text.lines().collect();
+        let head_count = 50;
+        let tail_count = 10;
+        let omitted = line_count - head_count - tail_count;
+        let head: String = lines[..head_count].join("\n");
+        let tail: String = lines[line_count - tail_count..].join("\n");
+        format!("{head}\n// ... {omitted} lines omitted ...\n{tail}")
     } else {
         text.to_string()
     }
@@ -1953,8 +1958,36 @@ pub fn greet(name: &str) -> String {
         let (symbols, _) = parse_rust_source(&source, "src/lib.rs").unwrap();
         let sym = symbols.iter().find(|s| s.name == "long_fn").unwrap();
         let body = sym.body.as_deref().unwrap();
-        assert!(body.contains("// ... truncated"));
-        assert!(body.lines().count() <= 101);
+        assert!(
+            body.contains("// ...") && body.contains("lines omitted"),
+            "Should have omission marker"
+        );
+        // Head (50 lines) + marker (1 line) + tail (10 lines) = 61 lines
+        assert!(body.lines().count() <= 62, "Should be truncated");
+    }
+
+    #[test]
+    fn test_body_truncation_preserves_tail() {
+        use std::fmt::Write;
+        let mut source = String::from("pub fn big() {\n");
+        for i in 0..118 {
+            let _ = writeln!(source, "    let x{i} = {i};");
+        }
+        source.push_str("    x117\n}\n");
+
+        let (symbols, _) = parse_rust_source(&source, "test.rs").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "big").unwrap();
+        let body = sym.body.as_deref().unwrap();
+        assert!(body.contains("pub fn big()"), "Should start with signature");
+        assert!(
+            body.contains("x117"),
+            "Should preserve tail with return value, got last 200 chars:\n{}",
+            &body[body.len().saturating_sub(200)..]
+        );
+        assert!(
+            body.contains("// ...") && body.contains("lines omitted"),
+            "Should have structured omission marker, got:\n{body}"
+        );
     }
 
     #[test]
