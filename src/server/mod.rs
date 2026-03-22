@@ -99,7 +99,7 @@ impl IlluServer {
 struct QueryParams {
     /// Search term. Use `*` to match all names when filtering by signature, path, or attribute.
     query: String,
-    /// Search scope: symbols (default), docs, files, all, `doc_comments`, bodies
+    /// Search scope: symbols (default), docs, files, all, `doc_comments`, bodies, strings
     scope: Option<String>,
     kind: Option<String>,
     /// Filter by attribute/derive (e.g. "test", "derive(Serialize)")
@@ -420,7 +420,7 @@ fn text_result(text: String) -> CallToolResult {
 impl IlluServer {
     #[tool(
         name = "query",
-        description = "Search the codebase for symbols, documentation, or files. Scope: symbols (default), docs, files, all, doc_comments, bodies. Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results). Use query='*' with signature/path/attribute filters to search without a name."
+        description = "Search the codebase for symbols, documentation, or files. Scope: symbols (default), docs, files, all, doc_comments, bodies, strings. Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results). Use query='*' with signature/path/attribute filters to search without a name."
     )]
     async fn query(
         &self,

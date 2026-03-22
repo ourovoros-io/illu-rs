@@ -48,9 +48,10 @@ pub fn handle_query(
         }
         "doc_comments" => format_doc_comments(db, query, kind, path, limit, &mut output)?,
         "bodies" => format_body_search(db, query, kind, path, limit, &mut output)?,
+        "strings" => format_string_search(db, query, kind, path, limit, &mut output)?,
         other => {
             return Err(format!(
-                "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, bodies, all"
+                "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, bodies, strings, all"
             )
             .into());
         }
@@ -309,6 +310,92 @@ fn format_body_search(
                             let _ = writeln!(output, "  > `{trimmed}`");
                             break;
                         }
+                    }
+                }
+            }
+        }
+        output.push('\n');
+    }
+    Ok(())
+}
+
+/// Extract string literal contents from source code.
+/// Handles `"..."` strings, skipping escaped quotes.
+/// Known limitation: does not handle raw strings (r"...", r#"..."#).
+fn extract_string_literals(source: &str) -> Vec<&str> {
+    let mut literals = Vec::new();
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            let start = i + 1;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    if start < i {
+                        literals.push(&source[start..i]);
+                    }
+                    break;
+                }
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    literals
+}
+
+fn format_string_search(
+    db: &Database,
+    query: &str,
+    kind: Option<&str>,
+    path: Option<&str>,
+    limit: Option<i64>,
+    output: &mut String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut symbols = db.search_symbols_by_body(query)?;
+    if let Some(p) = path {
+        symbols.retain(|s| s.file_path.starts_with(p));
+    }
+    if let Some(k) = kind {
+        symbols.retain(|s| super::kind_matches(&s.kind, k));
+    }
+    let query_lower = query.to_lowercase();
+    symbols.retain(|s| {
+        s.body.as_ref().is_some_and(|body| {
+            extract_string_literals(body)
+                .iter()
+                .any(|lit| lit.to_lowercase().contains(&query_lower))
+        })
+    });
+    if let Some(max) = limit {
+        let max = usize::try_from(max.max(1)).unwrap_or(50);
+        symbols.truncate(max);
+    }
+    if !symbols.is_empty() {
+        output.push_str("## Symbols containing string literal\n\n");
+        for sym in &symbols {
+            let qname = super::qualified_name(sym);
+            let _ = writeln!(
+                output,
+                "- **{qname}** ({}) at {}:{}-{}\n  `{}`",
+                sym.kind, sym.file_path, sym.line_start, sym.line_end, sym.signature,
+            );
+            if let Some(body) = &sym.body {
+                for lit in extract_string_literals(body) {
+                    if lit.to_lowercase().contains(&query_lower) {
+                        let end = lit.floor_char_boundary(100);
+                        let display = if end < lit.len() {
+                            format!("{}...", &lit[..end])
+                        } else {
+                            lit.to_string()
+                        };
+                        let _ = writeln!(output, "  > `\"{display}\"`");
+                        break;
                     }
                 }
             }
@@ -1251,6 +1338,91 @@ mod tests {
         assert!(!signature_matches("fn foo() -> ResultSet", "-> Result"));
         // But "MyResult" DOES end with "Result" — match
         assert!(signature_matches("fn foo() -> MyResult<()>", "-> Result"));
+    }
+
+    #[test]
+    fn test_query_scope_strings() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/main.rs", "h1").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[
+                Symbol {
+                    name: "setup_db".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/main.rs".into(),
+                    line_start: 1,
+                    line_end: 5,
+                    signature: "fn setup_db()".into(),
+                    doc_comment: None,
+                    body: Some(
+                        "fn setup_db() {\n    conn.execute(\"PRAGMA journal_mode = WAL\");\n}"
+                            .into(),
+                    ),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+                Symbol {
+                    name: "other".into(),
+                    kind: SymbolKind::Function,
+                    visibility: Visibility::Public,
+                    file_path: "src/main.rs".into(),
+                    line_start: 10,
+                    line_end: 15,
+                    signature: "fn other()".into(),
+                    doc_comment: None,
+                    body: Some("fn other() {\n    let pragma = 42;\n}".into()),
+                    details: None,
+                    attributes: None,
+                    impl_type: None,
+                },
+            ],
+        )
+        .unwrap();
+        let result =
+            handle_query(&db, "PRAGMA", Some("strings"), None, None, None, None, None).unwrap();
+        assert!(
+            result.contains("setup_db"),
+            "Should find 'PRAGMA' inside string literal, got:\n{result}"
+        );
+        assert!(
+            !result.contains("other"),
+            "Should NOT match variable name 'pragma' outside string literal, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_query_scope_strings_shows_literal() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "h1").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[Symbol {
+                name: "greet".into(),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                file_path: "src/lib.rs".into(),
+                line_start: 1,
+                line_end: 3,
+                signature: "fn greet()".into(),
+                doc_comment: None,
+                body: Some("fn greet() {\n    println!(\"Hello, world!\");\n}".into()),
+                details: None,
+                attributes: None,
+                impl_type: None,
+            }],
+        )
+        .unwrap();
+        let result =
+            handle_query(&db, "Hello", Some("strings"), None, None, None, None, None).unwrap();
+        assert!(
+            result.contains("Hello, world!"),
+            "Should show the matching string literal, got:\n{result}"
+        );
     }
 
     #[test]
