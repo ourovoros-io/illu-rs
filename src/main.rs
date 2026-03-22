@@ -474,9 +474,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
     let repo_path = if cli.repo == Path::new(".") {
-        match illu_rs::git::detect_repo_root(&std::env::current_dir()?) {
-            Ok(root) => root,
-            Err(_) => std::env::current_dir()?,
+        let cwd = std::env::current_dir()?;
+        match illu_rs::git::detect_repo_root(&cwd) {
+            Ok(git_root) => illu_rs::git::detect_cargo_root(&cwd, &git_root),
+            Err(_) => cwd,
         }
     } else {
         cli.repo.clone()
