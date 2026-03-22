@@ -460,7 +460,7 @@ const TOOL_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             (
                 "query",
-                "Search symbols, docs, or files. Filters: kind, attribute, signature, path.",
+                "Search symbols, docs, files, bodies, or string literals. Filters: kind, attribute, signature, path.",
             ),
             (
                 "context",
@@ -503,7 +503,7 @@ const TOOL_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("file_graph", "File-level dependency graph."),
             (
                 "graph_export",
-                "DOT/Graphviz export of call or file graphs.",
+                "Export call or file graphs as DOT, compact edge list, or summary.",
             ),
         ],
     ),
@@ -554,6 +554,31 @@ const TOOL_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
             ("freshness", "Index staleness check."),
             ("health", "Index quality diagnosis."),
+        ],
+    ),
+    (
+        "Cross-Repo",
+        &[
+            (
+                "repos",
+                "Dashboard of all registered repos with status and symbol counts.",
+            ),
+            (
+                "cross_query",
+                "Search symbols across all registered repos.",
+            ),
+            (
+                "cross_impact",
+                "Find references to a symbol in other repos.",
+            ),
+            (
+                "cross_deps",
+                "Inter-repo dependency relationships via Cargo.toml.",
+            ),
+            (
+                "cross_callpath",
+                "Find call chains spanning repo boundaries.",
+            ),
         ],
     ),
 ];
@@ -826,7 +851,7 @@ pub fn hello() -> &'static str { "hello" }
         let skill = generate_claude_skill(&["serde", "tokio"]);
         assert!(skill.contains("serde"));
         assert!(skill.contains("tokio"));
-        assert!(skill.contains("31 available"));
+        assert!(skill.contains("36 available"));
         assert!(skill.contains("query"));
         assert!(skill.contains("context"));
         assert!(skill.contains("impact"));
