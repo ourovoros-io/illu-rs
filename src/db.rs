@@ -1,5 +1,4 @@
 use crate::indexer::parser::{SymbolKind, Visibility};
-use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Connection, Result as SqlResult, params};
 use std::collections::{HashMap, HashSet};
 
@@ -8,14 +7,16 @@ macro_rules! newtype_id {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub struct $name(pub(crate) i64);
 
-        impl FromSql for $name {
-            fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                value: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
                 i64::column_result(value).map(Self)
             }
         }
 
-        impl ToSql for $name {
-            fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        impl rusqlite::types::ToSql for $name {
+            fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
                 self.0.to_sql()
             }
         }

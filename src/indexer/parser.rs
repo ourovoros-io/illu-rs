@@ -762,7 +762,7 @@ pub struct SymbolRef {
     pub ref_line: Option<i64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RefKind {
     /// Type used in signature or body
     TypeRef,
@@ -892,6 +892,17 @@ impl std::fmt::Display for RefKind {
         match self {
             Self::TypeRef => f.write_str("type_ref"),
             Self::Call => f.write_str("call"),
+        }
+    }
+}
+
+impl std::str::FromStr for RefKind {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "type_ref" => Ok(Self::TypeRef),
+            "call" => Ok(Self::Call),
+            other => Err(format!("unknown ref kind: {other}")),
         }
     }
 }

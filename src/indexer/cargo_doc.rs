@@ -12,6 +12,7 @@ fn has_nightly_rustdoc() -> bool {
 }
 
 /// Named docs for a single crate.
+#[derive(Debug, Clone)]
 pub struct CrateDocs {
     pub name: String,
     pub modules: Vec<ModuleDoc>,
@@ -308,6 +309,7 @@ fn format_fn_signature(name: &str, inner: &serde_json::Map<String, serde_json::V
 }
 
 /// A single module's documentation content.
+#[derive(Debug, Clone)]
 pub struct ModuleDoc {
     /// Module name ("" for summary/root).
     pub module: String,

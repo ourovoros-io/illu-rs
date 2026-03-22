@@ -1,21 +1,21 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectDep {
     pub name: String,
     pub version_req: String,
     pub features: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedDep {
     pub name: String,
     pub version: String,
     pub source: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedDep {
     pub name: String,
     pub version: String,
