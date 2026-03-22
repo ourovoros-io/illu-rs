@@ -3,10 +3,10 @@
     "illu": {
       "args": [
         "--repo",
-        "/Users/georgiosdelkos/Documents/GitHub/illu-rs",
+        "/root/illu-rs",
         "serve"
       ],
-      "command": "/Users/georgiosdelkos/Documents/GitHub/illu-rs/target/release/illu-rs",
+      "command": "/root/illu-rs/target/release/illu-rs",
       "env": {
         "RUST_LOG": "warn"
       }

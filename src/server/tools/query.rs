@@ -318,21 +318,41 @@ fn format_body_search(
     Ok(())
 }
 
-/// Match a signature against a filter, with generic shorthand support.
-/// `"-> Result<String>"` matches `"-> Result<String, Box<dyn ...>>"`
-/// because after stripping the trailing `>`, the prefix `-> Result<String`
-/// is found and followed by `,` or `>` in the actual signature.
+/// Match a signature against a filter, with generic shorthand and type-alias suffix support.
+/// `"-> Result<String>"` matches `"-> Result<String, Box<dyn ...>>"` (generic shorthand).
+/// `"-> Result"` matches `"-> SqlResult<Self>"` (type-alias suffix).
 fn signature_matches(signature: &str, filter: &str) -> bool {
     let sig_lower = signature.to_lowercase();
     let filter_lower = filter.to_lowercase();
-    if sig_lower.contains(&filter_lower) {
-        return true;
+    // Direct substring match with word-boundary check: the filter must not be
+    // a prefix of a longer identifier (e.g. "-> Result" must not match "-> ResultSet").
+    if let Some(idx) = sig_lower.find(&filter_lower) {
+        let after = &sig_lower[idx + filter_lower.len()..];
+        // Word boundary: next char must be non-alphanumeric (or end of string)
+        if after.chars().next().is_none_or(|c| !c.is_alphanumeric()) {
+            return true;
+        }
     }
+    // Generic shorthand: `-> Result<String>` matches `-> Result<String, Box<...>>`
     if let Some(prefix) = filter_lower.strip_suffix('>')
         && let Some(idx) = sig_lower.find(prefix)
     {
         let after = &sig_lower[idx + prefix.len()..];
-        return after.starts_with(',') || after.starts_with('>');
+        if after.starts_with(',') || after.starts_with('>') {
+            return true;
+        }
+    }
+    // Type-alias suffix: "-> Result" matches "-> SqlResult<Self>"
+    // Extract type-words from filter, check if any sig word ends with them
+    for filter_word in filter_lower.split(|c: char| !c.is_alphanumeric()) {
+        if filter_word.len() < 3 {
+            continue;
+        }
+        for sig_word in sig_lower.split(|c: char| !c.is_alphanumeric()) {
+            if sig_word.len() >= filter_word.len() && sig_word.ends_with(filter_word) {
+                return true;
+            }
+        }
     }
     false
 }
@@ -1216,6 +1236,21 @@ mod tests {
             result.contains("fetch"),
             "-> Result<String> should match Result<String, Box<...>>, got: {result}"
         );
+    }
+
+    #[test]
+    fn test_signature_matches_type_alias_suffix() {
+        assert!(signature_matches("pub fn open() -> SqlResult<Self>", "-> Result"));
+        assert!(signature_matches("fn foo() -> anyhow::Result<()>", "-> Result"));
+        assert!(!signature_matches("pub fn open() -> SqlResult<Self>", "-> String"));
+    }
+
+    #[test]
+    fn test_signature_matches_suffix_word_boundary() {
+        // "ResultSet" does NOT end with "Result" (it ends with "Set") — no match
+        assert!(!signature_matches("fn foo() -> ResultSet", "-> Result"));
+        // But "MyResult" DOES end with "Result" — match
+        assert!(signature_matches("fn foo() -> MyResult<()>", "-> Result"));
     }
 
     #[test]
