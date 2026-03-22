@@ -16,7 +16,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-dea584?style=flat-square&logo=rust" alt="Rust 2024"/>
   <img src="https://img.shields.io/badge/tools-36-blue?style=flat-square" alt="36 tools"/>
-  <img src="https://img.shields.io/badge/tests-540_passing-brightgreen?style=flat-square" alt="540 tests"/>
+  <img src="https://img.shields.io/badge/tests-575_passing-brightgreen?style=flat-square" alt="575 tests"/>
 </p>
 
 ---
@@ -92,6 +92,7 @@ query: "Color", scope: "symbols", kind: "enum_variant"  → enum variants of Col
 query: "*", attribute: "test"                            → all #[test] functions
 query: "*", signature: "-> Result<String"                → functions returning Result<String>
 query: "parse", scope: "bodies"                          → search inside function bodies
+query: "PRAGMA", scope: "strings"                        → search inside string literals only
 query: "todo", scope: "doc_comments"                     → search doc comment content
 ```
 
@@ -127,7 +128,7 @@ file: "src/db.rs", line: 114   → Database::open (function, lines 114-133)
 
 #### See project structure — `overview` and `tree`
 
-- **`overview`** — public symbols under a path, grouped by file, with signatures, doc snippets, and intra-file call relationships
+- **`overview`** — public symbols under a path, grouped by file, with signatures, doc snippets, intra-file callees, and external callers
 - **`tree`** — file/module hierarchy with symbol counts per file
 
 ```
@@ -254,13 +255,15 @@ Derives which files depend on which based on cross-file symbol references.
 path: "src/server/"   → file dependency edges within server module
 ```
 
-#### Export as Graphviz — `graph_export`
+#### Export graphs — `graph_export`
 
-Export call graphs or file dependency graphs in DOT format.
+Export call graphs or file dependency graphs in multiple formats.
 
 ```
-symbol_name: "handle_impact"   → DOT graph of impact's call tree
-path: "src/indexer/"           → DOT graph of file dependencies
+symbol_name: "handle_impact"                       → DOT graph of impact's call tree
+symbol_name: "handle_impact", format: "edges"      → compact A -> B lines (AI-friendly)
+symbol_name: "handle_impact", format: "summary"    → node/edge counts, roots, leaves
+path: "src/indexer/"                               → file dependency graph
 ```
 
 ### Discover and Audit
@@ -510,7 +513,7 @@ Any MCP client with stdio transport support works — illu speaks standard MCP.
 | **Rename planning** | `rename_plan` previews all locations to update before renaming |
 | **Similar symbol discovery** | `similar` finds functions with matching signatures and call patterns |
 | **Hotspot identification** | Most-referenced, most-referencing, and largest functions |
-| **File-level dependency graph** | Derived from cross-file refs, exportable as Graphviz DOT |
+| **File-level dependency graph** | Derived from cross-file refs, exportable as DOT, edge list, or summary |
 | **Git blame and history** | Per-symbol blame and commit history with optional function-level diffs |
 | **Doc coverage auditing** | Find undocumented symbols with coverage percentages |
 | **Relevance-ranked results** | Query results sorted by incoming reference count — most important first |
@@ -651,7 +654,7 @@ src/
 <summary>Development</summary>
 
 ```bash
-cargo test                                                    # 540 tests
+cargo test                                                    # 575 tests
 cargo clippy --all-targets --all-features -- -D warnings      # strict lints
 cargo fmt --all -- --check                                    # formatting
 RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
@@ -659,7 +662,7 @@ RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
 
 | Test Suite | Count | What it guards |
 |------------|-------|----------------|
-| Unit | 359 | Parser, DB, indexer, tool handlers, registry |
+| Unit | 393 | Parser, DB, indexer, tool handlers, registry |
 | Data integrity | 68 | Line numbers, refs, cross-crate resolution, stale cleanup |
 | Data quality | 61 | End-to-end tool output format and content |
 | Integration | 28 | Full pipeline: index, query, verify + cross-repo |
