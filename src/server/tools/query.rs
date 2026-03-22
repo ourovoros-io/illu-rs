@@ -98,8 +98,7 @@ fn format_symbols(
         all_symbols.retain(|s| s.name.to_lowercase().contains(&q));
     }
     if let Some(sig) = signature {
-        let sig_lower = sig.to_lowercase();
-        all_symbols.retain(|s| s.signature.to_lowercase().contains(&sig_lower));
+        all_symbols.retain(|s| signature_matches(&s.signature, sig));
     }
     if let Some(p) = path {
         all_symbols.retain(|s| s.file_path.starts_with(p));
@@ -317,6 +316,25 @@ fn format_body_search(
         output.push('\n');
     }
     Ok(())
+}
+
+/// Match a signature against a filter, with generic shorthand support.
+/// `"-> Result<String>"` matches `"-> Result<String, Box<dyn ...>>"`
+/// because after stripping the trailing `>`, the prefix `-> Result<String`
+/// is found and followed by `,` or `>` in the actual signature.
+fn signature_matches(signature: &str, filter: &str) -> bool {
+    let sig_lower = signature.to_lowercase();
+    let filter_lower = filter.to_lowercase();
+    if sig_lower.contains(&filter_lower) {
+        return true;
+    }
+    if let Some(prefix) = filter_lower.strip_suffix('>')
+        && let Some(idx) = sig_lower.find(prefix)
+    {
+        let after = &sig_lower[idx + prefix.len()..];
+        return after.starts_with(',') || after.starts_with('>');
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1165,6 +1183,70 @@ mod tests {
         assert!(
             !result.contains("run"),
             "Should NOT find run() which is in other.rs: {result}"
+        );
+    }
+
+    #[test]
+    fn test_query_signature_filter_generic_shorthand() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[make_fn(
+                "fetch",
+                "src/lib.rs",
+                1,
+                "pub fn fetch() -> Result<String, Box<dyn std::error::Error>>",
+            )],
+        )
+        .unwrap();
+        let result = super::handle_query(
+            &db,
+            "*",
+            None,
+            None,
+            None,
+            Some("-> Result<String>"),
+            Some("src/"),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.contains("fetch"),
+            "-> Result<String> should match Result<String, Box<...>>, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_query_signature_filter_exact_still_works() {
+        let db = Database::open_in_memory().unwrap();
+        let file_id = db.insert_file("src/lib.rs", "hash").unwrap();
+        store_symbols(
+            &db,
+            file_id,
+            &[make_fn(
+                "greet",
+                "src/lib.rs",
+                1,
+                "pub fn greet(name: &str) -> String",
+            )],
+        )
+        .unwrap();
+        let result = super::handle_query(
+            &db,
+            "*",
+            None,
+            None,
+            None,
+            Some("-> String"),
+            Some("src/"),
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.contains("greet"),
+            "exact signature filter should still work, got: {result}"
         );
     }
 }
