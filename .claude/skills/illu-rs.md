@@ -2,11 +2,11 @@
 
 This project is indexed by illu-rs. Use the following MCP tools to explore the codebase and its dependencies.
 
-## Tools (31 available)
+## Tools (36 available)
 
 ### Search & Navigate
 
-- **query** — Search symbols, docs, or files. Filters: kind, attribute, signature, path.
+- **query** — Search symbols, docs, files, bodies, or string literals. Filters: kind, attribute, signature, path.
 - **context** — Full symbol context: source, callers, callees, trait impls. Supports `Type::method`, `sections` filter, `exclude_tests`.
 - **batch_context** — Context for multiple symbols in one call.
 - **symbols_at** — Find symbols at a file:line location.
@@ -27,7 +27,7 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 - **references** — Unified view: call sites, type usage, trait impls.
 - **type_usage** — Where a type appears in signatures and struct fields.
 - **file_graph** — File-level dependency graph.
-- **graph_export** — DOT/Graphviz export of call or file graphs.
+- **graph_export** — Export call or file graphs as DOT, compact edge list, or summary.
 
 ### Discovery & Audit
 
@@ -49,6 +49,14 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 - **history** — Git commit history for a symbol, with optional diffs.
 - **freshness** — Index staleness check.
 - **health** — Index quality diagnosis.
+
+### Cross-Repo
+
+- **repos** — Dashboard of all registered repos with status and symbol counts.
+- **cross_query** — Search symbols across all registered repos.
+- **cross_impact** — Find references to a symbol in other repos.
+- **cross_deps** — Inter-repo dependency relationships via Cargo.toml.
+- **cross_callpath** — Find call chains spanning repo boundaries.
 
 ## Direct Dependencies
 
