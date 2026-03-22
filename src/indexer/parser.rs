@@ -4029,4 +4029,48 @@ pub fn caller(db: &Database) {
             "caller should reference Database::file_count despite local shadowing, got: {callers:?}"
         );
     }
+
+    /// End-to-end test: index the real repo, then check that `ensure_indexed`
+    /// has callees stored in the DB (not just extracted by `extract_refs`).
+    #[test]
+    fn test_refs_real_main_rs_ensure_indexed() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        let config = crate::indexer::IndexConfig {
+            repo_path: std::path::PathBuf::from("."),
+        };
+        crate::indexer::index_repo(&db, &config).unwrap();
+
+        let callees = db
+            .get_callees("ensure_indexed", "src/main.rs", false)
+            .unwrap();
+        assert!(
+            callees
+                .iter()
+                .any(|c| c.name == "open"
+                    && c.impl_type.as_deref() == Some("Database")),
+            "ensure_indexed should have Database::open as callee, got: {callees:#?}"
+        );
+        assert!(
+            callees.iter().any(|c| c.name == "index_repo"),
+            "ensure_indexed should have index_repo as callee, got: {callees:#?}"
+        );
+
+        let oor_callees = db
+            .get_callees("open_or_index", "src/main.rs", false)
+            .unwrap();
+        assert!(
+            oor_callees
+                .iter()
+                .any(|c| c.name == "open"
+                    && c.impl_type.as_deref() == Some("Database")),
+            "open_or_index should have Database::open as callee, got: {oor_callees:#?}"
+        );
+        assert!(
+            oor_callees
+                .iter()
+                .any(|c| c.name == "ensure_indexed"),
+            "open_or_index should have ensure_indexed as callee, got: {oor_callees:#?}"
+        );
+    }
+
 }

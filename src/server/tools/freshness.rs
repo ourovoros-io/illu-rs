@@ -25,18 +25,39 @@ pub fn handle_freshness(
     let _ = writeln!(output, "- **Indexed commit:** `{indexed}`");
     let _ = writeln!(output, "- **Current HEAD:** `{current_head}`");
 
-    let is_current = indexed_hash.as_deref() == Some(current_head.as_str());
+    let stored_version = db.get_index_version(&repo_str)?;
+    let current_version = crate::indexer::INDEX_VERSION;
     let _ = writeln!(
         output,
-        "- **Status:** {}",
-        if is_current {
-            "up to date"
-        } else {
-            "**STALE**"
-        }
+        "- **Index version:** {}",
+        stored_version.as_deref().unwrap_or("unknown")
     );
+    let _ = writeln!(output, "- **Binary version:** {current_version}");
 
-    if !is_current {
+    let version_current =
+        stored_version.as_deref() == Some(current_version);
+    let commit_current =
+        indexed_hash.as_deref() == Some(current_head.as_str());
+    let is_current = commit_current && version_current;
+
+    if version_current {
+        let _ = writeln!(
+            output,
+            "- **Status:** {}",
+            if is_current {
+                "up to date"
+            } else {
+                "**STALE**"
+            }
+        );
+    } else {
+        let _ = writeln!(
+            output,
+            "- **Status:** **STALE** (version mismatch — will re-index on next refresh)"
+        );
+    }
+
+    if !commit_current {
         if let Some(hash) = &indexed_hash {
             let diff_output = Command::new("git")
                 .args(["diff", "--name-only", hash, "HEAD"])

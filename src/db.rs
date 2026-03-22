@@ -313,7 +313,22 @@ impl Database {
                 ON files(crate_id);
             CREATE INDEX IF NOT EXISTS idx_symbols_name_impl
                 ON symbols(name, impl_type);",
-        )
+        )?;
+
+        // Add index_version column if missing (existing DBs)
+        let has_version: bool = self.conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('metadata') \
+             WHERE name = 'index_version'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_version {
+            self.conn.execute_batch(
+                "ALTER TABLE metadata ADD COLUMN index_version TEXT;",
+            )?;
+        }
+
+        Ok(())
     }
 
     /// Detect old FTS schema and rebuild if needed.
@@ -457,11 +472,16 @@ impl Database {
         )
     }
 
-    pub fn set_metadata(&self, repo_path: &str, commit_hash: &str) -> SqlResult<()> {
+    pub fn set_metadata(
+        &self,
+        repo_path: &str,
+        commit_hash: &str,
+        index_version: &str,
+    ) -> SqlResult<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO metadata (repo_path, commit_hash)
-             VALUES (?1, ?2)",
-            params![repo_path, commit_hash],
+            "INSERT OR REPLACE INTO metadata (repo_path, commit_hash, index_version)
+             VALUES (?1, ?2, ?3)",
+            params![repo_path, commit_hash, index_version],
         )?;
         Ok(())
     }
@@ -470,6 +490,17 @@ impl Database {
         let mut stmt = self
             .conn
             .prepare("SELECT commit_hash FROM metadata WHERE repo_path = ?1")?;
+        let mut rows = stmt.query_map(params![repo_path], |row| row.get(0))?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_index_version(&self, repo_path: &str) -> SqlResult<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT index_version FROM metadata WHERE repo_path = ?1",
+        )?;
         let mut rows = stmt.query_map(params![repo_path], |row| row.get(0))?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
@@ -2369,9 +2400,11 @@ mod tests {
     #[test]
     fn test_metadata_roundtrip() {
         let db = Database::open_in_memory().unwrap();
-        db.set_metadata("/tmp/repo", "abc123").unwrap();
+        db.set_metadata("/tmp/repo", "abc123", "0.1.0").unwrap();
         let hash = db.get_commit_hash("/tmp/repo").unwrap();
         assert_eq!(hash, Some("abc123".to_string()));
+        let version = db.get_index_version("/tmp/repo").unwrap();
+        assert_eq!(version, Some("0.1.0".to_string()));
     }
 
     #[test]
@@ -2379,6 +2412,8 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let hash = db.get_commit_hash("/nonexistent").unwrap();
         assert_eq!(hash, None);
+        let version = db.get_index_version("/nonexistent").unwrap();
+        assert_eq!(version, None);
     }
 
     #[test]
