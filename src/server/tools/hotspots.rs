@@ -19,11 +19,7 @@ pub fn handle_hotspots(
     if !most_referenced.is_empty() {
         let _ = writeln!(output, "### Most Referenced (fragile to change)\n");
         for (i, entry) in most_referenced.iter().enumerate() {
-            let display = if let Some(it) = &entry.impl_type {
-                format!("{it}::{}", entry.name)
-            } else {
-                entry.name.clone()
-            };
+            let display = super::format_qualified(&entry.name, entry.impl_type.as_deref());
             let _ = writeln!(
                 output,
                 "{}. **{display}** ({}) — {} references",
@@ -51,11 +47,7 @@ pub fn handle_hotspots(
     if !largest.is_empty() {
         let _ = writeln!(output, "### Largest Functions (by line count)\n");
         for (i, func) in largest.iter().enumerate() {
-            let qname = if let Some(it) = &func.impl_type {
-                format!("{it}::{}", func.name)
-            } else {
-                func.name.clone()
-            };
+            let qname = super::format_qualified(&func.name, func.impl_type.as_deref());
             let _ = writeln!(
                 output,
                 "{}. **{qname}** ({}) — {} lines",

@@ -132,11 +132,7 @@ fn levenshtein_suggestions(db: &Database, query: &str) -> Vec<(String, Option<St
     let mut scored: Vec<(usize, String, Option<String>)> = all_names
         .into_iter()
         .map(|(name, impl_type)| {
-            let qname = if let Some(ref it) = impl_type {
-                format!("{it}::{name}")
-            } else {
-                name.clone()
-            };
+            let qname = format_qualified(&name, impl_type.as_deref());
             let dist = levenshtein(query, &qname);
             (dist, name, impl_type)
         })
@@ -194,11 +190,7 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
         use std::fmt::Write;
         let mut out = format!("No symbol found matching '{name}'.\n\nDid you mean:\n",);
         for (sym_name, impl_type) in &lev_matches {
-            let qname = if let Some(it) = impl_type {
-                format!("{it}::{sym_name}")
-            } else {
-                sym_name.clone()
-            };
+            let qname = format_qualified(sym_name, impl_type.as_deref());
             let _ = writeln!(out, "- `{qname}`");
         }
         let _ = write!(out, "\nUse `query` to search more broadly.");
@@ -228,6 +220,12 @@ pub(crate) fn format_qualified(name: &str, impl_type: Option<&str>) -> String {
 /// Format a symbol's qualified name (e.g. `Database::open` for methods).
 pub(crate) fn qualified_name(sym: &StoredSymbol) -> String {
     format_qualified(&sym.name, sym.impl_type.as_deref())
+}
+
+/// Abbreviate a full commit hash to 7 characters for display.
+#[must_use]
+pub(crate) fn short_hash(hash: &str) -> &str {
+    &hash[..hash.len().min(7)]
 }
 
 /// Check if a `SymbolKind` matches a user-provided kind filter string.

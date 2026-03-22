@@ -57,8 +57,7 @@ pub fn handle_history(
     let _ = writeln!(output, "- **Commits:** {}\n", commits.len());
 
     for c in &commits {
-        let short = &c.hash[..c.hash.len().min(7)];
-        let _ = writeln!(output, "### {short} \u{2014} {}", c.subject);
+        let _ = writeln!(output, "### {} \u{2014} {}", super::short_hash(&c.hash), c.subject);
         let _ = writeln!(output, "- **Author:** {}", c.author);
         let _ = writeln!(output, "- **Date:** {}", c.date);
         if !c.body.is_empty() {
@@ -223,8 +222,7 @@ fn build_diff_entry(lines: &[&str]) -> Option<DiffLogEntry> {
 
 fn format_diff_entry(entry: &DiffLogEntry) -> String {
     let mut out = String::new();
-    let short = &entry.hash[..entry.hash.len().min(7)];
-    let _ = writeln!(out, "### {short} \u{2014} {}", entry.subject);
+    let _ = writeln!(out, "### {} \u{2014} {}", super::short_hash(&entry.hash), entry.subject);
     let _ = writeln!(out, "- **Author:** {}", entry.author);
     let _ = writeln!(out, "- **Date:** {}", entry.date);
 

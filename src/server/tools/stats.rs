@@ -87,11 +87,7 @@ pub fn handle_stats(
     if !most_ref.is_empty() {
         let _ = writeln!(output, "### Most Referenced\n");
         for entry in &most_ref {
-            let display = if let Some(it) = &entry.impl_type {
-                format!("{it}::{}", entry.name)
-            } else {
-                entry.name.clone()
-            };
+            let display = super::format_qualified(&entry.name, entry.impl_type.as_deref());
             let _ = writeln!(
                 output,
                 "- **{display}** ({}) — {} refs",
