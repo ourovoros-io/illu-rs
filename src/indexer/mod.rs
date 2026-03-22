@@ -78,8 +78,39 @@ pub fn refresh_index(
 
     crate::status::set("refreshing ▸ scanning files");
 
+    // Detect committed changes since last indexed commit
+    let stored_hash = db.get_commit_hash(&config.repo_path.display().to_string())?;
+    let current_head = get_current_commit_hash(&config.repo_path).ok();
+    let head_changed = match (&stored_hash, &current_head) {
+        (Some(old), Some(new)) => old != new,
+        (None, Some(_)) => true,
+        _ => false,
+    };
+    let committed_changes = if head_changed {
+        if let Some(old) = &stored_hash {
+            committed_changed_rs_files(&config.repo_path, old)
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
     // Try git-based detection first, fall back to full walk
-    let candidate_files = git_changed_rs_files(&config.repo_path, &existing);
+    let mut candidate_files = git_changed_rs_files(&config.repo_path, &existing);
+
+    // Merge in committed changes not already in the candidate list
+    if !committed_changes.is_empty() {
+        let existing_set: std::collections::HashSet<&str> =
+            candidate_files.iter().map(String::as_str).collect();
+        let new: Vec<String> = committed_changes
+            .into_iter()
+            .filter(|p| !existing_set.contains(p.as_str()))
+            .collect();
+        candidate_files.extend(new);
+        tracing::debug!("Merged committed changes into candidates");
+    }
+
     let dirty_files = collect_dirty_files(&config.repo_path, &candidate_files, &existing);
 
     // Check for deleted files (only in full-walk mode, git handles this via status)
@@ -91,6 +122,10 @@ pub fn refresh_index(
     }
 
     if dirty_files.is_empty() {
+        // Freshness compares stored hash to HEAD; keep it current
+        if head_changed {
+            update_metadata(db, config)?;
+        }
         crate::status::set(crate::status::READY);
         return Ok(0);
     }
@@ -120,6 +155,9 @@ pub fn refresh_index(
     if stale > 0 {
         tracing::info!(deleted = stale, "Cleaned up stale symbol refs");
     }
+
+    // Update stored commit hash so freshness reports correctly
+    update_metadata(db, config)?;
 
     crate::status::set(crate::status::READY);
     Ok(count)
@@ -572,6 +610,31 @@ fn content_hash(content: &str) -> String {
     format!("{hash:x}")
 }
 
+/// Find `.rs` files changed in commits since `since_hash` up to HEAD.
+fn committed_changed_rs_files(repo_path: &std::path::Path, since_hash: &str) -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "--name-only", &format!("{since_hash}..HEAD")])
+        .current_dir(repo_path)
+        .output();
+    let Ok(output) = output else {
+        tracing::debug!("git diff --name-only failed to execute");
+        return Vec::new();
+    };
+    if !output.status.success() {
+        tracing::debug!("git diff --name-only returned non-zero");
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|l| {
+            std::path::Path::new(l)
+                .extension()
+                .is_some_and(|ext| ext == "rs")
+        })
+        .map(String::from)
+        .collect()
+}
+
 /// Use `git status` to find changed/new/deleted `.rs` files.
 /// Returns a list of relative paths to check. If git fails, returns all
 /// indexed files plus walks for new ones (full scan fallback).
@@ -620,8 +683,7 @@ fn git_changed_rs_files(
 
     // Also include files that are in our index but might have been modified
     // outside of git tracking (rare but possible)
-    let changed_set: std::collections::HashSet<String> =
-        changed.iter().cloned().collect();
+    let changed_set: std::collections::HashSet<String> = changed.iter().cloned().collect();
     for path in existing.keys() {
         if !changed_set.contains(path) {
             let full = repo_path.join(path);

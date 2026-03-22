@@ -1521,6 +1521,7 @@ impl Database {
         symbol_name: &str,
         target_file: &str,
         exclude_tests: bool,
+        min_confidence: Option<&str>,
     ) -> SqlResult<Vec<CalleeInfo>> {
         let query = if exclude_tests {
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
@@ -1530,7 +1531,7 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              JOIN files tf ON tf.id = ts.file_id \
-             WHERE ts.name = ?1 AND tf.path = ?2 AND sr.confidence = 'high' AND ss.is_test = 0"
+             WHERE ts.name = ?1 AND tf.path = ?2 AND (?3 IS NULL OR sr.confidence = ?3) AND ss.is_test = 0"
         } else {
             "SELECT DISTINCT ss.name, ss.kind, sf.path, sr.kind, ss.line_start, ss.impl_type, \
              sr.ref_line, ss.is_test \
@@ -1539,11 +1540,11 @@ impl Database {
              JOIN symbols ts ON ts.id = sr.target_symbol_id \
              JOIN files sf ON sf.id = ss.file_id \
              JOIN files tf ON tf.id = ts.file_id \
-             WHERE ts.name = ?1 AND tf.path = ?2 AND sr.confidence = 'high'"
+             WHERE ts.name = ?1 AND tf.path = ?2 AND (?3 IS NULL OR sr.confidence = ?3)"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
-        let mut rows = stmt.query(params![symbol_name, target_file])?;
+        let mut rows = stmt.query(params![symbol_name, target_file, min_confidence])?;
         while let Some(row) = rows.next()? {
             results.push(CalleeInfo {
                 name: row.get(0)?,
@@ -1573,7 +1574,7 @@ impl Database {
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1 AND sr.kind = 'call' \
              AND (?2 IS NULL OR sr.confidence = ?2) AND ts.is_test = 0 \
-             AND ts.kind NOT IN ('const', 'static')"
+             AND ts.kind NOT IN ('const', 'static', 'enum_variant')"
         } else {
             "SELECT DISTINCT ts.name, f.path \
              FROM symbol_refs sr \
@@ -1582,7 +1583,7 @@ impl Database {
              JOIN files f ON f.id = ts.file_id \
              WHERE ss.name = ?1 AND sr.kind = 'call' \
              AND (?2 IS NULL OR sr.confidence = ?2) \
-             AND ts.kind NOT IN ('const', 'static')"
+             AND ts.kind NOT IN ('const', 'static', 'enum_variant')"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
@@ -1607,7 +1608,7 @@ impl Database {
              JOIN files sf ON sf.id = ss.file_id \
              WHERE ts.name = ?1 AND sr.kind = 'call' \
              AND (?2 IS NULL OR sr.confidence = ?2) AND ss.is_test = 0 \
-             AND ss.kind NOT IN ('const', 'static')"
+             AND ss.kind NOT IN ('const', 'static', 'enum_variant')"
         } else {
             "SELECT DISTINCT ss.name, sf.path \
              FROM symbol_refs sr \
@@ -1616,7 +1617,7 @@ impl Database {
              JOIN files sf ON sf.id = ss.file_id \
              WHERE ts.name = ?1 AND sr.kind = 'call' \
              AND (?2 IS NULL OR sr.confidence = ?2) \
-             AND ss.kind NOT IN ('const', 'static')"
+             AND ss.kind NOT IN ('const', 'static', 'enum_variant')"
         };
         let mut stmt = self.conn.prepare_cached(query)?;
         let mut results = Vec::new();
@@ -1861,9 +1862,22 @@ impl Database {
         limit: i64,
         path_prefix: &str,
         min_confidence: Option<&str>,
+        exclude_tests: bool,
     ) -> SqlResult<Vec<(String, String, i64)>> {
         let pattern = format!("{}%", escape_like(path_prefix));
-        let mut stmt = self.conn.prepare_cached(
+        let sql = if exclude_tests {
+            "SELECT ss.name, f.path, \
+                    COUNT(DISTINCT sr.target_symbol_id) as ref_count \
+             FROM symbol_refs sr \
+             JOIN symbols ss ON ss.id = sr.source_symbol_id \
+             JOIN files f ON f.id = ss.file_id \
+             WHERE f.path LIKE ?1 ESCAPE '\\' \
+               AND (?3 IS NULL OR sr.confidence = ?3) \
+               AND ss.is_test = 0 \
+             GROUP BY ss.id \
+             ORDER BY ref_count DESC \
+             LIMIT ?2"
+        } else {
             "SELECT ss.name, f.path, \
                     COUNT(DISTINCT sr.target_symbol_id) as ref_count \
              FROM symbol_refs sr \
@@ -1873,8 +1887,9 @@ impl Database {
                AND (?3 IS NULL OR sr.confidence = ?3) \
              GROUP BY ss.id \
              ORDER BY ref_count DESC \
-             LIMIT ?2",
-        )?;
+             LIMIT ?2"
+        };
+        let mut stmt = self.conn.prepare_cached(sql)?;
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
         while let Some(row) = rows.next()? {
@@ -3515,7 +3530,9 @@ mod tests {
         // a -> c (a has 1 outgoing ref)
         db.insert_symbol_ref(a, c, "call", "high", None).unwrap();
 
-        let results = db.get_most_referencing_symbols(10, "", None).unwrap();
+        let results = db
+            .get_most_referencing_symbols(10, "", None, false)
+            .unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, "b");
         assert_eq!(results[0].2, 2);
@@ -3754,5 +3771,49 @@ mod tests {
             ["src/main.rs", "def456"],
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_callees_by_name_excludes_enum_variants() {
+        let db = Database::open_in_memory().unwrap();
+        let fid = db.insert_file("src/test.rs", "hash1").unwrap();
+        // Insert a function
+        db.conn.execute(
+            "INSERT INTO symbols (file_id, name, kind, visibility, line_start, line_end, signature, is_test) \
+             VALUES (?1, 'my_func', 'function', 'public', 1, 10, 'fn my_func()', 0)",
+            params![fid],
+        ).unwrap();
+        let func_id: i64 = db
+            .conn
+            .query_row("SELECT id FROM symbols WHERE name = 'my_func'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        // Insert an enum variant
+        db.conn.execute(
+            "INSERT INTO symbols (file_id, name, kind, visibility, line_start, line_end, signature, is_test) \
+             VALUES (?1, 'MyVariant', 'enum_variant', 'public', 20, 20, 'MyVariant', 0)",
+            params![fid],
+        ).unwrap();
+        let variant_id: i64 = db
+            .conn
+            .query_row("SELECT id FROM symbols WHERE name = 'MyVariant'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        // Insert a call ref from func to variant
+        db.conn
+            .execute(
+                "INSERT INTO symbol_refs (source_symbol_id, target_symbol_id, kind, confidence) \
+             VALUES (?1, ?2, 'call', 'high')",
+                params![func_id, variant_id],
+            )
+            .unwrap();
+        // get_callees_by_name should NOT return the enum variant
+        let callees = db.get_callees_by_name("my_func", None, false).unwrap();
+        assert!(
+            callees.iter().all(|(name, _)| name != "MyVariant"),
+            "Enum variant should be excluded from call graph"
+        );
     }
 }

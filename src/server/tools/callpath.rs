@@ -15,11 +15,11 @@ pub fn handle_callpath(
 
     let from_syms = super::resolve_symbol(db, from)?;
     if from_syms.is_empty() {
-        return Ok(super::symbol_not_found(from));
+        return Ok(super::symbol_not_found(db, from));
     }
     let to_syms = super::resolve_symbol(db, to)?;
     if to_syms.is_empty() {
-        return Ok(super::symbol_not_found(to));
+        return Ok(super::symbol_not_found(db, to));
     }
 
     let to_name = super::base_name(to);

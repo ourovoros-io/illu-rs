@@ -9,7 +9,7 @@ pub fn handle_references(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
-        return Ok(super::symbol_not_found(symbol_name));
+        return Ok(super::symbol_not_found(db, symbol_name));
     }
 
     let mut output = String::new();
@@ -58,7 +58,7 @@ fn render_call_sites(
     let mut prod = Vec::new();
     let mut test = Vec::new();
     for sym in symbols {
-        for c in db.get_callers(&sym.name, &sym.file_path, false)? {
+        for c in db.get_callers(&sym.name, &sym.file_path, false, Some("high"))? {
             if path.is_some_and(|p| !c.file_path.starts_with(p)) {
                 continue;
             }
