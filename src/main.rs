@@ -85,10 +85,16 @@ fn write_mcp_config_to(
         std::fs::create_dir_all(parent)?;
     }
 
-    let mut config: serde_json::Value = std::fs::read_to_string(config_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
+    let mut config: serde_json::Value = match std::fs::read_to_string(config_path) {
+        Ok(s) => serde_json::from_str(&s)
+            .inspect_err(|e| tracing::warn!("Failed to parse {}: {e}", config_path.display()))
+            .ok(),
+        Err(e) => {
+            tracing::debug!("Could not read {}: {e}", config_path.display());
+            None
+        }
+    }
+    .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
 
     config["mcpServers"]["illu"] = illu_entry;
 
@@ -200,7 +206,9 @@ fn write_md_section(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let md_path = repo_path.join(file_name);
 
-    let content = std::fs::read_to_string(&md_path).unwrap_or_default();
+    let content = std::fs::read_to_string(&md_path)
+        .inspect_err(|e| tracing::debug!("Could not read {}: {e}", md_path.display()))
+        .unwrap_or_default();
 
     // Skip write if section already exists and is identical
     if content.contains(ILLU_SECTION_START) && content.contains(section) {
@@ -313,7 +321,9 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn append_gitignore_entry(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let content = std::fs::read_to_string(path)
+        .inspect_err(|e| tracing::debug!("Could not read {}: {e}", path.display()))
+        .unwrap_or_default();
     if content
         .lines()
         .any(|l| l.trim() == ".illu/" || l.trim() == ".illu")
@@ -334,10 +344,14 @@ fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>
 }
 
 fn register_repo(repo_path: &Path) {
-    let Ok(registry_path) = illu_rs::registry::Registry::default_path() else {
+    let Ok(registry_path) = illu_rs::registry::Registry::default_path().inspect_err(|e| {
+        tracing::debug!("Could not determine registry path: {e}");
+    }) else {
         return;
     };
-    let Ok(mut registry) = illu_rs::registry::Registry::load(&registry_path) else {
+    let Ok(mut registry) = illu_rs::registry::Registry::load(&registry_path).inspect_err(|e| {
+        tracing::debug!("Could not load registry from {}: {e}", registry_path.display());
+    }) else {
         return;
     };
 
@@ -346,8 +360,9 @@ fn register_repo(repo_path: &Path) {
         .map_or_else(|| "unknown".into(), |n| n.to_string_lossy().into_owned());
 
     let git_remote = illu_rs::git::git_remote_url(repo_path);
-    let git_common_dir =
-        illu_rs::git::git_common_dir(repo_path).unwrap_or_else(|_| repo_path.join(".git"));
+    let git_common_dir = illu_rs::git::git_common_dir(repo_path)
+        .inspect_err(|e| tracing::debug!("Could not get git common dir: {e}"))
+        .unwrap_or_else(|_| repo_path.join(".git"));
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -361,7 +376,9 @@ fn register_repo(repo_path: &Path) {
         last_indexed: now,
     });
     registry.prune();
-    let _ = registry.save();
+    if let Err(e) = registry.save() {
+        tracing::debug!("Failed to save registry: {e}");
+    }
 }
 
 fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -386,10 +403,18 @@ fn install_statusline(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     // Check if Claude settings already has a statusLine entry
     let claude_settings = home.join(".claude/settings.json");
-    let config: serde_json::Value = std::fs::read_to_string(&claude_settings)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
+    let config: serde_json::Value = match std::fs::read_to_string(&claude_settings) {
+        Ok(s) => serde_json::from_str(&s)
+            .inspect_err(|e| {
+                tracing::warn!("Failed to parse {}: {e}", claude_settings.display());
+            })
+            .ok(),
+        Err(e) => {
+            tracing::debug!("Could not read {}: {e}", claude_settings.display());
+            None
+        }
+    }
+    .unwrap_or_else(|| serde_json::json!({}));
 
     if config.get("statusLine").is_some() {
         println!(
@@ -529,8 +554,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let registry = {
                 let path = illu_rs::registry::Registry::default_path()
+                    .inspect_err(|e| tracing::debug!("Could not determine registry path: {e}"))
                     .unwrap_or_else(|_| repo_path.join(".illu/registry.toml"));
                 illu_rs::registry::Registry::load(&path)
+                    .inspect_err(|e| tracing::debug!("Could not load registry: {e}"))
                     .unwrap_or_else(|_| illu_rs::registry::Registry::empty())
             };
 
@@ -562,9 +589,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let fetched =
                         illu_rs::indexer::docs::fetch_docs(&pending_docs, &repo_path).await;
                     if !fetched.is_empty() {
-                        let Ok(db) = db.lock() else { return };
+                        let Ok(db) = db.lock() else {
+                            tracing::warn!("Database lock poisoned, skipping doc storage");
+                            return;
+                        };
                         let count = fetched.len();
-                        let _ = illu_rs::indexer::docs::store_fetched_docs(&db, &fetched);
+                        if let Err(e) = illu_rs::indexer::docs::store_fetched_docs(&db, &fetched) {
+                            tracing::warn!("Failed to store fetched docs: {e}");
+                        }
                         tracing::info!(count, "Stored dependency docs");
                     }
                     illu_rs::status::set(illu_rs::status::READY);

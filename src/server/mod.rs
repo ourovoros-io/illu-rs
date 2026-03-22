@@ -72,6 +72,8 @@ impl IlluServer {
 
         if let Ok(mut last) = self.last_refresh.lock() {
             *last = std::time::Instant::now();
+        } else {
+            tracing::warn!("Refresh timestamp lock poisoned, skipping cooldown update");
         }
 
         // Fetch docs in background — don't block tool responses
@@ -84,9 +86,14 @@ impl IlluServer {
                 crate::status::set(&format!("fetching docs ▸ 0/{total}"));
                 let fetched = crate::indexer::docs::fetch_docs(&pending_docs, &repo_path).await;
                 if !fetched.is_empty() {
-                    let Ok(db) = db.lock() else { return };
+                    let Ok(db) = db.lock() else {
+                        tracing::warn!("Database lock poisoned, skipping doc storage");
+                        return;
+                    };
                     tracing::info!(count = fetched.len(), "Storing fetched docs");
-                    let _ = crate::indexer::docs::store_fetched_docs(&db, &fetched);
+                    if let Err(e) = crate::indexer::docs::store_fetched_docs(&db, &fetched) {
+                        tracing::warn!("Failed to store fetched docs: {e}");
+                    }
                 }
                 crate::status::set(crate::status::READY);
             });

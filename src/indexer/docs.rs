@@ -96,7 +96,9 @@ async fn fetch_github_readme(client: &reqwest::Client, repo_url: &str) -> Option
             Ok(r) if r.status().is_success() => r,
             _ => continue,
         };
-        let text = resp.text().await.ok()?;
+        let text = resp.text().await
+            .inspect_err(|e| tracing::debug!("Failed to read README body for {repo_url}: {e}"))
+            .ok()?;
         if !text.is_empty() {
             return Some(text);
         }
@@ -109,22 +111,29 @@ async fn fetch_github_readme(client: &reqwest::Client, repo_url: &str) -> Option
         .header("User-Agent", "illu-rs")
         .send()
         .await
+        .inspect_err(|e| tracing::debug!("GitHub API request failed for {api_url}: {e}"))
         .ok()?;
     if !api_resp.status().is_success() {
         return None;
     }
-    let json: serde_json::Value = api_resp.json().await.ok()?;
+    let json: serde_json::Value = api_resp.json().await
+        .inspect_err(|e| tracing::debug!("Failed to parse GitHub API JSON for {api_url}: {e}"))
+        .ok()?;
     let default_branch = json.get("default_branch")?.as_str()?;
     if default_branch == "main" || default_branch == "master" {
         return None;
     }
     let url =
         format!("https://raw.githubusercontent.com/{owner}/{repo}/{default_branch}/README.md");
-    let resp = client.get(&url).send().await.ok()?;
+    let resp = client.get(&url).send().await
+        .inspect_err(|e| tracing::debug!("HTTP request failed for {url}: {e}"))
+        .ok()?;
     if !resp.status().is_success() {
         return None;
     }
-    let text = resp.text().await.ok()?;
+    let text = resp.text().await
+        .inspect_err(|e| tracing::debug!("Failed to read response body for {url}: {e}"))
+        .ok()?;
     if text.is_empty() {
         return None;
     }
@@ -134,11 +143,15 @@ async fn fetch_github_readme(client: &reqwest::Client, repo_url: &str) -> Option
 /// Query the crates.io API for a crate's repository URL.
 async fn fetch_crates_io_repo_url(client: &reqwest::Client, name: &str) -> Option<String> {
     let url = format!("https://crates.io/api/v1/crates/{name}");
-    let resp = client.get(&url).send().await.ok()?;
+    let resp = client.get(&url).send().await
+        .inspect_err(|e| tracing::debug!("crates.io request failed for {name}: {e}"))
+        .ok()?;
     if !resp.status().is_success() {
         return None;
     }
-    let json: serde_json::Value = resp.json().await.ok()?;
+    let json: serde_json::Value = resp.json().await
+        .inspect_err(|e| tracing::debug!("Failed to parse crates.io JSON for {name}: {e}"))
+        .ok()?;
     json.get("crate")?
         .get("repository")?
         .as_str()
