@@ -773,10 +773,30 @@ pub enum RefKind {
     Call,
 }
 
+impl RefKind {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::TypeRef => "type_ref",
+            Self::Call => "call",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Confidence {
     High,
     Low,
+}
+
+impl Confidence {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::High => "high",
+            Self::Low => "low",
+        }
+    }
 }
 
 impl std::fmt::Display for Confidence {
@@ -4016,7 +4036,7 @@ pub fn handle_impact() {
         assert!(count > 0, "should store at least one ref");
 
         let callers = db
-            .callers("resolve_symbol", "src/tools/mod.rs", false, Some("high"))
+            .callers("resolve_symbol", "src/tools/mod.rs", false, Some(Confidence::High))
             .unwrap();
         assert!(
             callers.iter().any(|c| c.name == "handle_impact"),
@@ -4063,7 +4083,7 @@ pub fn caller(db: &Database) {
         db.store_symbol_refs_fast(&refs, &map).unwrap();
 
         let callers = db
-            .callers("file_count", "src/db.rs", false, Some("high"))
+            .callers("file_count", "src/db.rs", false, Some(Confidence::High))
             .unwrap();
         assert!(
             callers.iter().any(|c| c.name == "caller"),

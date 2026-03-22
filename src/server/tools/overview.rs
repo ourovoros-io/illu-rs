@@ -1,5 +1,5 @@
 use crate::db::Database;
-use crate::indexer::parser::SymbolKind;
+use crate::indexer::parser::{Confidence, SymbolKind};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -133,7 +133,7 @@ fn render_external_callers(db: &Database, output: &mut String, sym: &crate::db::
         return;
     }
     // get_callers_by_name returns Vec<(name, file_path)> — no target_file needed
-    let Ok(callers) = db.callers_by_name(&sym.name, Some("high"), false) else {
+    let Ok(callers) = db.callers_by_name(&sym.name, Some(Confidence::High), false) else {
         return;
     };
     let external: Vec<&str> = callers

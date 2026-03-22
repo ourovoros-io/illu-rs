@@ -902,7 +902,7 @@ impl IlluServer {
         self.refresh()?;
         let target = {
             let db = self.lock_db()?;
-            tools::blame::resolve_blame_target(&db, &params.symbol_name).map_err(to_mcp_err)?
+            tools::resolve_symbol_target(&db, &params.symbol_name).map_err(to_mcp_err)?
         };
         let target = match target {
             Ok(t) => t,
@@ -927,7 +927,7 @@ impl IlluServer {
         self.refresh()?;
         let target = {
             let db = self.lock_db()?;
-            tools::history::resolve_history_target(&db, &params.symbol_name).map_err(to_mcp_err)?
+            tools::resolve_symbol_target(&db, &params.symbol_name).map_err(to_mcp_err)?
         };
         let target = match target {
             Ok(t) => t,

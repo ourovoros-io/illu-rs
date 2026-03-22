@@ -1,4 +1,5 @@
 use crate::db::Database;
+use crate::indexer::parser::Confidence;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt::Write;
 
@@ -123,7 +124,7 @@ fn bfs_collect(
                     .map(|c| (c.name, c.file_path))
                     .collect()
             }
-            BfsDir::Up => db.callers_by_name(&current_name, Some("high"), exclude_tests)?,
+            BfsDir::Up => db.callers_by_name(&current_name, Some(Confidence::High), exclude_tests)?,
         };
         for (neighbor, file_path) in neighbors {
             if super::NOISY_CALLEES.contains(&neighbor.as_str()) {
@@ -233,10 +234,10 @@ impl<'a> TreeRenderer<'a> {
 
         let children = if self.use_callers {
             self.db
-                .callers_by_name(name, Some("high"), self.exclude_tests)?
+                .callers_by_name(name, Some(Confidence::High), self.exclude_tests)?
         } else {
             self.db
-                .callees_by_name(name, Some("high"), self.exclude_tests)?
+                .callees_by_name(name, Some(Confidence::High), self.exclude_tests)?
         };
 
         let child_prefix = if is_root {

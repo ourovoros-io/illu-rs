@@ -260,6 +260,32 @@ pub(crate) fn short_hash(hash: &str) -> &str {
     &hash[..hash.len().min(7)]
 }
 
+/// Resolved symbol location for tools that need file path and line range.
+pub struct SymbolTarget {
+    pub qname: String,
+    pub file_path: String,
+    pub line_start: i64,
+    pub line_end: i64,
+}
+
+/// Resolve a symbol to its location, returning an error message if not found.
+pub fn resolve_symbol_target(
+    db: &Database,
+    symbol_name: &str,
+) -> Result<Result<SymbolTarget, String>, Box<dyn std::error::Error>> {
+    let symbols = resolve_symbol(db, symbol_name)?;
+    if symbols.is_empty() {
+        return Ok(Err(symbol_not_found(db, symbol_name)));
+    }
+    let sym = &symbols[0];
+    Ok(Ok(SymbolTarget {
+        qname: qualified_name(sym),
+        file_path: sym.file_path.clone(),
+        line_start: sym.line_start,
+        line_end: sym.line_end,
+    }))
+}
+
 /// Check if a `SymbolKind` matches a user-provided kind filter string.
 pub(crate) fn kind_matches(kind: &SymbolKind, filter: &str) -> bool {
     kind.to_string().eq_ignore_ascii_case(filter)

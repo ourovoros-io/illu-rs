@@ -1,40 +1,13 @@
 use crate::db::Database;
+use super::SymbolTarget;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::Path;
 
-/// Data extracted from the DB needed to run git blame.
-pub struct BlameTarget {
-    pub qname: String,
-    pub file_path: String,
-    pub line_start: i64,
-    pub line_end: i64,
-}
-
-/// Resolve the symbol from the database, returning the target info
-/// needed for git blame. Returns `None` (with a not-found message)
-/// if the symbol cannot be resolved.
-pub fn resolve_blame_target(
-    db: &Database,
-    symbol_name: &str,
-) -> Result<Result<BlameTarget, String>, Box<dyn std::error::Error>> {
-    let symbols = super::resolve_symbol(db, symbol_name)?;
-    if symbols.is_empty() {
-        return Ok(Err(super::symbol_not_found(db, symbol_name)));
-    }
-    let sym = &symbols[0];
-    Ok(Ok(BlameTarget {
-        qname: super::qualified_name(sym),
-        file_path: sym.file_path.clone(),
-        line_start: sym.line_start,
-        line_end: sym.line_end,
-    }))
-}
-
 /// Run git blame and format the output. Does not require DB access.
 pub fn run_and_format_blame(
     repo_path: &Path,
-    target: &BlameTarget,
+    target: &SymbolTarget,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut output = String::new();
     let _ = writeln!(output, "## Blame: {}\n", target.qname);
@@ -102,7 +75,7 @@ pub fn handle_blame(
     repo_path: &Path,
     symbol_name: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let target = match resolve_blame_target(db, symbol_name)? {
+    let target = match super::resolve_symbol_target(db, symbol_name)? {
         Ok(t) => t,
         Err(msg) => return Ok(msg),
     };

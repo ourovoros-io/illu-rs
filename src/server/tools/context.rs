@@ -1,5 +1,5 @@
 use crate::db::{CalleeInfo, Database, StoredSymbol};
-use crate::indexer::parser::SymbolKind;
+use crate::indexer::parser::{Confidence, SymbolKind};
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::path::Path;
@@ -218,7 +218,7 @@ fn render_callers(
 ) -> Result<(), Box<dyn std::error::Error>> {
     const MAX_CALLERS: usize = 30;
 
-    let mut callers = db.callers(&sym.name, &sym.file_path, exclude_tests, Some("high"))?;
+    let mut callers = db.callers(&sym.name, &sym.file_path, exclude_tests, Some(Confidence::High))?;
     if let Some(p) = callers_path {
         callers.retain(|c| c.file_path.starts_with(p));
     }

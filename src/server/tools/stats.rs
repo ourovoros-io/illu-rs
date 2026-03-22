@@ -1,5 +1,5 @@
 use crate::db::Database;
-use crate::indexer::parser::SymbolKind;
+use crate::indexer::parser::{Confidence, SymbolKind};
 use crate::indexer::store::is_test_attribute;
 use std::fmt::Write;
 
@@ -83,7 +83,7 @@ pub fn handle_stats(
 
     // Most referenced
     let most_ref =
-        db.most_referenced_symbols_filtered(5, prefix, Some("high"), exclude_tests)?;
+        db.most_referenced_symbols_filtered(5, prefix, Some(Confidence::High), exclude_tests)?;
     if !most_ref.is_empty() {
         let _ = writeln!(output, "### Most Referenced\n");
         for entry in &most_ref {

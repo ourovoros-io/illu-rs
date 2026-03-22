@@ -1,4 +1,5 @@
 use crate::db::{Database, StoredSymbol};
+use crate::indexer::parser::Confidence;
 use std::collections::HashSet;
 use std::fmt::Write;
 
@@ -74,7 +75,7 @@ fn collect_symbol_edges(
             if d >= max_depth {
                 continue;
             }
-            let callers = db.callers_by_name(&name, Some("high"), false)?;
+            let callers = db.callers_by_name(&name, Some(Confidence::High), false)?;
             for (caller, _path) in &callers {
                 edges.push((caller.clone(), name.clone()));
                 if seen_up.insert(caller.clone()) {
@@ -91,7 +92,7 @@ fn collect_file_edges(
     db: &Database,
     path_prefix: &str,
 ) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
-    let deps = db.file_dependencies(path_prefix, Some("high"))?;
+    let deps = db.file_dependencies(path_prefix, Some(Confidence::High))?;
     let edges: Vec<(String, String)> = deps
         .into_iter()
         .map(|(src, tgt)| {

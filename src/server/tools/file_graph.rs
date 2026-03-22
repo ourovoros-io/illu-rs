@@ -1,9 +1,10 @@
 use crate::db::Database;
+use crate::indexer::parser::Confidence;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
 pub fn handle_file_graph(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let edges = db.file_dependencies(path, Some("high"))?;
+    let edges = db.file_dependencies(path, Some(Confidence::High))?;
 
     let mut output = String::new();
     let _ = writeln!(output, "## File Dependency Graph: {path}\n");
