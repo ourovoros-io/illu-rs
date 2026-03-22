@@ -55,10 +55,10 @@ pub fn handle_blame(
         output,
         "- **Last modified:** {formatted_date} by {latest_author}"
     );
-    let short_hash = &latest_commit[..latest_commit.len().min(7)];
     let _ = writeln!(
         output,
-        "- **Commit:** {short_hash} \u{2014} {latest_summary}"
+        "- **Commit:** {} \u{2014} {latest_summary}",
+        super::short_hash(&latest_commit)
     );
 
     let total_lines = entries.len();

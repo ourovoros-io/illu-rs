@@ -134,7 +134,7 @@ mod tests {
             features: vec!["derive".into()],
         }];
         store_dependencies(&db, &deps).unwrap();
-        let stored = db.get_direct_dependencies().unwrap();
+        let stored = db.direct_dependencies().unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].name, "serde");
         assert_eq!(stored[0].version, "1.0.210");
@@ -160,11 +160,11 @@ mod tests {
             },
         ];
         store_dependencies(&db, &deps).unwrap();
-        let dep = db.get_dependency_by_name("serde").unwrap();
+        let dep = db.dependency_by_name("serde").unwrap();
         assert!(dep.is_some());
         assert_eq!(dep.unwrap().version, "1.0.210");
 
-        let missing = db.get_dependency_by_name("nonexistent").unwrap();
+        let missing = db.dependency_by_name("nonexistent").unwrap();
         assert!(missing.is_none());
     }
 
@@ -212,7 +212,7 @@ mod tests {
         db.store_doc(dep_id, "docs.rs", "Async runtime").unwrap();
         db.store_doc(dep_id, "github_readme", "Tokio README")
             .unwrap();
-        let docs = db.get_docs_for_dependency("tokio").unwrap();
+        let docs = db.docs_for_dependency("tokio").unwrap();
         assert_eq!(docs.len(), 2);
     }
 
@@ -270,14 +270,14 @@ mod tests {
         ];
         store_trait_impls(&db, file_id, &impls).unwrap();
 
-        let stored = db.get_trait_impls_for_type("Config").unwrap();
+        let stored = db.trait_impls_for_type("Config").unwrap();
         assert_eq!(stored.len(), 2);
 
         let trait_names: Vec<&str> = stored.iter().map(|i| i.trait_name.as_str()).collect();
         assert!(trait_names.contains(&"Display"));
         assert!(trait_names.contains(&"Debug"));
 
-        let by_trait = db.get_trait_impls_for_trait("Display").unwrap();
+        let by_trait = db.trait_impls_for_trait("Display").unwrap();
         assert_eq!(by_trait.len(), 1);
         assert_eq!(by_trait[0].type_name, "Config");
     }

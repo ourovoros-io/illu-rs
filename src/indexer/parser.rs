@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use tree_sitter::{Node, Parser};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -900,7 +901,7 @@ impl std::fmt::Display for RefKind {
 /// Returns both `module.rs` and `module/mod.rs` variants for each path.
 fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
     qualified_path: &str,
-    crate_map: &std::collections::HashMap<String, String, S>,
+    crate_map: &HashMap<String, String, S>,
 ) -> Vec<String> {
     // crate:: prefix (current crate)
     if let Some(path) = qualified_path.strip_prefix("crate::") {
@@ -947,7 +948,7 @@ fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
 fn qualified_path_to_file(qualified_path: &str) -> Option<String> {
     qualified_path_to_files_with_crates(
         qualified_path,
-        &std::collections::HashMap::<String, String>::new(),
+        &HashMap::<String, String>::new(),
     )
     .into_iter()
     .next()
@@ -961,8 +962,8 @@ fn qualified_path_to_file(qualified_path: &str) -> Option<String> {
 pub fn extract_import_map(
     root: &Node,
     source: &str,
-) -> std::collections::HashMap<String, ImportInfo> {
-    let mut map = std::collections::HashMap::new();
+) -> HashMap<String, ImportInfo> {
+    let mut map = HashMap::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
         if child.kind() != "use_declaration" {
@@ -980,7 +981,7 @@ fn collect_use_entries(
     node: &Node,
     source: &str,
     prefix: &str,
-    map: &mut std::collections::HashMap<String, ImportInfo>,
+    map: &mut HashMap<String, ImportInfo>,
 ) {
     match node.kind() {
         "use_as_clause" => {
@@ -1084,7 +1085,7 @@ fn collect_use_entries(
 #[cfg(test)]
 fn extract_import_map_from_source(
     source: &str,
-) -> Result<std::collections::HashMap<String, ImportInfo>, String> {
+) -> Result<HashMap<String, ImportInfo>, String> {
     let tree = parse_source(source)?;
     let root = tree.root_node();
     Ok(extract_import_map(&root, source))
@@ -1095,9 +1096,9 @@ fn extract_import_map_from_source(
 struct RefContext<'a, S: std::hash::BuildHasher, S2: std::hash::BuildHasher> {
     source: &'a str,
     file_path: &'a str,
-    known_symbols: &'a std::collections::HashSet<String, S>,
-    import_map: std::collections::HashMap<String, ImportInfo>,
-    crate_map: &'a std::collections::HashMap<String, String, S2>,
+    known_symbols: &'a HashSet<String, S>,
+    import_map: HashMap<String, ImportInfo>,
+    crate_map: &'a HashMap<String, String, S2>,
 }
 
 /// Extract references between symbols by scanning function/impl bodies
@@ -1105,8 +1106,8 @@ struct RefContext<'a, S: std::hash::BuildHasher, S2: std::hash::BuildHasher> {
 pub fn extract_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     source: &str,
     file_path: &str,
-    known_symbols: &std::collections::HashSet<String, S>,
-    crate_map: &std::collections::HashMap<String, String, S2>,
+    known_symbols: &HashSet<String, S>,
+    crate_map: &HashMap<String, String, S2>,
 ) -> Result<Vec<SymbolRef>, String> {
     let tree = parse_source(source)?;
     let root = tree.root_node();
@@ -1202,7 +1203,7 @@ fn collect_derive_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
 fn collect_pattern_identifiers(
     node: &Node,
     source: &str,
-    locals: &mut std::collections::HashSet<String>,
+    locals: &mut HashSet<String>,
 ) {
     let mut stack = vec![*node];
     while let Some(n) = stack.pop() {
@@ -1217,8 +1218,8 @@ fn collect_pattern_identifiers(
     }
 }
 
-fn collect_locals(node: &Node, source: &str) -> std::collections::HashSet<String> {
-    let mut locals = std::collections::HashSet::new();
+fn collect_locals(node: &Node, source: &str) -> HashSet<String> {
+    let mut locals = HashSet::new();
     let mut stack = vec![*node];
 
     while let Some(n) = stack.pop() {
@@ -1372,8 +1373,8 @@ fn collect_local_types(
     fn_node: &Node,
     source: &str,
     impl_type: Option<&str>,
-) -> std::collections::HashMap<String, String> {
-    let mut types = std::collections::HashMap::new();
+) -> HashMap<String, String> {
+    let mut types = HashMap::new();
 
     // `self` always maps to impl_type
     if let Some(it) = impl_type {
@@ -1468,8 +1469,8 @@ fn resolve_target_file<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
 struct BodyRefCollector<'a, S: std::hash::BuildHasher, S2: std::hash::BuildHasher> {
     fn_name: &'a str,
     ctx: &'a RefContext<'a, S, S2>,
-    locals: std::collections::HashSet<String>,
-    seen: std::collections::HashSet<String>,
+    locals: HashSet<String>,
+    seen: HashSet<String>,
 }
 
 impl<S: std::hash::BuildHasher, S2: std::hash::BuildHasher> BodyRefCollector<'_, S, S2> {
@@ -1651,7 +1652,7 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
         fn_name,
         ctx,
         locals,
-        seen: std::collections::HashSet::new(),
+        seen: HashSet::new(),
     };
     let mut stack = vec![*fn_node];
 
@@ -1816,7 +1817,7 @@ pub fn create_config() -> Config {
     Config { port: 8080 }
 }
 ";
-        let known: std::collections::HashSet<String> = ["Config", "create_config"]
+        let known: HashSet<String> = ["Config", "create_config"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -1824,7 +1825,7 @@ pub fn create_config() -> Config {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let config_ref = refs.iter().find(|r| r.target_name == "Config");
@@ -1841,7 +1842,7 @@ pub fn caller() -> i32 {
     helper()
 }
 ";
-        let known: std::collections::HashSet<String> = ["helper", "caller"]
+        let known: HashSet<String> = ["helper", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -1849,7 +1850,7 @@ pub fn caller() -> i32 {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let helper_ref = refs.iter().find(|r| r.target_name == "helper");
@@ -1866,7 +1867,7 @@ pub fn caller(db: &Database) {
     let results = db.do_query();
 }
 ";
-        let known: std::collections::HashSet<String> = ["do_query", "caller", "Database"]
+        let known: HashSet<String> = ["do_query", "caller", "Database"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -1874,7 +1875,7 @@ pub fn caller(db: &Database) {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let method_ref = refs
@@ -1891,13 +1892,13 @@ pub fn caller(db: &Database) {
         let source = r"
 pub fn standalone() -> i32 { 42 }
 ";
-        let known: std::collections::HashSet<String> =
+        let known: HashSet<String> =
             ["standalone"].iter().map(|s| (*s).to_string()).collect();
         let refs = extract_refs(
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         assert!(refs.is_empty(), "should not create self-references");
@@ -2127,7 +2128,7 @@ pub fn caller() -> Config {
     Config::new(8080)
 }
 ";
-        let known: std::collections::HashSet<String> = ["Config", "new", "caller"]
+        let known: HashSet<String> = ["Config", "new", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -2135,7 +2136,7 @@ pub fn caller() -> Config {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         assert!(
@@ -2586,7 +2587,7 @@ impl Foo {
     }
 }
 ";
-        let known: std::collections::HashSet<String> = ["helper", "method", "Foo"]
+        let known: HashSet<String> = ["helper", "method", "Foo"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -2594,7 +2595,7 @@ impl Foo {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let helper_ref = refs
@@ -2615,7 +2616,7 @@ fn caller() {
     let f = |x: i32| target() + x;
 }
 ";
-        let known: std::collections::HashSet<String> = ["target", "caller"]
+        let known: HashSet<String> = ["target", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -2623,7 +2624,7 @@ fn caller() {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let target_ref = refs
@@ -2646,7 +2647,7 @@ fn make() -> Config {
     Config { port: 8080 }
 }
 ";
-        let known: std::collections::HashSet<String> = ["Config", "make"]
+        let known: HashSet<String> = ["Config", "make"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -2654,7 +2655,7 @@ fn make() -> Config {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let config_ref = refs
@@ -2675,7 +2676,7 @@ fn caller() -> String {
     setup().to_string()
 }
 ";
-        let known: std::collections::HashSet<String> = ["setup", "caller", "to_string"]
+        let known: HashSet<String> = ["setup", "caller", "to_string"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -2683,7 +2684,7 @@ fn caller() -> String {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         assert!(
@@ -2705,7 +2706,7 @@ fn caller() -> i32 {
     target() + target() + target()
 }
 ";
-        let known: std::collections::HashSet<String> = ["target", "caller"]
+        let known: HashSet<String> = ["target", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -2713,7 +2714,7 @@ fn caller() -> i32 {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let target_refs: Vec<_> = refs.iter().filter(|r| r.target_name == "target").collect();
@@ -2734,7 +2735,7 @@ fn builder() {
     Config + 1
 }
 ";
-        let known: std::collections::HashSet<String> = ["Config", "builder"]
+        let known: HashSet<String> = ["Config", "builder"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -2742,7 +2743,7 @@ fn builder() {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         assert!(
@@ -2762,7 +2763,7 @@ fn caller(target: i32) -> i32 {
     target + 1
 }
 ";
-        let known: std::collections::HashSet<String> = ["target", "caller"]
+        let known: HashSet<String> = ["target", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -2770,7 +2771,7 @@ fn caller(target: i32) -> i32 {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         assert!(
@@ -2978,7 +2979,7 @@ pub fn documented_with_code() {}
 
     #[test]
     fn test_qualified_path_to_file_cross_crate() {
-        let mut crate_map = std::collections::HashMap::new();
+        let mut crate_map = HashMap::new();
         crate_map.insert("shared".to_string(), "shared".to_string());
         crate_map.insert("core_lib".to_string(), "libs/core".to_string());
 
@@ -3021,7 +3022,7 @@ pub fn documented_with_code() {}
 
     #[test]
     fn test_qualified_path_returns_mod_rs_variant() {
-        let crate_map = std::collections::HashMap::<String, String>::new();
+        let crate_map = HashMap::<String, String>::new();
         let candidates =
             qualified_path_to_files_with_crates("crate::server::tools::Config", &crate_map);
         assert_eq!(candidates.len(), 2);
@@ -3038,7 +3039,7 @@ pub fn make() -> Config {
     Config { port: 8080 }
 }
 ";
-        let known: std::collections::HashSet<String> = ["Config", "make"]
+        let known: HashSet<String> = ["Config", "make"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3046,7 +3047,7 @@ pub fn make() -> Config {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let config_ref = refs.iter().find(|r| r.target_name == "Config").unwrap();
@@ -3066,7 +3067,7 @@ pub fn make() -> Config {
     Config { port: 8080 }
 }
 ";
-        let known: std::collections::HashSet<String> = ["Config", "make"]
+        let known: HashSet<String> = ["Config", "make"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3074,7 +3075,7 @@ pub fn make() -> Config {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let config_ref = refs.iter().find(|r| r.target_name == "Config").unwrap();
@@ -3114,7 +3115,7 @@ impl MyStruct {
     pub fn helper(&self) {}
 }
 ";
-        let known: std::collections::HashSet<String> = ["do_work", "helper", "MyStruct"]
+        let known: HashSet<String> = ["do_work", "helper", "MyStruct"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3122,7 +3123,7 @@ impl MyStruct {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let helper_ref = refs
@@ -3220,11 +3221,11 @@ pub fn caller() -> i32 {
     helper()
 }
 ";
-        let known_symbols: std::collections::HashSet<String> = ["helper", "caller"]
+        let known_symbols: HashSet<String> = ["helper", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let crate_map = std::collections::HashMap::new();
+        let crate_map = HashMap::new();
         let refs = extract_refs(source, "src/lib.rs", &known_symbols, &crate_map).unwrap();
         let caller_to_helper = refs
             .iter()
@@ -3256,7 +3257,7 @@ pub fn caller(db: &Database) {
     db.search();
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "search", "Database"]
+        let known: HashSet<String> = ["caller", "search", "Database"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3264,7 +3265,7 @@ pub fn caller(db: &Database) {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let search_ref = refs
@@ -3294,7 +3295,7 @@ pub fn updater(config: &mut Config) {
     config.reload();
 }
 ";
-        let known: std::collections::HashSet<String> = ["updater", "reload", "Config"]
+        let known: HashSet<String> = ["updater", "reload", "Config"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3302,7 +3303,7 @@ pub fn updater(config: &mut Config) {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let reload_ref = refs
@@ -3334,7 +3335,7 @@ pub fn caller() {
     db.query();
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "open", "query", "Database"]
+        let known: HashSet<String> = ["caller", "open", "query", "Database"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3342,7 +3343,7 @@ pub fn caller() {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let query_ref = refs
@@ -3375,7 +3376,7 @@ pub fn caller() {
     config.validate();
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "validate", "Config"]
+        let known: HashSet<String> = ["caller", "validate", "Config"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3383,7 +3384,7 @@ pub fn caller() {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let validate_ref = refs
@@ -3416,7 +3417,7 @@ pub fn caller() -> Result<(), String> {
     Ok(())
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "open", "query", "Database"]
+        let known: HashSet<String> = ["caller", "open", "query", "Database"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3424,7 +3425,7 @@ pub fn caller() -> Result<(), String> {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let query_ref = refs
@@ -3455,7 +3456,7 @@ pub fn caller() {
     server.start();
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "start", "Server"]
+        let known: HashSet<String> = ["caller", "start", "Server"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3463,7 +3464,7 @@ pub fn caller() {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let start_ref = refs
@@ -3489,7 +3490,7 @@ pub fn caller(x: i32) {
     x.search();
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "search"]
+        let known: HashSet<String> = ["caller", "search"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3497,7 +3498,7 @@ pub fn caller(x: i32) {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let search_ref = refs
@@ -3525,7 +3526,7 @@ pub fn caller(config: Config) {
     config.save();
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "save", "Config"]
+        let known: HashSet<String> = ["caller", "save", "Config"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3533,7 +3534,7 @@ pub fn caller(config: Config) {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let save_ref = refs
@@ -3568,7 +3569,7 @@ mod tests {
     }
 }
 ";
-        let known: std::collections::HashSet<String> =
+        let known: HashSet<String> =
             ["Database", "open_in_memory", "test_creates_schema"]
                 .iter()
                 .map(|s| (*s).to_string())
@@ -3577,7 +3578,7 @@ mod tests {
             source,
             "src/db.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         assert!(
@@ -3605,7 +3606,7 @@ pub fn caller() {
     let _g = crate::status::StatusGuard::new("test");
 }
 "#;
-        let known: std::collections::HashSet<String> = ["set", "StatusGuard", "new", "caller"]
+        let known: HashSet<String> = ["set", "StatusGuard", "new", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3613,7 +3614,7 @@ pub fn caller() {
             source,
             "src/status.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
 
@@ -3654,7 +3655,7 @@ pub fn caller() {
     crate::indexer::docs::pending_docs();
 }
 ";
-        let known: std::collections::HashSet<String> = ["pending_docs", "caller"]
+        let known: HashSet<String> = ["pending_docs", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3662,7 +3663,7 @@ pub fn caller() {
             source,
             "src/server/mod.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
 
@@ -3695,7 +3696,7 @@ pub fn caller() {
     let _ = Foo::bar();
 }
 ";
-        let known: std::collections::HashSet<String> = ["Foo", "bar", "caller"]
+        let known: HashSet<String> = ["Foo", "bar", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3703,7 +3704,7 @@ pub fn caller() {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
 
@@ -3725,12 +3726,12 @@ fn caller() {
     let db = Database::new();
 }
 ";
-        let known: std::collections::HashSet<String> = ["Database", "new", "caller"]
+        let known: HashSet<String> = ["Database", "new", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
         let refs =
-            extract_refs(source, "test.rs", &known, &std::collections::HashMap::new()).unwrap();
+            extract_refs(source, "test.rs", &known, &HashMap::new()).unwrap();
         let new_ref = refs
             .iter()
             .find(|r| r.source_name == "caller" && r.target_name == "new");
@@ -3756,12 +3757,12 @@ fn caller() {
     let v = Vec::new();
 }
 ";
-        let known: std::collections::HashSet<String> = ["MyStruct", "new", "caller"]
+        let known: HashSet<String> = ["MyStruct", "new", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
         let refs =
-            extract_refs(source, "test.rs", &known, &std::collections::HashMap::new()).unwrap();
+            extract_refs(source, "test.rs", &known, &HashMap::new()).unwrap();
         let new_refs: Vec<_> = refs
             .iter()
             .filter(|r| r.source_name == "caller" && r.target_name == "new")
@@ -3789,8 +3790,8 @@ fn caller() {
         let known = ["Status", "clear", "caller"]
             .into_iter()
             .map(String::from)
-            .collect::<std::collections::HashSet<_>>();
-        let crate_map = std::collections::HashMap::<String, String>::new();
+            .collect::<HashSet<_>>();
+        let crate_map = HashMap::<String, String>::new();
         let refs = extract_refs(source, "src/status.rs", &known, &crate_map).unwrap();
         let has_clear_ref = refs
             .iter()
@@ -3817,8 +3818,8 @@ fn caller() {
         let known = ["Foo", "Bar", "new", "caller"]
             .into_iter()
             .map(String::from)
-            .collect::<std::collections::HashSet<_>>();
-        let crate_map = std::collections::HashMap::<String, String>::new();
+            .collect::<HashSet<_>>();
+        let crate_map = HashMap::<String, String>::new();
         let refs = extract_refs(source, "src/lib.rs", &known, &crate_map).unwrap();
         let new_refs: Vec<_> = refs
             .iter()
@@ -3838,7 +3839,7 @@ pub fn handle_impact() {
     super::resolve_symbol();
 }
 ";
-        let known: std::collections::HashSet<String> = ["handle_impact", "resolve_symbol"]
+        let known: HashSet<String> = ["handle_impact", "resolve_symbol"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3846,7 +3847,7 @@ pub fn handle_impact() {
             source,
             "src/server/tools/impact.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let rs_ref = refs
@@ -3872,7 +3873,7 @@ pub fn caller() {
     self::helper();
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "helper"]
+        let known: HashSet<String> = ["caller", "helper"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3880,7 +3881,7 @@ pub fn caller() {
             source,
             "src/server/tools/mod.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let helper_ref = refs
@@ -3914,7 +3915,7 @@ pub fn caller(db: &Database) -> Result<(), String> {
     Ok(())
 }
 ";
-        let known: std::collections::HashSet<String> = ["caller", "file_count", "Database"]
+        let known: HashSet<String> = ["caller", "file_count", "Database"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3922,7 +3923,7 @@ pub fn caller(db: &Database) -> Result<(), String> {
             source,
             "src/lib.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
         let fc_ref = refs
@@ -3958,7 +3959,7 @@ pub fn handle_impact() {
         crate::indexer::store::store_symbols(&db, mod_file_id, &mod_syms).unwrap();
         crate::indexer::store::store_symbols(&db, impact_file_id, &impact_syms).unwrap();
 
-        let known: std::collections::HashSet<String> = ["resolve_symbol", "handle_impact"]
+        let known: HashSet<String> = ["resolve_symbol", "handle_impact"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -3966,7 +3967,7 @@ pub fn handle_impact() {
             impact_source,
             "src/tools/impact.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
 
@@ -3975,7 +3976,7 @@ pub fn handle_impact() {
         assert!(count > 0, "should store at least one ref");
 
         let callers = db
-            .get_callers("resolve_symbol", "src/tools/mod.rs", false, Some("high"))
+            .callers("resolve_symbol", "src/tools/mod.rs", false, Some("high"))
             .unwrap();
         assert!(
             callers.iter().any(|c| c.name == "handle_impact"),
@@ -4006,7 +4007,7 @@ pub fn caller(db: &Database) {
         crate::indexer::store::store_symbols(&db, db_file_id, &db_syms).unwrap();
         crate::indexer::store::store_symbols(&db, caller_file_id, &caller_syms).unwrap();
 
-        let known: std::collections::HashSet<String> = ["Database", "file_count", "caller"]
+        let known: HashSet<String> = ["Database", "file_count", "caller"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
@@ -4014,7 +4015,7 @@ pub fn caller(db: &Database) {
             caller_source,
             "src/caller.rs",
             &known,
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
         )
         .unwrap();
 
@@ -4022,7 +4023,7 @@ pub fn caller(db: &Database) {
         db.store_symbol_refs_fast(&refs, &map).unwrap();
 
         let callers = db
-            .get_callers("file_count", "src/db.rs", false, Some("high"))
+            .callers("file_count", "src/db.rs", false, Some("high"))
             .unwrap();
         assert!(
             callers.iter().any(|c| c.name == "caller"),
@@ -4041,13 +4042,12 @@ pub fn caller(db: &Database) {
         crate::indexer::index_repo(&db, &config).unwrap();
 
         let callees = db
-            .get_callees("ensure_indexed", "src/main.rs", false)
+            .callees("ensure_indexed", "src/main.rs", false)
             .unwrap();
         assert!(
             callees
                 .iter()
-                .any(|c| c.name == "open"
-                    && c.impl_type.as_deref() == Some("Database")),
+                .any(|c| c.name == "open" && c.impl_type.as_deref() == Some("Database")),
             "ensure_indexed should have Database::open as callee, got: {callees:#?}"
         );
         assert!(
@@ -4056,21 +4056,17 @@ pub fn caller(db: &Database) {
         );
 
         let oor_callees = db
-            .get_callees("open_or_index", "src/main.rs", false)
+            .callees("open_or_index", "src/main.rs", false)
             .unwrap();
         assert!(
             oor_callees
                 .iter()
-                .any(|c| c.name == "open"
-                    && c.impl_type.as_deref() == Some("Database")),
+                .any(|c| c.name == "open" && c.impl_type.as_deref() == Some("Database")),
             "open_or_index should have Database::open as callee, got: {oor_callees:#?}"
         );
         assert!(
-            oor_callees
-                .iter()
-                .any(|c| c.name == "ensure_indexed"),
+            oor_callees.iter().any(|c| c.name == "ensure_indexed"),
             "open_or_index should have ensure_indexed as callee, got: {oor_callees:#?}"
         );
     }
-
 }

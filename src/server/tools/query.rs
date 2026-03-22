@@ -1,3 +1,4 @@
+use super::QueryScope;
 use crate::db::Database;
 use std::fmt::Write;
 
@@ -8,18 +9,18 @@ use std::fmt::Write;
 pub fn handle_query(
     db: &Database,
     query: &str,
-    scope: Option<&str>,
+    scope: Option<QueryScope>,
     kind: Option<&str>,
     attribute: Option<&str>,
     signature: Option<&str>,
     path: Option<&str>,
     limit: Option<i64>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let scope = scope.unwrap_or("symbols");
+    let scope = scope.unwrap_or(QueryScope::Symbols);
     let mut output = String::new();
 
     match scope {
-        "symbols" => {
+        QueryScope::Symbols => {
             format_symbols(
                 db,
                 query,
@@ -31,9 +32,9 @@ pub fn handle_query(
                 &mut output,
             )?;
         }
-        "docs" => format_docs(db, query, &mut output)?,
-        "files" => format_files(db, query, path, limit, &mut output)?,
-        "all" => {
+        QueryScope::Docs => format_docs(db, query, &mut output)?,
+        QueryScope::Files => format_files(db, query, path, limit, &mut output)?,
+        QueryScope::All => {
             format_symbols(
                 db,
                 query,
@@ -46,15 +47,11 @@ pub fn handle_query(
             )?;
             format_docs(db, query, &mut output)?;
         }
-        "doc_comments" => format_doc_comments(db, query, kind, path, limit, &mut output)?,
-        "bodies" => format_body_search(db, query, kind, path, limit, &mut output)?,
-        "strings" => format_string_search(db, query, kind, path, limit, &mut output)?,
-        other => {
-            return Err(format!(
-                "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, bodies, strings, all"
-            )
-            .into());
+        QueryScope::DocComments => {
+            format_doc_comments(db, query, kind, path, limit, &mut output)?;
         }
+        QueryScope::Bodies => format_body_search(db, query, kind, path, limit, &mut output)?,
+        QueryScope::Strings => format_string_search(db, query, kind, path, limit, &mut output)?,
     }
 
     if output.is_empty() {
@@ -86,11 +83,11 @@ fn format_symbols(
     } else if let Some(p) = path {
         // Path is the most selective seed for wildcard queries;
         // check it before signature to avoid LIMIT truncation
-        db.get_symbols_by_path_prefix(p)?
+        db.symbols_by_path_prefix(p)?
     } else if let Some(sig) = signature {
         db.search_symbols_by_signature(sig)?
     } else if kind.is_some() {
-        db.get_symbols_by_path_prefix("")?
+        db.symbols_by_path_prefix("")?
     } else {
         return Ok(());
     };
@@ -192,7 +189,7 @@ fn format_files(
     limit: Option<i64>,
     output: &mut String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let all_paths = db.get_all_file_paths()?;
+    let all_paths = db.all_file_paths()?;
     let query_lower = query.to_lowercase();
     let mut files: Vec<&str> = all_paths
         .iter()
@@ -270,7 +267,7 @@ fn format_body_search(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let is_wildcard = query == "*" || query.is_empty();
     let mut symbols = if is_wildcard {
-        db.get_symbols_by_path_prefix(path.unwrap_or(""))?
+        db.symbols_by_path_prefix(path.unwrap_or(""))?
             .into_iter()
             .filter(|s| s.body.is_some())
             .collect()
@@ -492,8 +489,17 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            handle_query(&db, "parse", Some("symbols"), None, None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "parse",
+            Some(QueryScope::Symbols),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(!result.is_empty());
         assert!(result.contains("parse_config"));
     }
@@ -508,7 +514,7 @@ mod tests {
         let result = handle_query(
             &db,
             "serialization",
-            Some("docs"),
+            Some(QueryScope::Docs),
             None,
             None,
             None,
@@ -574,7 +580,7 @@ mod tests {
         let result = handle_query(
             &db,
             "parse_config",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             None,
             None,
             None,
@@ -629,7 +635,7 @@ mod tests {
         let result = handle_query(
             &db,
             "Config",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             Some("struct"),
             None,
             None,
@@ -646,7 +652,7 @@ mod tests {
         let result = handle_query(
             &db,
             "Config",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             Some("function"),
             None,
             None,
@@ -686,7 +692,7 @@ mod tests {
         let r = handle_query(
             &db,
             "",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             None,
             None,
             Some("pub fn"),
@@ -701,7 +707,7 @@ mod tests {
         let r = handle_query(
             &db,
             "",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             None,
             None,
             Some("pub fn"),
@@ -716,7 +722,7 @@ mod tests {
         let r = handle_query(
             &db,
             "",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             None,
             None,
             Some("pub fn"),
@@ -731,7 +737,7 @@ mod tests {
         let r = handle_query(
             &db,
             "",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             None,
             None,
             Some("pub fn"),
@@ -786,7 +792,7 @@ mod tests {
         let result = handle_query(
             &db,
             "",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             None,
             Some("test"),
             Some("Database"),
@@ -863,7 +869,7 @@ mod tests {
         let result = handle_query(
             &db,
             "TOML",
-            Some("doc_comments"),
+            Some(QueryScope::DocComments),
             None,
             None,
             None,
@@ -888,7 +894,7 @@ mod tests {
         let result = handle_query(
             &db,
             "nonexistent",
-            Some("doc_comments"),
+            Some(QueryScope::DocComments),
             None,
             None,
             None,
@@ -942,7 +948,7 @@ mod tests {
         let result = handle_query(
             &db,
             "tokio::spawn",
-            Some("bodies"),
+            Some(QueryScope::Bodies),
             None,
             None,
             None,
@@ -971,7 +977,7 @@ mod tests {
         let result = handle_query(
             &db,
             "nonexistent_call",
-            Some("bodies"),
+            Some(QueryScope::Bodies),
             None,
             None,
             None,
@@ -999,15 +1005,33 @@ mod tests {
         store_symbols(&db, file_id, &symbols).unwrap();
 
         // Without limit: all 10
-        let result =
-            handle_query(&db, "fn_", Some("symbols"), None, None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "fn_",
+            Some(QueryScope::Symbols),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         for i in 0..10 {
             assert!(result.contains(&format!("fn_{i}")));
         }
 
         // With limit=3: only 3
-        let result =
-            handle_query(&db, "fn_", Some("symbols"), None, None, None, None, Some(3)).unwrap();
+        let result = handle_query(
+            &db,
+            "fn_",
+            Some(QueryScope::Symbols),
+            None,
+            None,
+            None,
+            None,
+            Some(3),
+        )
+        .unwrap();
         let count = result.matches("**fn_").count();
         assert_eq!(count, 3, "limit=3 should return 3 results, got {count}");
     }
@@ -1049,7 +1073,17 @@ mod tests {
         );
 
         // Explicit "all" scope should include both
-        let result = handle_query(&db, "parse", Some("all"), None, None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "parse",
+            Some(QueryScope::All),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(result.contains("parse"));
         assert!(
             result.contains("## Documentation"),
@@ -1147,7 +1181,7 @@ mod tests {
         let result = handle_query(
             &db,
             "*",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             Some("struct"),
             None,
             None,
@@ -1229,8 +1263,17 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            handle_query(&db, "parse", Some("symbols"), None, None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "parse",
+            Some(QueryScope::Symbols),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         // parse_beta (3 refs) should appear before parse_alpha (1 ref)
         let beta_pos = result.find("parse_beta").unwrap();
         let alpha_pos = result.find("parse_alpha").unwrap();
@@ -1271,7 +1314,7 @@ mod tests {
         let result = handle_query(
             &db,
             "*",
-            Some("symbols"),
+            Some(QueryScope::Symbols),
             Some("function"),
             None,
             Some("-> Result"),
@@ -1327,9 +1370,18 @@ mod tests {
 
     #[test]
     fn test_signature_matches_type_alias_suffix() {
-        assert!(signature_matches("pub fn open() -> SqlResult<Self>", "-> Result"));
-        assert!(signature_matches("fn foo() -> anyhow::Result<()>", "-> Result"));
-        assert!(!signature_matches("pub fn open() -> SqlResult<Self>", "-> String"));
+        assert!(signature_matches(
+            "pub fn open() -> SqlResult<Self>",
+            "-> Result"
+        ));
+        assert!(signature_matches(
+            "fn foo() -> anyhow::Result<()>",
+            "-> Result"
+        ));
+        assert!(!signature_matches(
+            "pub fn open() -> SqlResult<Self>",
+            "-> String"
+        ));
     }
 
     #[test]
@@ -1382,8 +1434,17 @@ mod tests {
             ],
         )
         .unwrap();
-        let result =
-            handle_query(&db, "PRAGMA", Some("strings"), None, None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "PRAGMA",
+            Some(QueryScope::Strings),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(
             result.contains("setup_db"),
             "Should find 'PRAGMA' inside string literal, got:\n{result}"
@@ -1417,8 +1478,17 @@ mod tests {
             }],
         )
         .unwrap();
-        let result =
-            handle_query(&db, "Hello", Some("strings"), None, None, None, None, None).unwrap();
+        let result = handle_query(
+            &db,
+            "Hello",
+            Some(QueryScope::Strings),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(
             result.contains("Hello, world!"),
             "Should show the matching string literal, got:\n{result}"

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 #[must_use]
 fn docs_rs_url(name: &str, version: &str) -> String {
     format!("https://docs.rs/{name}/{version}/{name}/")
@@ -40,15 +42,15 @@ pub struct PendingDoc {
 pub fn pending_docs(
     db: &crate::db::Database,
 ) -> Result<Vec<PendingDoc>, Box<dyn std::error::Error>> {
-    let deps = db.get_direct_dependencies()?;
+    let deps = db.direct_dependencies()?;
     let mut pending = Vec::new();
 
     for dep in &deps {
-        let existing = db.get_docs_for_dependency(&dep.name)?;
+        let existing = db.docs_for_dependency(&dep.name)?;
         if !existing.is_empty() {
             continue;
         }
-        let Some(dep_id) = db.get_dependency_id(&dep.name)? else {
+        let Some(dep_id) = db.dependency_id(&dep.name)? else {
             continue;
         };
         pending.push(PendingDoc {
@@ -218,9 +220,9 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
         let dep_names: Vec<String> = pending.iter().map(|p| p.name.clone()).collect();
         match super::cargo_doc::generate_cargo_docs(repo_path, &dep_names) {
             Ok(docs) => {
-                for (name, module_docs) in docs {
-                    if let Some(p) = pending.iter().find(|p| p.name == name) {
-                        for md in module_docs {
+                for crate_docs in docs {
+                    if let Some(p) = pending.iter().find(|p| p.name == crate_docs.name) {
+                        for md in crate_docs.modules {
                             results.push(FetchedDoc {
                                 dep_id: p.dep_id,
                                 source: "cargo_doc",
@@ -239,7 +241,7 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
     }
 
     // Phase 2: Network fetch for any deps cargo doc missed
-    let covered: std::collections::HashSet<&str> = results
+    let covered: HashSet<&str> = results
         .iter()
         .filter_map(|r| pending.iter().find(|p| p.dep_id == r.dep_id))
         .map(|p| p.name.as_str())

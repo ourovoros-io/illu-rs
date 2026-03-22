@@ -6,7 +6,7 @@ pub fn handle_crate_impact(
     db: &Database,
     symbol_name: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let crate_count = db.get_crate_count()?;
+    let crate_count = db.crate_count()?;
     if crate_count <= 1 {
         return Ok("Crate impact analysis requires a workspace with multiple crates.".into());
     }
@@ -20,13 +20,13 @@ pub fn handle_crate_impact(
     let _ = writeln!(output, "## Crate Impact: {symbol_name}\n");
 
     let sym = &symbols[0];
-    let defining_crate = db.get_crate_for_file(&sym.file_path)?;
+    let defining_crate = db.crate_for_file(&sym.file_path)?;
     if let Some(ref stored_crate) = defining_crate {
         let _ = writeln!(output, "**Defined in crate:** `{}`\n", stored_crate.name);
     }
 
     if let Some(ref stored_crate) = defining_crate {
-        let dependents = db.get_transitive_crate_dependents(stored_crate.id)?;
+        let dependents = db.transitive_crate_dependents(stored_crate.id)?;
         if dependents.is_empty() {
             let _ = writeln!(output, "No other crates depend on `{}`.", stored_crate.name);
         } else {

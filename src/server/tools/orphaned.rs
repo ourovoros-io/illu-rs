@@ -8,7 +8,7 @@ pub fn handle_orphaned(
     kind: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Get unused symbols (no incoming references)
-    let mut unused = db.get_unreferenced_symbols(path, false)?;
+    let mut unused = db.unreferenced_symbols(path, false)?;
 
     // Filter to meaningful kinds
     unused.retain(|s| {
@@ -27,7 +27,7 @@ pub fn handle_orphaned(
     // Further filter to symbols with no test coverage
     let mut orphaned = Vec::new();
     for sym in unused {
-        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
+        let tests = db.related_tests(&sym.name, sym.impl_type.as_deref())?;
         if tests.is_empty() {
             orphaned.push(sym);
         }
@@ -174,10 +174,10 @@ mod tests {
 
         // test_db calls open_in_memory — so open_in_memory has a caller
         let open_id = db
-            .get_symbol_id("open_in_memory", "src/lib.rs")
+            .symbol_id("open_in_memory", "src/lib.rs")
             .unwrap()
             .unwrap();
-        let test_id = db.get_symbol_id("test_db", "src/lib.rs").unwrap().unwrap();
+        let test_id = db.symbol_id("test_db", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(test_id, open_id, "call", "high", None)
             .unwrap();
 

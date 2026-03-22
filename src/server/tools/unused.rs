@@ -13,7 +13,7 @@ pub fn handle_unused(
         return handle_untested(db, path, kind, include_private);
     }
 
-    let mut symbols = db.get_unreferenced_symbols(path, include_private)?;
+    let mut symbols = db.unreferenced_symbols(path, include_private)?;
 
     if let Some(k) = kind {
         let k_lower = k.to_lowercase();
@@ -56,7 +56,7 @@ fn handle_untested(
     include_private: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let prefix = path.unwrap_or("");
-    let mut symbols = db.get_symbols_by_path_prefix_filtered(prefix, include_private)?;
+    let mut symbols = db.symbols_by_path_prefix_filtered(prefix, include_private)?;
 
     // Only functions are meaningfully "testable"
     let kind_filter = kind.unwrap_or("function");
@@ -74,7 +74,7 @@ fn handle_untested(
     // Filter to symbols with no related tests
     let mut untested = Vec::new();
     for sym in symbols {
-        let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
+        let tests = db.related_tests(&sym.name, sym.impl_type.as_deref())?;
         if tests.is_empty() {
             untested.push(sym);
         }

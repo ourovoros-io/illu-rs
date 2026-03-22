@@ -6,7 +6,7 @@ use std::path::Path;
 
 pub struct CrossQueryOpts<'a> {
     pub query: &'a str,
-    pub scope: Option<&'a str>,
+    pub scope: Option<super::QueryScope>,
     pub kind: Option<&'a str>,
     pub attribute: Option<&'a str>,
     pub signature: Option<&'a str>,

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let symbols = db.get_symbols_by_path_prefix_filtered(path, false)?;
+    let symbols = db.symbols_by_path_prefix_filtered(path, false)?;
     if symbols.is_empty() {
         return Ok(format!("No public symbols found under '{path}'."));
     }
@@ -24,7 +24,7 @@ pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std:
             continue;
         }
 
-        let callers = db.get_callers(&sym.name, &sym.file_path, false, None)?;
+        let callers = db.callers(&sym.name, &sym.file_path, false, None)?;
         let mut ext_files: Vec<&str> = callers
             .iter()
             .filter(|c| !c.file_path.starts_with(path))
@@ -169,11 +169,11 @@ mod tests {
 
         // External caller -> public_fn
         let caller_id = db
-            .get_symbol_id("caller", "src/other/main.rs")
+            .symbol_id("caller", "src/other/main.rs")
             .unwrap()
             .unwrap();
         let public_fn_id = db
-            .get_symbol_id("public_fn", "src/mod/lib.rs")
+            .symbol_id("public_fn", "src/mod/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(caller_id, public_fn_id, "call", "high", None)
@@ -181,11 +181,11 @@ mod tests {
 
         // Internal caller -> internal_fn
         let helper_id = db
-            .get_symbol_id("helper", "src/mod/helper.rs")
+            .symbol_id("helper", "src/mod/helper.rs")
             .unwrap()
             .unwrap();
         let internal_fn_id = db
-            .get_symbol_id("internal_fn", "src/mod/lib.rs")
+            .symbol_id("internal_fn", "src/mod/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(helper_id, internal_fn_id, "call", "high", None)
@@ -271,11 +271,11 @@ mod tests {
 
         // Low-confidence external ref (simulates module path resolution)
         let dispatch_id = db
-            .get_symbol_id("dispatch", "src/server.rs")
+            .symbol_id("dispatch", "src/server.rs")
             .unwrap()
             .unwrap();
         let handle_id = db
-            .get_symbol_id("handle_context", "src/tools/context.rs")
+            .symbol_id("handle_context", "src/tools/context.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(dispatch_id, handle_id, "call", "low", None)

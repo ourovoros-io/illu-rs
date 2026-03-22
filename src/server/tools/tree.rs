@@ -2,7 +2,7 @@ use crate::db::Database;
 use std::fmt::Write;
 
 pub fn handle_tree(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let file_counts = db.get_file_symbol_counts(path)?;
+    let file_counts = db.file_symbol_counts(path)?;
 
     if file_counts.is_empty() {
         return Ok(format!(

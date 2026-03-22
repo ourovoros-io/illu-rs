@@ -1,4 +1,5 @@
 use crate::db::Database;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 
 pub fn handle_impact(
@@ -24,14 +25,14 @@ pub fn handle_impact(
     let _ = writeln!(output, "## Impact Analysis: {symbol_name}\n");
 
     // Crate-level summary (only for workspace projects with >1 crate)
-    let crate_count = db.get_crate_count()?;
+    let crate_count = db.crate_count()?;
     if crate_count > 1 {
         let first_sym = &symbols[0];
-        if let Ok(Some(defining_crate)) = db.get_crate_for_file(&first_sym.file_path) {
+        if let Ok(Some(defining_crate)) = db.crate_for_file(&first_sym.file_path) {
             let _ = writeln!(output, "### Affected Crates\n");
             let _ = writeln!(output, "- **{}** (defined here)", defining_crate.name);
 
-            if let Ok(dep_crates) = db.get_transitive_crate_dependents(defining_crate.id) {
+            if let Ok(dep_crates) = db.transitive_crate_dependents(defining_crate.id) {
                 for c in &dep_crates {
                     let _ = writeln!(output, "- **{}**", c.name);
                 }
@@ -49,7 +50,7 @@ pub fn handle_impact(
 
     let mut current_depth: i64 = -1;
     let mut depth_buf: Vec<&crate::db::ImpactEntry> = Vec::new();
-    let mut seen_in_impact: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut seen_in_impact: HashSet<&str> = HashSet::new();
 
     for dep in &dependents {
         if dep.depth != current_depth {
@@ -78,7 +79,7 @@ pub fn handle_impact(
     }
 
     // Related tests section — exclude tests already shown in impact
-    let all_tests = db.get_related_tests(base_name, base_impl)?;
+    let all_tests = db.related_tests(base_name, base_impl)?;
     let tests: Vec<_> = all_tests
         .iter()
         .filter(|t| !seen_in_impact.contains(t.name.as_str()))
@@ -109,8 +110,8 @@ fn render_depth_entries(
 
     if should_summarize {
         // Group by file
-        let mut file_counts: std::collections::BTreeMap<&str, usize> =
-            std::collections::BTreeMap::new();
+        let mut file_counts: BTreeMap<&str, usize> =
+            BTreeMap::new();
         for dep in entries {
             *file_counts.entry(&dep.file_path).or_default() += 1;
         }
@@ -149,7 +150,7 @@ mod tests {
     use crate::indexer::store::store_symbols;
 
     fn sym_id(db: &Database, name: &str, file: &str) -> SymbolId {
-        db.get_symbol_id(name, file).unwrap().unwrap()
+        db.symbol_id(name, file).unwrap().unwrap()
     }
 
     #[test]
@@ -229,9 +230,9 @@ mod tests {
         .unwrap();
 
         // Create a reference from caller_fn -> base_fn
-        let base_id = db.get_symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
+        let base_id = db.symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
         let caller_id = db
-            .get_symbol_id("caller_fn", "src/lib.rs")
+            .symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(caller_id, base_id, "call", "high", None)
@@ -295,9 +296,9 @@ mod tests {
         )
         .unwrap();
 
-        let base_id = db.get_symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
-        let mid_id = db.get_symbol_id("mid_fn", "src/lib.rs").unwrap().unwrap();
-        let top_id = db.get_symbol_id("top_fn", "src/lib.rs").unwrap().unwrap();
+        let base_id = db.symbol_id("base_fn", "src/lib.rs").unwrap().unwrap();
+        let mid_id = db.symbol_id("mid_fn", "src/lib.rs").unwrap().unwrap();
+        let top_id = db.symbol_id("top_fn", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(mid_id, base_id, "call", "high", None)
             .unwrap();
         db.insert_symbol_ref(top_id, mid_id, "call", "high", None)
@@ -479,13 +480,13 @@ mod tests {
         .unwrap();
 
         // test_via_wrapper -> wrapper_fn -> inner_fn
-        let inner_id = db.get_symbol_id("inner_fn", "src/lib.rs").unwrap().unwrap();
+        let inner_id = db.symbol_id("inner_fn", "src/lib.rs").unwrap().unwrap();
         let wrapper_id = db
-            .get_symbol_id("wrapper_fn", "src/lib.rs")
+            .symbol_id("wrapper_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
         let test_id = db
-            .get_symbol_id("test_via_wrapper", "src/lib.rs")
+            .symbol_id("test_via_wrapper", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(wrapper_id, inner_id, "call", "high", None)
@@ -587,11 +588,11 @@ mod tests {
         .unwrap();
 
         let shared_sym_id = db
-            .get_symbol_id("SharedType", "shared/src/lib.rs")
+            .symbol_id("SharedType", "shared/src/lib.rs")
             .unwrap()
             .unwrap();
         let app_sym_id = db
-            .get_symbol_id("use_it", "app/src/main.rs")
+            .symbol_id("use_it", "app/src/main.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(app_sym_id, shared_sym_id, "type_ref", "high", None)
@@ -646,9 +647,9 @@ mod tests {
         )
         .unwrap();
 
-        let open_id = db.get_symbol_id("open", "src/lib.rs").unwrap().unwrap();
+        let open_id = db.symbol_id("open", "src/lib.rs").unwrap().unwrap();
         let caller_id = db
-            .get_symbol_id("caller_fn", "src/lib.rs")
+            .symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(caller_id, open_id, "call", "high", None)
@@ -701,9 +702,9 @@ mod tests {
         )
         .unwrap();
 
-        let open_id = db.get_symbol_id("open", "src/lib.rs").unwrap().unwrap();
+        let open_id = db.symbol_id("open", "src/lib.rs").unwrap().unwrap();
         let test_id = db
-            .get_symbol_id("test_open", "src/lib.rs")
+            .symbol_id("test_open", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(test_id, open_id, "call", "high", None)
@@ -775,9 +776,9 @@ mod tests {
         )
         .unwrap();
 
-        let base_id = db.get_symbol_id("base", "src/lib.rs").unwrap().unwrap();
-        let mid_id = db.get_symbol_id("mid", "src/lib.rs").unwrap().unwrap();
-        let top_id = db.get_symbol_id("top", "src/lib.rs").unwrap().unwrap();
+        let base_id = db.symbol_id("base", "src/lib.rs").unwrap().unwrap();
+        let mid_id = db.symbol_id("mid", "src/lib.rs").unwrap().unwrap();
+        let top_id = db.symbol_id("top", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(mid_id, base_id, "call", "high", None)
             .unwrap();
         db.insert_symbol_ref(top_id, mid_id, "call", "high", None)

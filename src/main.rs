@@ -3,8 +3,8 @@ use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
 use illu_rs::server::IlluServer;
 use illu_rs::server::tools::{
-    context::handle_context, docs::handle_docs, impact::handle_impact, query::handle_query,
-    tree::handle_tree,
+    QueryScope, context::handle_context, docs::handle_docs, impact::handle_impact,
+    query::handle_query, tree::handle_tree,
 };
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
@@ -583,10 +583,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             kind,
         }) => {
             let db = open_or_index(repo_path)?;
+            let scope: QueryScope = serde_json::from_value(serde_json::Value::String(scope))?;
             let result = handle_query(
                 &db,
                 &search,
-                Some(&scope),
+                Some(scope),
                 kind.as_deref(),
                 None,
                 None,

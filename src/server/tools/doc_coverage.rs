@@ -9,7 +9,7 @@ pub fn handle_doc_coverage(
     include_private: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let prefix = path.unwrap_or("");
-    let mut symbols = db.get_symbols_by_path_prefix_filtered(prefix, include_private)?;
+    let mut symbols = db.symbols_by_path_prefix_filtered(prefix, include_private)?;
 
     // Filter out non-documentable kinds
     symbols.retain(|s| {

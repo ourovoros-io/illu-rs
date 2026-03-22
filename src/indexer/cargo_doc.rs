@@ -11,8 +11,11 @@ fn has_nightly_rustdoc() -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Named docs for a single crate: (`crate_name`, per-module docs).
-pub type CrateDocs = (String, Vec<ModuleDoc>);
+/// Named docs for a single crate.
+pub struct CrateDocs {
+    pub name: String,
+    pub modules: Vec<ModuleDoc>,
+}
 
 /// Generate dependency docs using `cargo +nightly doc` JSON output.
 /// Returns a list of `(dep_name, module_docs)` pairs.
@@ -89,7 +92,10 @@ pub fn generate_cargo_docs(
         };
 
         if !module_docs.is_empty() {
-            results.push((dep_name.clone(), module_docs));
+            results.push(CrateDocs {
+                name: dep_name.clone(),
+                modules: module_docs,
+            });
         }
     }
 

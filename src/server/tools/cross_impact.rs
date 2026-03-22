@@ -40,10 +40,7 @@ pub fn handle_cross_impact(
                 refs.len()
             );
             for r in &refs {
-                let qualified = match &r.impl_type {
-                    Some(it) => format!("{it}::{}", r.name),
-                    None => r.name.clone(),
-                };
+                let qualified = super::format_qualified(&r.name, r.impl_type.as_deref());
                 let _ = writeln!(out, "- `{qualified}` ({}:{})", r.file_path, r.line_start);
             }
             out.push('\n');

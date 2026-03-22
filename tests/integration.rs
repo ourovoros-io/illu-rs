@@ -2,7 +2,7 @@
 
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{context, docs, impact, overview, query};
+use illu_rs::server::tools::{QueryScope, context, docs, impact, overview, query};
 
 fn setup_indexed_db() -> (tempfile::TempDir, Database) {
     let dir = tempfile::TempDir::new().unwrap();
@@ -90,7 +90,7 @@ impl std::fmt::Display for Config {
     };
     index_repo(&db, &config).unwrap();
 
-    let serde_id = db.get_dependency_id("serde").unwrap().unwrap();
+    let serde_id = db.dependency_id("serde").unwrap().unwrap();
     db.store_doc(
         serde_id,
         "docs.rs",
@@ -104,8 +104,17 @@ impl std::fmt::Display for Config {
 #[test]
 fn test_query_tool_symbols() {
     let (_dir, db) = setup_indexed_db();
-    let result =
-        query::handle_query(&db, "parse", Some("symbols"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "parse",
+        Some(QueryScope::Symbols),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(
         result.contains("parse_config"),
         "query should find parse_config"
@@ -115,8 +124,17 @@ fn test_query_tool_symbols() {
 #[test]
 fn test_query_tool_docs() {
     let (_dir, db) = setup_indexed_db();
-    let result =
-        query::handle_query(&db, "serializ", Some("docs"), None, None, None, None, None).unwrap();
+    let result = query::handle_query(
+        &db,
+        "serializ",
+        Some(QueryScope::Docs),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(result.contains("Serde"), "query should find serde docs");
 }
 
@@ -283,7 +301,7 @@ fn test_workspace_query_across_crates() {
     let result = query::handle_query(
         &db,
         "SharedConfig",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,
@@ -380,7 +398,7 @@ fn test_query_doc_snippet() {
     let result = query::handle_query(
         &db,
         "parse_config",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,

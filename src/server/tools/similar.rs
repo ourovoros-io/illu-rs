@@ -2,7 +2,11 @@ use crate::db::{Database, StoredSymbol};
 use std::collections::HashSet;
 use std::fmt::Write;
 
-type ScoredSymbol<'a> = (usize, &'a StoredSymbol, Vec<String>);
+struct ScoredSymbol<'a> {
+    score: usize,
+    symbol: &'a StoredSymbol,
+    reasons: Vec<String>,
+}
 
 use super::NOISY_CALLEES;
 
@@ -21,7 +25,7 @@ pub fn handle_similar(
     let return_type = target_sig.split_once("->").map(|(_, r)| r.trim());
 
     let target_callees: HashSet<String> = db
-        .get_callees_by_name(&target.name, None, false)?
+        .callees_by_name(&target.name, None, false)?
         .into_iter()
         .map(|(name, _)| name)
         .collect();
@@ -57,7 +61,7 @@ pub fn handle_similar(
     }
 
     // Also include same-file siblings of the same kind as candidates
-    let mut same_file = db.get_symbols_by_path_prefix(&target.file_path)?;
+    let mut same_file = db.symbols_by_path_prefix(&target.file_path)?;
     for s in same_file.drain(..) {
         if s.kind == target.kind
             && (s.name != target.name || s.file_path != target.file_path)
@@ -89,17 +93,18 @@ pub fn handle_similar(
     }
 
     let _ = writeln!(output, "### Similar Symbols\n");
-    for (i, (score, sym, reasons)) in scored.iter().enumerate() {
-        let cqname = super::qualified_name(sym);
+    for (i, entry) in scored.iter().enumerate() {
+        let cqname = super::qualified_name(entry.symbol);
         let _ = writeln!(
             output,
-            "{}. **{cqname}** (score: {score}) — {}:{}",
+            "{}. **{cqname}** (score: {}) — {}:{}",
             i + 1,
-            sym.file_path,
-            sym.line_start
+            entry.score,
+            entry.symbol.file_path,
+            entry.symbol.line_start
         );
-        let _ = writeln!(output, "   `{}`", sym.signature);
-        let _ = writeln!(output, "   Shared: {}", reasons.join(", "));
+        let _ = writeln!(output, "   `{}`", entry.symbol.signature);
+        let _ = writeln!(output, "   Shared: {}", entry.reasons.join(", "));
     }
 
     Ok(output)
@@ -137,11 +142,15 @@ fn score_candidates<'a>(
             target_callees,
         )?;
         if score >= 2 {
-            scored.push((score, candidate, reasons));
+            scored.push(ScoredSymbol {
+                score,
+                symbol: candidate,
+                reasons,
+            });
         }
     }
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by(|a, b| b.score.cmp(&a.score));
     scored.truncate(10);
     Ok(scored)
 }
@@ -195,7 +204,7 @@ fn score_one(
 
     if !target_callees.is_empty() {
         let cand_callees: HashSet<String> = db
-            .get_callees_by_name(cand_name, None, false)?
+            .callees_by_name(cand_name, None, false)?
             .into_iter()
             .map(|(name, _)| name)
             .collect();

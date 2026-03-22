@@ -15,19 +15,17 @@ pub fn handle_hotspots(
 
     // Most referenced (fragile to change)
     let most_referenced =
-        db.get_most_referenced_symbols_filtered(max, prefix, Some("high"), exclude_tests)?;
+        db.most_referenced_symbols_filtered(max, prefix, Some("high"), exclude_tests)?;
     if !most_referenced.is_empty() {
         let _ = writeln!(output, "### Most Referenced (fragile to change)\n");
-        for (i, (name, file, count, impl_type)) in most_referenced.iter().enumerate() {
-            let display = if let Some(it) = impl_type {
-                format!("{it}::{name}")
-            } else {
-                name.clone()
-            };
+        for (i, entry) in most_referenced.iter().enumerate() {
+            let display = super::format_qualified(&entry.name, entry.impl_type.as_deref());
             let _ = writeln!(
                 output,
-                "{}. **{display}** ({file}) — {count} references",
-                i + 1
+                "{}. **{display}** ({}) — {} references",
+                i + 1,
+                entry.file_path,
+                entry.count
             );
         }
         let _ = writeln!(output);
@@ -35,7 +33,7 @@ pub fn handle_hotspots(
 
     // Most referencing (high complexity)
     let most_referencing =
-        db.get_most_referencing_symbols(max, prefix, Some("high"), exclude_tests)?;
+        db.most_referencing_symbols(max, prefix, Some("high"), exclude_tests)?;
     if !most_referencing.is_empty() {
         let _ = writeln!(output, "### Most Referencing (high complexity)\n");
         for (i, (name, file, count)) in most_referencing.iter().enumerate() {
@@ -45,15 +43,11 @@ pub fn handle_hotspots(
     }
 
     // Largest functions (by line span) — targeted SQL query
-    let largest = db.get_largest_functions(max, prefix, exclude_tests)?;
+    let largest = db.largest_functions(max, prefix, exclude_tests)?;
     if !largest.is_empty() {
         let _ = writeln!(output, "### Largest Functions (by line count)\n");
         for (i, func) in largest.iter().enumerate() {
-            let qname = if let Some(it) = &func.impl_type {
-                format!("{it}::{}", func.name)
-            } else {
-                func.name.clone()
-            };
+            let qname = super::format_qualified(&func.name, func.impl_type.as_deref());
             let _ = writeln!(
                 output,
                 "{}. **{qname}** ({}) — {} lines",

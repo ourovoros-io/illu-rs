@@ -1,6 +1,7 @@
 use crate::indexer::parser::{SymbolKind, Visibility};
 use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Connection, Result as SqlResult, params};
+use std::collections::{HashMap, HashSet};
 
 macro_rules! newtype_id {
     ($name:ident) => {
@@ -26,7 +27,12 @@ newtype_id!(SymbolId);
 newtype_id!(CrateId);
 newtype_id!(DepId);
 
-pub type SymbolRefCount = (String, String, i64, Option<String>);
+pub struct SymbolRefCount {
+    pub name: String,
+    pub file_path: String,
+    pub count: i64,
+    pub impl_type: Option<String>,
+}
 
 fn escape_like(s: &str) -> String {
     s.replace('%', r"\%").replace('_', r"\_")
@@ -323,9 +329,8 @@ impl Database {
             |row| row.get(0),
         )?;
         if !has_version {
-            self.conn.execute_batch(
-                "ALTER TABLE metadata ADD COLUMN index_version TEXT;",
-            )?;
+            self.conn
+                .execute_batch("ALTER TABLE metadata ADD COLUMN index_version TEXT;")?;
         }
 
         Ok(())
@@ -486,7 +491,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_commit_hash(&self, repo_path: &str) -> SqlResult<Option<String>> {
+    pub fn commit_hash(&self, repo_path: &str) -> SqlResult<Option<String>> {
         let mut stmt = self
             .conn
             .prepare("SELECT commit_hash FROM metadata WHERE repo_path = ?1")?;
@@ -497,10 +502,10 @@ impl Database {
         }
     }
 
-    pub fn get_index_version(&self, repo_path: &str) -> SqlResult<Option<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT index_version FROM metadata WHERE repo_path = ?1",
-        )?;
+    pub fn index_version(&self, repo_path: &str) -> SqlResult<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT index_version FROM metadata WHERE repo_path = ?1")?;
         let mut rows = stmt.query_map(params![repo_path], |row| row.get(0))?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
@@ -508,7 +513,7 @@ impl Database {
         }
     }
 
-    pub fn get_direct_dependencies(&self) -> SqlResult<Vec<StoredDep>> {
+    pub fn direct_dependencies(&self) -> SqlResult<Vec<StoredDep>> {
         let mut stmt = self.conn.prepare(
             "SELECT name, version, is_direct, repository_url, features \
              FROM dependencies WHERE is_direct = 1",
@@ -528,7 +533,7 @@ impl Database {
     }
 
     /// Get all indexed file paths.
-    pub fn get_all_file_paths(&self) -> SqlResult<Vec<String>> {
+    pub fn all_file_paths(&self) -> SqlResult<Vec<String>> {
         let mut stmt = self.conn.prepare("SELECT path FROM files")?;
         let mut paths = Vec::new();
         let mut rows = stmt.query([])?;
@@ -538,7 +543,7 @@ impl Database {
         Ok(paths)
     }
 
-    pub fn get_file_symbol_counts(&self, prefix: &str) -> SqlResult<Vec<FileSymbolCount>> {
+    pub fn file_symbol_counts(&self, prefix: &str) -> SqlResult<Vec<FileSymbolCount>> {
         let pattern = format!("{}%", escape_like(prefix));
         let mut stmt = self.conn.prepare(
             "SELECT f.path, COUNT(s.id) \
@@ -562,11 +567,11 @@ impl Database {
     }
 
     /// Get all distinct symbol names (for ref extraction matching).
-    pub fn get_all_symbol_names(&self) -> SqlResult<std::collections::HashSet<String>> {
+    pub fn all_symbol_names(&self) -> SqlResult<HashSet<String>> {
         let mut stmt = self
             .conn
             .prepare("SELECT DISTINCT name FROM symbols WHERE kind != 'use' AND kind != 'mod'")?;
-        let mut names = std::collections::HashSet::new();
+        let mut names = HashSet::new();
         let mut rows = stmt.query([])?;
         while let Some(row) = rows.next()? {
             let name: String = row.get(0)?;
@@ -576,9 +581,7 @@ impl Database {
     }
 
     /// Get all distinct (name, `impl_type`) pairs for fuzzy matching.
-    pub fn get_all_distinct_symbol_names(
-        &self,
-    ) -> SqlResult<Vec<(String, Option<String>)>> {
+    pub fn all_distinct_symbol_names(&self) -> SqlResult<Vec<(String, Option<String>)>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT s.name, s.impl_type FROM symbols s \
              WHERE s.kind != 'use' AND s.kind != 'mod'",
@@ -594,7 +597,7 @@ impl Database {
     }
 
     /// Look up a symbol's DB id by name and file path.
-    pub fn get_symbol_id(&self, name: &str, file_path: &str) -> SqlResult<Option<SymbolId>> {
+    pub fn symbol_id(&self, name: &str, file_path: &str) -> SqlResult<Option<SymbolId>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.id FROM symbols s \
              JOIN files f ON f.id = s.file_id \
@@ -609,7 +612,7 @@ impl Database {
     }
 
     /// Look up a symbol's DB id by name and impl type.
-    pub fn get_symbol_id_in_impl(
+    pub fn symbol_id_in_impl(
         &self,
         name: &str,
         impl_type: &str,
@@ -625,7 +628,7 @@ impl Database {
     }
 
     /// Look up any symbol's DB id by name (first match).
-    pub fn get_symbol_id_by_name(&self, name: &str) -> SqlResult<Option<SymbolId>> {
+    pub fn symbol_id_by_name(&self, name: &str) -> SqlResult<Option<SymbolId>> {
         let mut stmt = self
             .conn
             .prepare("SELECT id FROM symbols WHERE name = ?1 LIMIT 1")?;
@@ -662,7 +665,7 @@ impl Database {
         Ok(CrateId(self.conn.last_insert_rowid()))
     }
 
-    pub fn get_crate_by_name(&self, name: &str) -> SqlResult<Option<StoredCrate>> {
+    pub fn crate_by_name(&self, name: &str) -> SqlResult<Option<StoredCrate>> {
         let mut stmt = self
             .conn
             .prepare("SELECT id, name, path FROM crates WHERE name = ?1")?;
@@ -673,7 +676,7 @@ impl Database {
         }
     }
 
-    pub fn get_all_crates(&self) -> SqlResult<Vec<StoredCrate>> {
+    pub fn all_crates(&self) -> SqlResult<Vec<StoredCrate>> {
         let mut stmt = self.conn.prepare("SELECT id, name, path FROM crates")?;
         let mut results = Vec::new();
         let mut rows = stmt.query([])?;
@@ -683,12 +686,12 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_crate_count(&self) -> SqlResult<i64> {
+    pub fn crate_count(&self) -> SqlResult<i64> {
         self.conn
             .query_row("SELECT COUNT(*) FROM crates", [], |row| row.get(0))
     }
 
-    pub fn get_all_crate_deps(&self) -> SqlResult<Vec<(String, String)>> {
+    pub fn all_crate_deps(&self) -> SqlResult<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare(
             "SELECT sc.name, tc.name \
              FROM crate_deps cd \
@@ -717,7 +720,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_crate_dependents(&self, crate_id: CrateId) -> SqlResult<Vec<StoredCrate>> {
+    pub fn crate_dependents(&self, crate_id: CrateId) -> SqlResult<Vec<StoredCrate>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.id, c.name, c.path \
              FROM crate_deps cd \
@@ -732,7 +735,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_transitive_crate_dependents(
+    pub fn transitive_crate_dependents(
         &self,
         crate_id: CrateId,
     ) -> SqlResult<Vec<StoredCrate>> {
@@ -772,7 +775,7 @@ impl Database {
         Ok(FileId(self.conn.last_insert_rowid()))
     }
 
-    pub fn get_crate_for_file(&self, file_path: &str) -> SqlResult<Option<StoredCrate>> {
+    pub fn crate_for_file(&self, file_path: &str) -> SqlResult<Option<StoredCrate>> {
         let mut stmt = self.conn.prepare(
             "SELECT c.id, c.name, c.path \
              FROM files f \
@@ -786,7 +789,7 @@ impl Database {
         }
     }
 
-    pub fn get_dependency_id(&self, name: &str) -> SqlResult<Option<DepId>> {
+    pub fn dependency_id(&self, name: &str) -> SqlResult<Option<DepId>> {
         let mut stmt = self
             .conn
             .prepare("SELECT id FROM dependencies WHERE name = ?1")?;
@@ -797,7 +800,7 @@ impl Database {
         }
     }
 
-    pub fn get_file_hash(&self, path: &str) -> SqlResult<Option<String>> {
+    pub fn file_hash(&self, path: &str) -> SqlResult<Option<String>> {
         let mut stmt = self
             .conn
             .prepare("SELECT content_hash FROM files WHERE path = ?1")?;
@@ -897,7 +900,7 @@ impl Database {
     }
 
     /// Get low-confidence refs with highest fan-in (most likely noise sources).
-    pub fn get_noisy_symbols(&self, limit: i64) -> SqlResult<Vec<(String, i64)>> {
+    pub fn noisy_symbols(&self, limit: i64) -> SqlResult<Vec<(String, i64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT ts.name, COUNT(*) as cnt \
              FROM symbol_refs sr \
@@ -968,15 +971,15 @@ impl Database {
 
     /// Find test functions that directly or transitively call the given symbol.
     /// Walks the call graph upward (who calls me?) filtering for `#[test]` attributes.
-    pub fn get_related_tests(
+    pub fn related_tests(
         &self,
         symbol_name: &str,
         impl_type: Option<&str>,
     ) -> SqlResult<Vec<TestEntry>> {
-        self.get_related_tests_with_depth(symbol_name, impl_type, 5)
+        self.related_tests_with_depth(symbol_name, impl_type, 5)
     }
 
-    pub fn get_related_tests_with_depth(
+    pub fn related_tests_with_depth(
         &self,
         symbol_name: &str,
         impl_type: Option<&str>,
@@ -1014,7 +1017,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_all_files_with_hashes(&self) -> SqlResult<Vec<FileRecord>> {
+    pub fn all_files_with_hashes(&self) -> SqlResult<Vec<FileRecord>> {
         let mut stmt = self
             .conn
             .prepare("SELECT path, content_hash, crate_id FROM files")?;
@@ -1183,7 +1186,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_dependency_by_name(&self, name: &str) -> SqlResult<Option<StoredDep>> {
+    pub fn dependency_by_name(&self, name: &str) -> SqlResult<Option<StoredDep>> {
         let mut stmt = self.conn.prepare(
             "SELECT name, version, is_direct, repository_url, features \
              FROM dependencies WHERE name = ?1",
@@ -1242,7 +1245,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_doc_by_module(&self, dep_name: &str, module: &str) -> SqlResult<Option<DocResult>> {
+    pub fn doc_by_module(&self, dep_name: &str, module: &str) -> SqlResult<Option<DocResult>> {
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version, d.module \
              FROM docs d \
@@ -1258,7 +1261,7 @@ impl Database {
     }
 
     /// List all module names stored for a dependency.
-    pub fn get_doc_modules(&self, dep_name: &str) -> SqlResult<Vec<String>> {
+    pub fn doc_modules(&self, dep_name: &str) -> SqlResult<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT d.module \
              FROM docs d \
@@ -1337,7 +1340,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_trait_impls_for_type(&self, type_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
+    pub fn trait_impls_for_type(&self, type_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
         let mut stmt = self.conn.prepare(
             "SELECT ti.type_name, ti.trait_name, f.path, \
                     ti.line_start, ti.line_end \
@@ -1353,7 +1356,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_trait_impls_for_trait(&self, trait_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
+    pub fn trait_impls_for_trait(&self, trait_name: &str) -> SqlResult<Vec<StoredTraitImpl>> {
         // Match exact name OR last segment (e.g. "ProtocolHandler"
         // matches "iroh::protocol::ProtocolHandler")
         let like_suffix = format!("%::{trait_name}");
@@ -1373,7 +1376,7 @@ impl Database {
     }
 
     /// Find symbols whose line range overlaps any of the given ranges.
-    pub fn get_symbols_at_lines(
+    pub fn symbols_at_lines(
         &self,
         file_path: &str,
         line_ranges: &[(i64, i64)],
@@ -1381,7 +1384,7 @@ impl Database {
         if line_ranges.is_empty() {
             return Ok(Vec::new());
         }
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = HashSet::new();
         let mut results = Vec::new();
         let mut stmt = self.conn.prepare(
             "SELECT s.name, s.kind, s.visibility, f.path, \
@@ -1404,11 +1407,11 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_symbols_by_path_prefix(&self, path_prefix: &str) -> SqlResult<Vec<StoredSymbol>> {
-        self.get_symbols_by_path_prefix_filtered(path_prefix, false)
+    pub fn symbols_by_path_prefix(&self, path_prefix: &str) -> SqlResult<Vec<StoredSymbol>> {
+        self.symbols_by_path_prefix_filtered(path_prefix, false)
     }
 
-    pub fn get_symbols_by_path_prefix_filtered(
+    pub fn symbols_by_path_prefix_filtered(
         &self,
         path_prefix: &str,
         include_private: bool,
@@ -1521,7 +1524,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees(
+    pub fn callees(
         &self,
         symbol_name: &str,
         source_file: &str,
@@ -1565,7 +1568,7 @@ impl Database {
     }
 
     /// Find symbols that directly reference the given symbol (reverse of `get_callees`).
-    pub fn get_callers(
+    pub fn callers(
         &self,
         symbol_name: &str,
         target_file: &str,
@@ -1609,7 +1612,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callees_by_name(
+    pub fn callees_by_name(
         &self,
         symbol_name: &str,
         min_confidence: Option<&str>,
@@ -1643,7 +1646,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_callers_by_name(
+    pub fn callers_by_name(
         &self,
         symbol_name: &str,
         min_confidence: Option<&str>,
@@ -1677,7 +1680,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_docs_for_dependency(&self, name: &str) -> SqlResult<Vec<DocResult>> {
+    pub fn docs_for_dependency(&self, name: &str) -> SqlResult<Vec<DocResult>> {
         let mut stmt = self.conn.prepare(
             "SELECT d.content, d.source, dep.name, dep.version, d.module \
              FROM docs d \
@@ -1716,9 +1719,9 @@ impl Database {
     /// Build an in-memory lookup table mapping symbol names to their DB IDs.
     /// Three tiers: (name, file), (name, impl type), and name-only.
     pub fn build_symbol_id_map(&self) -> SqlResult<SymbolIdMap> {
-        let mut file_qualified = std::collections::HashMap::new();
-        let mut impl_qualified = std::collections::HashMap::new();
-        let mut name_only = std::collections::HashMap::new();
+        let mut file_qualified = HashMap::new();
+        let mut impl_qualified = HashMap::new();
+        let mut name_only = HashMap::new();
 
         let mut stmt = self.conn.prepare(
             "SELECT s.id, s.name, f.path, s.impl_type \
@@ -1769,7 +1772,7 @@ impl Database {
         Ok(count)
     }
 
-    pub fn get_unreferenced_symbols(
+    pub fn unreferenced_symbols(
         &self,
         path_prefix: Option<&str>,
         include_private: bool,
@@ -1825,7 +1828,7 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_file_dependencies(
+    pub fn file_dependencies(
         &self,
         path_prefix: &str,
         min_confidence: Option<&str>,
@@ -1851,16 +1854,16 @@ impl Database {
     }
 
     /// Get symbols with the most incoming references (most depended-upon).
-    pub fn get_most_referenced_symbols(
+    pub fn most_referenced_symbols(
         &self,
         limit: i64,
         path_prefix: &str,
         min_confidence: Option<&str>,
     ) -> SqlResult<Vec<SymbolRefCount>> {
-        self.get_most_referenced_symbols_filtered(limit, path_prefix, min_confidence, false)
+        self.most_referenced_symbols_filtered(limit, path_prefix, min_confidence, false)
     }
 
-    pub fn get_most_referenced_symbols_filtered(
+    pub fn most_referenced_symbols_filtered(
         &self,
         limit: i64,
         path_prefix: &str,
@@ -1900,13 +1903,18 @@ impl Database {
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
         while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?));
+            results.push(SymbolRefCount {
+                name: row.get(0)?,
+                file_path: row.get(1)?,
+                count: row.get(2)?,
+                impl_type: row.get(3)?,
+            });
         }
         Ok(results)
     }
 
     /// Get symbols with the most outgoing references (most complex).
-    pub fn get_most_referencing_symbols(
+    pub fn most_referencing_symbols(
         &self,
         limit: i64,
         path_prefix: &str,
@@ -2009,7 +2017,7 @@ impl Database {
     }
 
     /// Get the largest functions by line count, scoped to a path prefix.
-    pub fn get_largest_functions(
+    pub fn largest_functions(
         &self,
         limit: i64,
         path_prefix: &str,
@@ -2111,7 +2119,7 @@ impl Database {
 
     /// Get direct call-type callees of a symbol by name.
     /// Supports `Type::method` syntax (e.g., `HcfsClient::upload`).
-    pub fn get_direct_callees(&self, symbol_name: &str) -> SqlResult<Vec<String>> {
+    pub fn direct_callees(&self, symbol_name: &str) -> SqlResult<Vec<String>> {
         if let Some((impl_type, method)) = symbol_name.split_once("::") {
             let mut stmt = self.conn.prepare(
                 "SELECT DISTINCT t.name
@@ -2148,9 +2156,9 @@ pub struct CrossRef {
 }
 
 pub struct SymbolIdMap {
-    file_qualified: std::collections::HashMap<(String, String), SymbolId>,
-    impl_qualified: std::collections::HashMap<(String, String), SymbolId>,
-    name_only: std::collections::HashMap<String, SymbolId>,
+    file_qualified: HashMap<(String, String), SymbolId>,
+    impl_qualified: HashMap<(String, String), SymbolId>,
+    name_only: HashMap<String, SymbolId>,
 }
 
 impl SymbolIdMap {
@@ -2354,7 +2362,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let id = db.insert_crate("hcfs-server", "hcfs-server").unwrap();
         assert!(id.0 > 0);
-        let c = db.get_crate_by_name("hcfs-server").unwrap().unwrap();
+        let c = db.crate_by_name("hcfs-server").unwrap().unwrap();
         assert_eq!(c.name, "hcfs-server");
         assert_eq!(c.path, "hcfs-server");
     }
@@ -2365,7 +2373,7 @@ mod tests {
         let shared = db.insert_crate("shared", "shared").unwrap();
         let server = db.insert_crate("server", "server").unwrap();
         db.insert_crate_dep(server, shared).unwrap();
-        let deps = db.get_crate_dependents(shared).unwrap();
+        let deps = db.crate_dependents(shared).unwrap();
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "server");
     }
@@ -2378,7 +2386,7 @@ mod tests {
         let cli = db.insert_crate("cli", "cli").unwrap();
         db.insert_crate_dep(client, shared).unwrap();
         db.insert_crate_dep(cli, client).unwrap();
-        let deps = db.get_transitive_crate_dependents(shared).unwrap();
+        let deps = db.transitive_crate_dependents(shared).unwrap();
         assert_eq!(deps.len(), 2);
         let names: Vec<&str> = deps.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"client"));
@@ -2393,7 +2401,7 @@ mod tests {
             .insert_file_with_crate("mylib/src/lib.rs", "hash", crate_id)
             .unwrap();
         assert!(file_id.0 > 0);
-        let c = db.get_crate_for_file("mylib/src/lib.rs").unwrap().unwrap();
+        let c = db.crate_for_file("mylib/src/lib.rs").unwrap().unwrap();
         assert_eq!(c.name, "mylib");
     }
 
@@ -2401,18 +2409,18 @@ mod tests {
     fn test_metadata_roundtrip() {
         let db = Database::open_in_memory().unwrap();
         db.set_metadata("/tmp/repo", "abc123", "0.1.0").unwrap();
-        let hash = db.get_commit_hash("/tmp/repo").unwrap();
+        let hash = db.commit_hash("/tmp/repo").unwrap();
         assert_eq!(hash, Some("abc123".to_string()));
-        let version = db.get_index_version("/tmp/repo").unwrap();
+        let version = db.index_version("/tmp/repo").unwrap();
         assert_eq!(version, Some("0.1.0".to_string()));
     }
 
     #[test]
     fn test_metadata_missing() {
         let db = Database::open_in_memory().unwrap();
-        let hash = db.get_commit_hash("/nonexistent").unwrap();
+        let hash = db.commit_hash("/nonexistent").unwrap();
         assert_eq!(hash, None);
-        let version = db.get_index_version("/nonexistent").unwrap();
+        let version = db.index_version("/nonexistent").unwrap();
         assert_eq!(version, None);
     }
 
@@ -2481,7 +2489,7 @@ mod tests {
         // Second insert with same key should be ignored (INSERT OR IGNORE)
         db.insert_trait_impl("MyStruct", "Display", file_id, 1, 5)
             .unwrap();
-        let impls = db.get_trait_impls_for_type("MyStruct").unwrap();
+        let impls = db.trait_impls_for_type("MyStruct").unwrap();
         assert_eq!(impls.len(), 1);
     }
 
@@ -2610,7 +2618,7 @@ mod tests {
             .unwrap();
         db.insert_trait_impl("Other", "Display", file_id, 32, 40)
             .unwrap();
-        let impls = db.get_trait_impls_for_type("MyStruct").unwrap();
+        let impls = db.trait_impls_for_type("MyStruct").unwrap();
         assert_eq!(impls.len(), 2);
         let traits: Vec<&str> = impls.iter().map(|i| i.trait_name.as_str()).collect();
         assert!(traits.contains(&"Display"));
@@ -2627,7 +2635,7 @@ mod tests {
             .unwrap();
         db.insert_trait_impl("MyStruct", "Debug", file_id, 32, 40)
             .unwrap();
-        let impls = db.get_trait_impls_for_trait("Display").unwrap();
+        let impls = db.trait_impls_for_trait("Display").unwrap();
         assert_eq!(impls.len(), 2);
         let types: Vec<&str> = impls.iter().map(|i| i.type_name.as_str()).collect();
         assert!(types.contains(&"MyStruct"));
@@ -2657,7 +2665,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let results = db.get_symbols_by_path_prefix("src/server/").unwrap();
+        let results = db.symbols_by_path_prefix("src/server/").unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].name, "serve");
         assert_eq!(results[1].name, "handle");
@@ -2710,7 +2718,7 @@ mod tests {
             .unwrap();
         db.insert_symbol_ref(caller_id, callee_b_id, "type_ref", "high", None)
             .unwrap();
-        let callees = db.get_callees("caller", "src/lib.rs", false).unwrap();
+        let callees = db.callees("caller", "src/lib.rs", false).unwrap();
         assert_eq!(callees.len(), 2);
         let names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
         assert!(names.contains(&"callee_a"));
@@ -2774,18 +2782,18 @@ mod tests {
         db.delete_file_data("src/lib.rs").unwrap();
 
         // Verify: file gone
-        assert!(db.get_file_hash("src/lib.rs").unwrap().is_none());
+        assert!(db.file_hash("src/lib.rs").unwrap().is_none());
         // Verify: symbol gone
         let syms = db.search_symbols("Foo").unwrap();
         assert!(syms.is_empty());
         // Verify: trait impl gone
-        let impls = db.get_trait_impls_for_type("Foo").unwrap();
+        let impls = db.trait_impls_for_type("Foo").unwrap();
         assert!(impls.is_empty());
         // Verify: ref to deleted symbol gone
-        let callees = db.get_callees("main", "src/main.rs", false).unwrap();
+        let callees = db.callees("main", "src/main.rs", false).unwrap();
         assert!(callees.is_empty());
         // Verify: second file still intact
-        assert!(db.get_file_hash("src/main.rs").unwrap().is_some());
+        assert!(db.file_hash("src/main.rs").unwrap().is_some());
     }
 
     #[test]
@@ -3033,7 +3041,7 @@ mod tests {
         // Symbols and files should be gone
         let syms = db.search_symbols("Foo").unwrap();
         assert!(syms.is_empty());
-        let hash = db.get_file_hash("src/lib.rs").unwrap();
+        let hash = db.file_hash("src/lib.rs").unwrap();
         assert!(hash.is_none());
 
         // Docs and dependencies should remain
@@ -3064,24 +3072,24 @@ mod tests {
             .unwrap();
 
         // get_doc_by_module finds summary
-        let summary = db.get_doc_by_module("tokio", "").unwrap().unwrap();
+        let summary = db.doc_by_module("tokio", "").unwrap().unwrap();
         assert_eq!(summary.content, "Tokio summary");
         assert_eq!(summary.module, "");
 
         // get_doc_by_module finds specific module
-        let net = db.get_doc_by_module("tokio", "net").unwrap().unwrap();
+        let net = db.doc_by_module("tokio", "net").unwrap().unwrap();
         assert_eq!(net.content, "Tokio net module");
         assert_eq!(net.module, "net");
 
         // get_doc_by_module returns None for unknown module
-        assert!(db.get_doc_by_module("tokio", "io").unwrap().is_none());
+        assert!(db.doc_by_module("tokio", "io").unwrap().is_none());
 
         // get_doc_modules lists non-empty modules
-        let modules = db.get_doc_modules("tokio").unwrap();
+        let modules = db.doc_modules("tokio").unwrap();
         assert_eq!(modules, vec!["net", "sync"]);
 
         // get_docs_for_dependency returns all docs including module field
-        let all = db.get_docs_for_dependency("tokio").unwrap();
+        let all = db.docs_for_dependency("tokio").unwrap();
         assert_eq!(all.len(), 3);
         assert!(all.iter().any(|d| d.module == "net"));
     }
@@ -3133,12 +3141,12 @@ mod tests {
         }
 
         // Range overlapping alpha only
-        let results = db.get_symbols_at_lines("src/lib.rs", &[(5, 8)]).unwrap();
+        let results = db.symbols_at_lines("src/lib.rs", &[(5, 8)]).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "alpha");
 
         // Range overlapping beta and gamma
-        let results = db.get_symbols_at_lines("src/lib.rs", &[(20, 35)]).unwrap();
+        let results = db.symbols_at_lines("src/lib.rs", &[(20, 35)]).unwrap();
         assert_eq!(results.len(), 2);
         let names: Vec<&str> = results.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"beta"));
@@ -3146,21 +3154,21 @@ mod tests {
 
         // Multiple ranges with deduplication
         let results = db
-            .get_symbols_at_lines("src/lib.rs", &[(1, 5), (3, 8)])
+            .symbols_at_lines("src/lib.rs", &[(1, 5), (3, 8)])
             .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "alpha");
 
         // No overlap
-        let results = db.get_symbols_at_lines("src/lib.rs", &[(11, 14)]).unwrap();
+        let results = db.symbols_at_lines("src/lib.rs", &[(11, 14)]).unwrap();
         assert!(results.is_empty());
 
         // Empty ranges
-        let results = db.get_symbols_at_lines("src/lib.rs", &[]).unwrap();
+        let results = db.symbols_at_lines("src/lib.rs", &[]).unwrap();
         assert!(results.is_empty());
 
         // Wrong file
-        let results = db.get_symbols_at_lines("src/other.rs", &[(1, 50)]).unwrap();
+        let results = db.symbols_at_lines("src/other.rs", &[(1, 50)]).unwrap();
         assert!(results.is_empty());
     }
 
@@ -3252,17 +3260,17 @@ mod tests {
             )
             .unwrap();
 
-        let my_id = db.get_symbol_id_in_impl("method", "MyStruct").unwrap();
+        let my_id = db.symbol_id_in_impl("method", "MyStruct").unwrap();
         assert!(my_id.is_some());
 
-        let other_id = db.get_symbol_id_in_impl("method", "OtherStruct").unwrap();
+        let other_id = db.symbol_id_in_impl("method", "OtherStruct").unwrap();
         assert!(other_id.is_some());
 
         // Different ids
         assert_ne!(my_id, other_id);
 
         // Non-existent impl type
-        let missing = db.get_symbol_id_in_impl("method", "Nonexistent").unwrap();
+        let missing = db.symbol_id_in_impl("method", "Nonexistent").unwrap();
         assert!(missing.is_none());
     }
 
@@ -3295,21 +3303,21 @@ mod tests {
         db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
             .unwrap();
 
-        let callers = db.get_callers_by_name("target_fn", None, false).unwrap();
+        let callers = db.callers_by_name("target_fn", None, false).unwrap();
         assert_eq!(callers.len(), 1);
         assert_eq!(callers[0].0, "caller_fn");
         assert_eq!(callers[0].1, "src/lib.rs");
 
         // No callers for caller_fn
-        let empty = db.get_callers_by_name("caller_fn", None, false).unwrap();
+        let empty = db.callers_by_name("caller_fn", None, false).unwrap();
         assert!(empty.is_empty());
 
         // Type refs should be excluded
         db.insert_symbol_ref(caller_id, target_id, "type_ref", "high", None)
             .unwrap();
-        let callers = db.get_callers_by_name("target_fn", None, false).unwrap();
+        let callers = db.callers_by_name("target_fn", None, false).unwrap();
         assert_eq!(callers.len(), 1, "type_ref should not appear in callers");
-        let callees = db.get_callees_by_name("caller_fn", None, false).unwrap();
+        let callees = db.callees_by_name("caller_fn", None, false).unwrap();
         assert_eq!(callees.len(), 1, "type_ref should not appear in callees");
     }
 
@@ -3346,12 +3354,12 @@ mod tests {
         db.insert_symbol_ref(src_id, tgt_id, "call", "high", None)
             .unwrap();
 
-        let edges = db.get_file_dependencies("src/", None).unwrap();
+        let edges = db.file_dependencies("src/", None).unwrap();
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0], ("src/a.rs".to_string(), "src/b.rs".to_string()));
 
         // Wrong prefix returns empty
-        let empty = db.get_file_dependencies("other/", None).unwrap();
+        let empty = db.file_dependencies("other/", None).unwrap();
         assert!(empty.is_empty());
     }
 
@@ -3384,7 +3392,7 @@ mod tests {
 
         db.insert_symbol_ref(s1, s2, "call", "high", None).unwrap();
 
-        let edges = db.get_file_dependencies("src/", None).unwrap();
+        let edges = db.file_dependencies("src/", None).unwrap();
         assert!(edges.is_empty());
     }
 
@@ -3437,11 +3445,11 @@ mod tests {
             .unwrap();
 
         // Without filter: both edges
-        let all = db.get_file_dependencies("src/", None).unwrap();
+        let all = db.file_dependencies("src/", None).unwrap();
         assert_eq!(all.len(), 2);
 
         // With high filter: only high-confidence edge
-        let high_only = db.get_file_dependencies("src/", Some("high")).unwrap();
+        let high_only = db.file_dependencies("src/", Some("high")).unwrap();
         assert_eq!(high_only.len(), 1);
         assert_eq!(
             high_only[0],
@@ -3488,12 +3496,12 @@ mod tests {
         // b -> c (c has 1 incoming ref)
         db.insert_symbol_ref(b, c, "call", "high", None).unwrap();
 
-        let results = db.get_most_referenced_symbols(10, "", None).unwrap();
+        let results = db.most_referenced_symbols(10, "", None).unwrap();
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].0, "a");
-        assert_eq!(results[0].2, 2);
-        assert_eq!(results[1].0, "c");
-        assert_eq!(results[1].2, 1);
+        assert_eq!(results[0].name, "a");
+        assert_eq!(results[0].count, 2);
+        assert_eq!(results[1].name, "c");
+        assert_eq!(results[1].count, 1);
     }
 
     #[test]
@@ -3584,7 +3592,7 @@ mod tests {
         db.insert_symbol_ref(a, c, "call", "high", None).unwrap();
 
         let results = db
-            .get_most_referencing_symbols(10, "", None, false)
+            .most_referencing_symbols(10, "", None, false)
             .unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, "b");
@@ -3784,7 +3792,7 @@ mod tests {
         ];
         store_symbols(&db, file_id, &symbols).unwrap();
 
-        let largest = db.get_largest_functions(2, "", false).unwrap();
+        let largest = db.largest_functions(2, "", false).unwrap();
         assert_eq!(largest.len(), 2);
         assert_eq!(largest[0].name, "large");
         assert_eq!(largest[0].lines, 101); // 110 - 10 + 1
@@ -3863,7 +3871,7 @@ mod tests {
             )
             .unwrap();
         // get_callees_by_name should NOT return the enum variant
-        let callees = db.get_callees_by_name("my_func", None, false).unwrap();
+        let callees = db.callees_by_name("my_func", None, false).unwrap();
         assert!(
             callees.iter().all(|(name, _)| name != "MyVariant"),
             "Enum variant should be excluded from call graph"

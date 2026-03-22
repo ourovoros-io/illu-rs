@@ -11,7 +11,7 @@ pub fn handle_docs(
     }
 
     // No topic — return summary doc (module=""), list available modules
-    let summary = db.get_doc_by_module(dep_name, "")?;
+    let summary = db.doc_by_module(dep_name, "")?;
     if let Some(doc) = summary {
         let mut output = String::new();
         let _ = writeln!(
@@ -19,7 +19,7 @@ pub fn handle_docs(
             "### {} v{} ({})\n\n{}\n",
             doc.dependency_name, doc.version, doc.source, doc.content
         );
-        let modules = db.get_doc_modules(dep_name)?;
+        let modules = db.doc_modules(dep_name)?;
         if !modules.is_empty() {
             let _ = writeln!(
                 output,
@@ -35,9 +35,9 @@ pub fn handle_docs(
     }
 
     // No summary doc — fall back to returning all docs
-    let docs = db.get_docs_for_dependency(dep_name)?;
+    let docs = db.docs_for_dependency(dep_name)?;
     if docs.is_empty() {
-        let dep = db.get_dependency_by_name(dep_name)?;
+        let dep = db.dependency_by_name(dep_name)?;
         return match dep {
             Some(_) => Ok(format!(
                 "'{dep_name}' is a known dependency but no docs were \
@@ -68,7 +68,7 @@ fn handle_docs_with_topic(
     topic: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // Try exact module match first
-    if let Some(doc) = db.get_doc_by_module(dep_name, topic)? {
+    if let Some(doc) = db.doc_by_module(dep_name, topic)? {
         let mut output = String::new();
         let _ = writeln!(output, "## {dep_name}::{topic}\n");
         let _ = writeln!(output, "{}\n", doc.content);
@@ -99,7 +99,7 @@ fn handle_docs_with_topic(
             return Ok(output);
         }
 
-        let dep = db.get_dependency_by_name(dep_name)?;
+        let dep = db.dependency_by_name(dep_name)?;
         let mut msg = match dep {
             Some(_) => format!(
                 "'{dep_name}' is a known dependency but no docs match \
@@ -111,7 +111,7 @@ fn handle_docs_with_topic(
                 ));
             }
         };
-        let modules = db.get_doc_modules(dep_name)?;
+        let modules = db.doc_modules(dep_name)?;
         if modules.is_empty() {
             msg.push_str("\n\nNo module-level docs available for this dependency.");
         } else {
@@ -120,7 +120,7 @@ fn handle_docs_with_topic(
                 let _ = write!(msg, "\n- `{m}`");
             }
         }
-        if let Ok(Some(summary)) = db.get_doc_by_module(dep_name, "") {
+        if let Ok(Some(summary)) = db.doc_by_module(dep_name, "") {
             let excerpt: String = summary.content.chars().take(500).collect();
             let truncated = summary.content.chars().count() > 500;
             let _ = write!(

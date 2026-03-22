@@ -1,4 +1,5 @@
 use crate::db::Database;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
 use std::path::Path;
 
@@ -112,8 +113,8 @@ pub fn handle_diff_impact(
     }
 
     // Group hunks by file path into line ranges
-    let mut file_ranges: std::collections::BTreeMap<String, Vec<(i64, i64)>> =
-        std::collections::BTreeMap::new();
+    let mut file_ranges: BTreeMap<String, Vec<(i64, i64)>> =
+        BTreeMap::new();
     for hunk in &hunks {
         let end = hunk.new_start + hunk.new_count - 1;
         file_ranges
@@ -125,7 +126,7 @@ pub fn handle_diff_impact(
     // Map changed lines to symbols
     let mut changed_symbols: Vec<(String, crate::db::StoredSymbol)> = Vec::new();
     for (file, ranges) in &file_ranges {
-        let symbols = db.get_symbols_at_lines(file, ranges)?;
+        let symbols = db.symbols_at_lines(file, ranges)?;
         for sym in symbols {
             changed_symbols.push((file.clone(), sym));
         }
@@ -137,7 +138,7 @@ pub fn handle_diff_impact(
 
 fn check_staleness(db: &Database, repo_path: &Path) -> String {
     let repo_str = repo_path.to_string_lossy();
-    let indexed = db.get_commit_hash(&repo_str).ok().flatten();
+    let indexed = db.commit_hash(&repo_str).ok().flatten();
     let head = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(repo_path)
@@ -237,8 +238,8 @@ fn render_downstream_impact(
 
     let _ = writeln!(output, "\n### Downstream Impact\n");
     let mut truncated = false;
-    let mut seen_deps: std::collections::HashSet<(&str, &str, i64)> =
-        std::collections::HashSet::new();
+    let mut seen_deps: HashSet<(&str, &str, i64)> =
+        HashSet::new();
     for (name, dependents) in &impact_sections {
         if output.len() > MAX_DIFF_OUTPUT {
             truncated = true;
@@ -282,10 +283,10 @@ fn render_test_coverage(
     changed_symbols: &[(String, crate::db::StoredSymbol)],
 ) {
     let mut all_tests = Vec::new();
-    let mut seen_tests = std::collections::HashSet::new();
+    let mut seen_tests = HashSet::new();
     let mut untested_symbols = Vec::new();
     for (_file, sym) in changed_symbols {
-        if let Ok(tests) = db.get_related_tests(&sym.name, sym.impl_type.as_deref()) {
+        if let Ok(tests) = db.related_tests(&sym.name, sym.impl_type.as_deref()) {
             if tests.is_empty() {
                 let is_test = sym
                     .attributes
@@ -447,18 +448,18 @@ diff --git a/src/lib.rs b/src/lib.rs
 
         // Create a reference from caller_fn -> target_fn
         let target_id = db
-            .get_symbol_id("target_fn", "src/lib.rs")
+            .symbol_id("target_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
         let caller_id = db
-            .get_symbol_id("caller_fn", "src/lib.rs")
+            .symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
             .unwrap();
 
         // Simulate: lines 12-15 changed in src/lib.rs — overlaps target_fn
-        let symbols = db.get_symbols_at_lines("src/lib.rs", &[(12, 15)]).unwrap();
+        let symbols = db.symbols_at_lines("src/lib.rs", &[(12, 15)]).unwrap();
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "target_fn");
 
@@ -523,10 +524,10 @@ diff --git a/src/lib.rs b/src/lib.rs
         )
         .unwrap();
 
-        let a_id = db.get_symbol_id("fn_a", "src/lib.rs").unwrap().unwrap();
-        let b_id = db.get_symbol_id("fn_b", "src/lib.rs").unwrap().unwrap();
+        let a_id = db.symbol_id("fn_a", "src/lib.rs").unwrap().unwrap();
+        let b_id = db.symbol_id("fn_b", "src/lib.rs").unwrap().unwrap();
         let caller_id = db
-            .get_symbol_id("shared_caller", "src/lib.rs")
+            .symbol_id("shared_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         // shared_caller calls both fn_a and fn_b
@@ -549,8 +550,8 @@ diff --git a/src/lib.rs b/src/lib.rs
 
         // Render with cross-seed dedup
         let mut output = String::new();
-        let mut seen_deps: std::collections::HashSet<(String, String, i64)> =
-            std::collections::HashSet::new();
+        let mut seen_deps: HashSet<(String, String, i64)> =
+            HashSet::new();
         for (name, dependents) in &impact_sections {
             let new_deps: Vec<_> = dependents
                 .iter()
@@ -630,15 +631,15 @@ diff --git a/src/lib.rs b/src/lib.rs
         .unwrap();
 
         let target_id = db
-            .get_symbol_id("target_fn", "src/lib.rs")
+            .symbol_id("target_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
         let caller_id = db
-            .get_symbol_id("caller_fn", "src/lib.rs")
+            .symbol_id("caller_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
         let test_id = db
-            .get_symbol_id("test_target", "src/lib.rs")
+            .symbol_id("test_target", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(caller_id, target_id, "call", "high", None)
@@ -649,7 +650,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         // Build changed_symbols as if git diff found target_fn changed
         let changed = vec![(
             "src/lib.rs".to_string(),
-            db.get_symbols_at_lines("src/lib.rs", &[(10, 20)])
+            db.symbols_at_lines("src/lib.rs", &[(10, 20)])
                 .unwrap()
                 .remove(0),
         )];
@@ -738,7 +739,10 @@ diff --git a/src/lib.rs b/src/lib.rs
             ),
         ];
         let result = render_diff_output(&db, &changed, false, false, "").unwrap();
-        assert!(result.contains("do_thing"), "Should include function, got:\n{result}");
+        assert!(
+            result.contains("do_thing"),
+            "Should include function, got:\n{result}"
+        );
         assert!(
             !result.contains("**tests** (mod"),
             "Should filter out mod, got:\n{result}"
@@ -790,18 +794,18 @@ diff --git a/src/lib.rs b/src/lib.rs
         .unwrap();
 
         let target_id = db
-            .get_symbol_id("target_fn", "src/lib.rs")
+            .symbol_id("target_fn", "src/lib.rs")
             .unwrap()
             .unwrap();
         let test_id = db
-            .get_symbol_id("test_target", "src/lib.rs")
+            .symbol_id("test_target", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(test_id, target_id, "call", "high", None)
             .unwrap();
 
         // Verify get_related_tests finds the test
-        let tests = db.get_related_tests("target_fn", None).unwrap();
+        let tests = db.related_tests("target_fn", None).unwrap();
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_target");
     }

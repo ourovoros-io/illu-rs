@@ -39,6 +39,50 @@ pub(crate) use crate::truncate_at as truncate_snippet;
 
 use crate::db::{Database, StoredSymbol, TestEntry};
 use crate::indexer::parser::SymbolKind;
+use rmcp::schemars;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use std::collections::{BTreeMap, HashSet};
+
+/// Direction for graph traversal in neighborhood and `graph_export` tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Direction {
+    Both,
+    Down,
+    Up,
+}
+
+/// Display format for neighborhood tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum NeighborhoodFormat {
+    List,
+    Tree,
+}
+
+/// Output format for `graph_export` tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    Dot,
+    Edges,
+    Summary,
+}
+
+/// Scope for query tool search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum QueryScope {
+    Symbols,
+    All,
+    Docs,
+    Files,
+    Bodies,
+    Strings,
+    #[serde(rename = "doc_comments")]
+    DocComments,
+}
 
 /// Resolve a symbol name supporting `Type::method` syntax.
 /// Falls back to plain `search_symbols` if `::` lookup yields nothing.
@@ -74,9 +118,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i + 1;
         for (j, &cb) in b.iter().enumerate() {
             let cost = usize::from(!ca.eq_ignore_ascii_case(&cb));
-            curr[j + 1] = (prev[j] + cost)
-                .min(prev[j + 1] + 1)
-                .min(curr[j] + 1);
+            curr[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(curr[j] + 1);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -85,20 +127,13 @@ fn levenshtein(a: &str, b: &str) -> usize {
 
 /// Fuzzy-match a query against all symbol names using edit distance.
 /// Returns top 3 matches within a reasonable distance threshold.
-fn levenshtein_suggestions(
-    db: &Database,
-    query: &str,
-) -> Vec<(String, Option<String>)> {
-    let all_names = db.get_all_distinct_symbol_names().unwrap_or_default();
+fn levenshtein_suggestions(db: &Database, query: &str) -> Vec<(String, Option<String>)> {
+    let all_names = db.all_distinct_symbol_names().unwrap_or_default();
     let max_dist = (query.len() * 2 / 5).max(2);
     let mut scored: Vec<(usize, String, Option<String>)> = all_names
         .into_iter()
         .map(|(name, impl_type)| {
-            let qname = if let Some(ref it) = impl_type {
-                format!("{it}::{name}")
-            } else {
-                name.clone()
-            };
+            let qname = format_qualified(&name, impl_type.as_deref());
             let dist = levenshtein(query, &qname);
             (dist, name, impl_type)
         })
@@ -125,7 +160,7 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
     }
 
     // Deduplicate by qualified name, take top 3
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     let suggestions: Vec<_> = suggestions
         .into_iter()
         .filter(|s| {
@@ -154,15 +189,9 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
     let lev_matches = levenshtein_suggestions(db, name);
     if !lev_matches.is_empty() {
         use std::fmt::Write;
-        let mut out = format!(
-            "No symbol found matching '{name}'.\n\nDid you mean:\n",
-        );
+        let mut out = format!("No symbol found matching '{name}'.\n\nDid you mean:\n",);
         for (sym_name, impl_type) in &lev_matches {
-            let qname = if let Some(it) = impl_type {
-                format!("{it}::{sym_name}")
-            } else {
-                sym_name.clone()
-            };
+            let qname = format_qualified(sym_name, impl_type.as_deref());
             let _ = writeln!(out, "- `{qname}`");
         }
         let _ = write!(out, "\nUse `query` to search more broadly.");
@@ -192,6 +221,12 @@ pub(crate) fn format_qualified(name: &str, impl_type: Option<&str>) -> String {
 /// Format a symbol's qualified name (e.g. `Database::open` for methods).
 pub(crate) fn qualified_name(sym: &StoredSymbol) -> String {
     format_qualified(&sym.name, sym.impl_type.as_deref())
+}
+
+/// Abbreviate a full commit hash to 7 characters for display.
+#[must_use]
+pub(crate) fn short_hash(hash: &str) -> &str {
+    &hash[..hash.len().min(7)]
 }
 
 /// Check if a `SymbolKind` matches a user-provided kind filter string.
@@ -294,8 +329,8 @@ pub(crate) fn render_test_list(output: &mut String, tests: &[&TestEntry]) {
     }
 
     // Group tests by file
-    let mut by_file: std::collections::BTreeMap<&str, Vec<&TestEntry>> =
-        std::collections::BTreeMap::new();
+    let mut by_file: BTreeMap<&str, Vec<&TestEntry>> =
+        BTreeMap::new();
     for t in tests {
         by_file.entry(&t.file_path).or_default().push(t);
     }

@@ -5,7 +5,7 @@
 
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{context, impact, query};
+use illu_rs::server::tools::{QueryScope, context, impact, query};
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -94,7 +94,7 @@ fn query_on_empty_crate_returns_no_results() {
     let result = query::handle_query(
         &db,
         "anything",
-        Some("symbols"),
+        Some(QueryScope::Symbols),
         None,
         None,
         None,

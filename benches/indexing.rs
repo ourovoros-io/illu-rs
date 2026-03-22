@@ -5,6 +5,7 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
+use illu_rs::server::tools::QueryScope;
 
 fn bench_self_index(c: &mut Criterion) {
     c.bench_function("index_illu_rs", |b| {
@@ -31,7 +32,7 @@ fn bench_query_after_index(c: &mut Criterion) {
             illu_rs::server::tools::query::handle_query(
                 &db,
                 black_box("Database"),
-                Some("symbols"),
+                Some(QueryScope::Symbols),
                 None,
                 None,
                 None,

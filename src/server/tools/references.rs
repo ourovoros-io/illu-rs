@@ -1,4 +1,5 @@
 use crate::db::Database;
+use std::collections::HashSet;
 use std::fmt::Write;
 
 pub fn handle_references(
@@ -53,12 +54,12 @@ fn render_call_sites(
     output: &mut String,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let _ = writeln!(output, "\n### Call Sites\n");
-    let mut seen: std::collections::HashSet<(String, String, i64)> =
-        std::collections::HashSet::new();
+    let mut seen: HashSet<(String, String, i64)> =
+        HashSet::new();
     let mut prod = Vec::new();
     let mut test = Vec::new();
     for sym in symbols {
-        for c in db.get_callers(&sym.name, &sym.file_path, false, Some("high"))? {
+        for c in db.callers(&sym.name, &sym.file_path, false, Some("high"))? {
             if path.is_some_and(|p| !c.file_path.starts_with(p)) {
                 continue;
             }
@@ -99,7 +100,7 @@ fn render_type_usage(
     let _ = writeln!(output, "\n### Type Usage in Signatures\n");
     let sig_results = db.search_symbols_by_signature(base_name)?;
     let mut entries = Vec::new();
-    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
     for s in &sig_results {
         if s.name == base_name
             || s.kind == crate::indexer::parser::SymbolKind::Use
@@ -134,8 +135,8 @@ fn render_trait_impls(
     output: &mut String,
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let _ = writeln!(output, "\n### Trait Implementations\n");
-    let type_impls = db.get_trait_impls_for_type(base_name)?;
-    let trait_impls = db.get_trait_impls_for_trait(base_name)?;
+    let type_impls = db.trait_impls_for_type(base_name)?;
+    let trait_impls = db.trait_impls_for_trait(base_name)?;
     if type_impls.is_empty() && trait_impls.is_empty() {
         let _ = writeln!(output, "No trait implementations found.");
     }
@@ -269,8 +270,8 @@ mod tests {
         store_symbols(&db, file_id, &symbols).unwrap();
 
         // caller references both Status definitions
-        let enum_id = db.get_symbol_id("Status", "src/lib.rs").unwrap().unwrap();
-        let caller_id = db.get_symbol_id("caller", "src/lib.rs").unwrap().unwrap();
+        let enum_id = db.symbol_id("Status", "src/lib.rs").unwrap().unwrap();
+        let caller_id = db.symbol_id("caller", "src/lib.rs").unwrap().unwrap();
         db.insert_symbol_ref(caller_id, enum_id, "call", "high", Some(22))
             .unwrap();
 
@@ -333,13 +334,13 @@ mod tests {
         ];
         store_symbols(&db, file_id, &symbols).unwrap();
 
-        let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
+        let target_id = db.symbol_id("target", "src/lib.rs").unwrap().unwrap();
         let prod_id = db
-            .get_symbol_id("prod_caller", "src/lib.rs")
+            .symbol_id("prod_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         let test_id = db
-            .get_symbol_id("test_caller", "src/lib.rs")
+            .symbol_id("test_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(prod_id, target_id, "call", "high", Some(8))
@@ -407,13 +408,13 @@ mod tests {
         ];
         store_symbols(&db, file_id, &symbols).unwrap();
 
-        let target_id = db.get_symbol_id("target", "src/lib.rs").unwrap().unwrap();
+        let target_id = db.symbol_id("target", "src/lib.rs").unwrap().unwrap();
         let prod_id = db
-            .get_symbol_id("prod_caller", "src/lib.rs")
+            .symbol_id("prod_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         let test_id = db
-            .get_symbol_id("test_caller", "src/lib.rs")
+            .symbol_id("test_caller", "src/lib.rs")
             .unwrap()
             .unwrap();
         db.insert_symbol_ref(prod_id, target_id, "call", "high", Some(8))

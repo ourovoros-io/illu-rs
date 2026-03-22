@@ -100,7 +100,7 @@ struct QueryParams {
     /// Search term. Use `*` to match all names when filtering by signature, path, or attribute.
     query: String,
     /// Search scope: symbols (default), docs, files, all, `doc_comments`, bodies, strings
-    scope: Option<String>,
+    scope: Option<tools::QueryScope>,
     kind: Option<String>,
     /// Filter by attribute/derive (e.g. "test", "derive(Serialize)")
     attribute: Option<String>,
@@ -234,9 +234,9 @@ struct NeighborhoodParams {
     /// Max hops in each direction (default: 2)
     depth: Option<i64>,
     /// Direction: "both" (default), "down" (callees only), "up" (callers only)
-    direction: Option<String>,
+    direction: Option<tools::Direction>,
     /// Format: "list" (default flat), "tree" (hierarchical indented)
-    format: Option<String>,
+    format: Option<tools::NeighborhoodFormat>,
     /// Exclude test functions from results (default: false)
     exclude_tests: Option<bool>,
 }
@@ -368,10 +368,10 @@ struct GraphExportParams {
     depth: Option<i64>,
     /// Direction for symbol graph: "down" (callees only), "up" (callers only),
     /// "both" (default). Only applies to symbol graphs, not file graphs.
-    direction: Option<String>,
+    direction: Option<tools::Direction>,
     /// Output format: "dot" (Graphviz, default), "edges" (compact edge list for AI),
     /// "summary" (node/edge counts, roots, leaves).
-    format: Option<String>,
+    format: Option<tools::ExportFormat>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -384,7 +384,7 @@ struct ReposParams {}
 struct CrossQueryParams {
     /// Search term
     query: String,
-    scope: Option<String>,
+    scope: Option<tools::QueryScope>,
     kind: Option<String>,
     attribute: Option<String>,
     signature: Option<String>,
@@ -441,7 +441,7 @@ impl IlluServer {
         let result = tools::query::handle_query(
             &db,
             &params.query,
-            params.scope.as_deref(),
+            params.scope,
             params.kind.as_deref(),
             params.attribute.as_deref(),
             params.signature.as_deref(),
@@ -720,8 +720,8 @@ impl IlluServer {
             &db,
             &params.symbol_name,
             params.depth,
-            params.direction.as_deref(),
-            params.format.as_deref(),
+            params.direction,
+            params.format,
             params.exclude_tests.unwrap_or(false),
         )
         .map_err(to_mcp_err)?;
@@ -1043,8 +1043,8 @@ impl IlluServer {
             params.symbol_name.as_deref(),
             params.path.as_deref(),
             params.depth,
-            params.direction.as_deref(),
-            params.format.as_deref(),
+            params.direction,
+            params.format,
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -1116,7 +1116,7 @@ impl IlluServer {
             crate::status::StatusGuard::new(&format!("cross_query \u{25b8} {}", params.query));
         let opts = tools::cross_query::CrossQueryOpts {
             query: &params.query,
-            scope: params.scope.as_deref(),
+            scope: params.scope,
             kind: params.kind.as_deref(),
             attribute: params.attribute.as_deref(),
             signature: params.signature.as_deref(),

@@ -29,7 +29,7 @@ pub fn handle_health(db: &Database) -> Result<String, Box<dyn std::error::Error>
     let _ = writeln!(output);
 
     // Noise sources
-    let noisy = db.get_noisy_symbols(5)?;
+    let noisy = db.noisy_symbols(5)?;
     if !noisy.is_empty() {
         let _ = writeln!(output, "### Noise Sources (low-confidence hotspots)\n");
         for (name, count) in &noisy {

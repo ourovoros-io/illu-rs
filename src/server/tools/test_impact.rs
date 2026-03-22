@@ -19,7 +19,7 @@ pub fn handle_test_impact(
     for sym in &symbols {
         let qname = super::qualified_name(sym);
         let tests =
-            db.get_related_tests_with_depth(&sym.name, sym.impl_type.as_deref(), max_depth)?;
+            db.related_tests_with_depth(&sym.name, sym.impl_type.as_deref(), max_depth)?;
         if !tests.is_empty() {
             let _ = writeln!(output, "### Tests for `{qname}`\n");
             let test_refs: Vec<&crate::db::TestEntry> = tests.iter().collect();

@@ -6,6 +6,7 @@ pub mod store;
 pub mod workspace;
 
 use crate::db::Database;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -72,7 +73,7 @@ pub fn refresh_index(
 
     // Version mismatch → full re-index to avoid stale data
     let stored_version = db
-        .get_index_version(&config.repo_path.display().to_string())
+        .index_version(&config.repo_path.display().to_string())
         .unwrap_or(None);
     if stored_version.as_deref() != Some(INDEX_VERSION) {
         tracing::info!(
@@ -85,8 +86,8 @@ pub fn refresh_index(
         return Ok(usize::try_from(new_count).unwrap_or(0));
     }
 
-    let existing: std::collections::HashMap<String, (String, Option<crate::db::CrateId>)> = db
-        .get_all_files_with_hashes()?
+    let existing: HashMap<String, (String, Option<crate::db::CrateId>)> = db
+        .all_files_with_hashes()?
         .into_iter()
         .map(|f| (f.path, (f.content_hash, f.crate_id)))
         .collect();
@@ -94,7 +95,7 @@ pub fn refresh_index(
     crate::status::set("refreshing ▸ scanning files");
 
     // Detect committed changes since last indexed commit
-    let stored_hash = db.get_commit_hash(&config.repo_path.display().to_string())?;
+    let stored_hash = db.commit_hash(&config.repo_path.display().to_string())?;
     let current_head = get_current_commit_hash(&config.repo_path).ok();
     let head_changed = match (&stored_hash, &current_head) {
         (Some(old), Some(new)) => old != new,
@@ -116,7 +117,7 @@ pub fn refresh_index(
 
     // Merge in committed changes not already in the candidate list
     if !committed_changes.is_empty() {
-        let existing_set: std::collections::HashSet<&str> =
+        let existing_set: HashSet<&str> =
             candidate_files.iter().map(String::as_str).collect();
         let new: Vec<String> = committed_changes
             .into_iter()
@@ -182,13 +183,13 @@ fn rebuild_refs_for_files(
     db: &Database,
     dirty_files: &[DirtyFile],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let known_symbols = db.get_all_symbol_names()?;
+    let known_symbols = db.all_symbol_names()?;
     if known_symbols.is_empty() {
         return Ok(());
     }
 
-    let all_crates = db.get_all_crates()?;
-    let crate_map: std::collections::HashMap<String, String> = all_crates
+    let all_crates = db.all_crates()?;
+    let crate_map: HashMap<String, String> = all_crates
         .iter()
         .map(|c| (c.name.replace('-', "_"), c.path.clone()))
         .collect();
@@ -242,8 +243,8 @@ fn index_workspace(
     let mut all_direct = Vec::new();
 
     // Register each member crate
-    let mut crate_ids: std::collections::HashMap<String, crate::db::CrateId> =
-        std::collections::HashMap::new();
+    let mut crate_ids: HashMap<String, crate::db::CrateId> =
+        HashMap::new();
 
     // Collect path deps per crate to record after all crates are registered
     let mut path_deps_by_crate: Vec<(String, Vec<String>)> = Vec::new();
@@ -382,21 +383,21 @@ fn extract_all_symbol_refs(
     db: &Database,
     config: &IndexConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let known_symbols = db.get_all_symbol_names()?;
+    let known_symbols = db.all_symbol_names()?;
     if known_symbols.is_empty() {
         tracing::info!("No symbols found, skipping ref extraction");
         return Ok(());
     }
 
-    let all_crates = db.get_all_crates()?;
-    let crate_map: std::collections::HashMap<String, String> = all_crates
+    let all_crates = db.all_crates()?;
+    let crate_map: HashMap<String, String> = all_crates
         .iter()
         .map(|c| (c.name.replace('-', "_"), c.path.clone()))
         .collect();
 
     let symbol_map = db.build_symbol_id_map()?;
 
-    let files = db.get_all_file_paths()?;
+    let files = db.all_file_paths()?;
     let total = files.len();
     tracing::info!(
         files = total,
@@ -433,7 +434,7 @@ fn generate_skill_file(
     db: &Database,
     config: &IndexConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let direct_deps = db.get_direct_dependencies()?;
+    let direct_deps = db.direct_dependencies()?;
     let dep_names: Vec<&str> = direct_deps.iter().map(|d| d.name.as_str()).collect();
     let skill_content = generate_claude_skill(&dep_names);
     let skill_dir = config.repo_path.join(".claude").join("skills");
@@ -585,10 +586,7 @@ const TOOL_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "repos",
                 "Dashboard of all registered repos with status and symbol counts.",
             ),
-            (
-                "cross_query",
-                "Search symbols across all registered repos.",
-            ),
+            ("cross_query", "Search symbols across all registered repos."),
             (
                 "cross_impact",
                 "Find references to a symbol in other repos.",
@@ -687,7 +685,7 @@ fn committed_changed_rs_files(repo_path: &std::path::Path, since_hash: &str) -> 
 /// indexed files plus walks for new ones (full scan fallback).
 fn git_changed_rs_files(
     repo_path: &std::path::Path,
-    existing: &std::collections::HashMap<String, (String, Option<crate::db::CrateId>)>,
+    existing: &HashMap<String, (String, Option<crate::db::CrateId>)>,
 ) -> Vec<String> {
     let output = std::process::Command::new("git")
         .args([
@@ -730,7 +728,7 @@ fn git_changed_rs_files(
 
     // Also include files that are in our index but might have been modified
     // outside of git tracking (rare but possible)
-    let changed_set: std::collections::HashSet<String> = changed.iter().cloned().collect();
+    let changed_set: HashSet<String> = changed.iter().cloned().collect();
     for path in existing.keys() {
         if !changed_set.contains(path) {
             let full = repo_path.join(path);
@@ -776,7 +774,7 @@ fn full_scan_rs_files(repo_path: &std::path::Path) -> Vec<String> {
 fn collect_dirty_files(
     repo_path: &std::path::Path,
     candidates: &[String],
-    existing: &std::collections::HashMap<String, (String, Option<crate::db::CrateId>)>,
+    existing: &HashMap<String, (String, Option<crate::db::CrateId>)>,
 ) -> Vec<DirtyFile> {
     let mut dirty = Vec::new();
     for relative in candidates {
@@ -1013,13 +1011,13 @@ pub fn use_shared() -> SharedType {
         assert!(!app_syms.is_empty(), "use_shared should be indexed");
 
         // Inter-crate dependency tracked
-        let shared_crate = db.get_crate_by_name("shared").unwrap().unwrap();
-        let dependents = db.get_crate_dependents(shared_crate.id).unwrap();
+        let shared_crate = db.crate_by_name("shared").unwrap().unwrap();
+        let dependents = db.crate_dependents(shared_crate.id).unwrap();
         assert_eq!(dependents.len(), 1);
         assert_eq!(dependents[0].name, "app");
 
         // Workspace dep resolved
-        let serde_dep = db.get_dependency_by_name("serde").unwrap();
+        let serde_dep = db.dependency_by_name("serde").unwrap();
         assert!(serde_dep.is_some());
 
         // Cross-crate symbol ref exists
@@ -1146,7 +1144,7 @@ pub fn use_shared() -> SharedType {
         index_repo(&db, &config).unwrap();
 
         // The ref from main→reset_state should exist with high confidence
-        let callees = db.get_callees("main", "src/main.rs", false).unwrap();
+        let callees = db.callees("main", "src/main.rs", false).unwrap();
         let has_ref = callees.iter().any(|c| c.name == "reset_state");
         assert!(
             has_ref,
@@ -1223,7 +1221,7 @@ pub fn run() {
         };
         index_repo(&db, &config).unwrap();
 
-        let callees = db.get_callees("run", "src/lib.rs", false).unwrap();
+        let callees = db.callees("run", "src/lib.rs", false).unwrap();
         let callee_qualified: Vec<String> = callees
             .iter()
             .map(|c| match &c.impl_type {
@@ -1269,7 +1267,7 @@ pub fn run() {
         );
 
         // Verify Foo::new and Bar::new are NOT reported as unused
-        let unused = db.get_unreferenced_symbols(None, true).unwrap();
+        let unused = db.unreferenced_symbols(None, true).unwrap();
         let unused_names: Vec<String> = unused
             .iter()
             .map(|s| match &s.impl_type {
@@ -1360,7 +1358,7 @@ pub fn run() -> i32 {
         };
         index_repo(&db, &config).unwrap();
 
-        let callees = db.get_callees("run", "src/lib.rs", false).unwrap();
+        let callees = db.callees("run", "src/lib.rs", false).unwrap();
         let callee_names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
 
         assert!(
@@ -1414,7 +1412,7 @@ fn main() { run(); }
         };
         index_repo(&db, &config).unwrap();
 
-        let callees = db.get_callees("run", "src/main.rs", false).unwrap();
+        let callees = db.callees("run", "src/main.rs", false).unwrap();
         let callee_names: Vec<&str> = callees.iter().map(|c| c.name.as_str()).collect();
 
         assert!(

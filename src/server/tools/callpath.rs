@@ -67,7 +67,7 @@ fn handle_shortest_path(
         }
 
         // Use file-specific callee lookup to avoid ambiguity
-        let callees = db.get_callees(&current.0, &current.1, exclude_tests)?;
+        let callees = db.callees(&current.0, &current.1, exclude_tests)?;
         for callee in callees {
             let node = (callee.name.clone(), callee.file_path.clone());
             if visited.contains(&node) {
@@ -153,7 +153,7 @@ fn find_all_paths(
         .ok_or("current_path must not be empty")?
         .clone();
 
-    let callees = db.get_callees(&current.0, &current.1, cfg.exclude_tests)?;
+    let callees = db.callees(&current.0, &current.1, cfg.exclude_tests)?;
     for callee in callees {
         if results.len() >= cfg.max_paths {
             break;
