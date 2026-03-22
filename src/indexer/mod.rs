@@ -70,6 +70,21 @@ pub fn refresh_index(
         return Ok(usize::try_from(new_count).unwrap_or(0));
     }
 
+    // Version mismatch → full re-index to avoid stale data
+    let stored_version = db
+        .get_index_version(&config.repo_path.display().to_string())
+        .unwrap_or(None);
+    if stored_version.as_deref() != Some(INDEX_VERSION) {
+        tracing::info!(
+            stored = stored_version.as_deref().unwrap_or("none"),
+            current = INDEX_VERSION,
+            "Index version mismatch — running full re-index"
+        );
+        index_repo(db, config)?;
+        let new_count = db.file_count()?;
+        return Ok(usize::try_from(new_count).unwrap_or(0));
+    }
+
     let existing: std::collections::HashMap<String, (String, Option<crate::db::CrateId>)> = db
         .get_all_files_with_hashes()?
         .into_iter()
@@ -428,10 +443,17 @@ fn generate_skill_file(
     Ok(())
 }
 
+/// Binary version compiled into the binary at build time.
+pub const INDEX_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn update_metadata(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
     let commit_hash =
         get_current_commit_hash(&config.repo_path).unwrap_or_else(|_| "unknown".to_string());
-    db.set_metadata(&config.repo_path.display().to_string(), &commit_hash)?;
+    db.set_metadata(
+        &config.repo_path.display().to_string(),
+        &commit_hash,
+        INDEX_VERSION,
+    )?;
     Ok(())
 }
 
