@@ -19,6 +19,40 @@ pub fn detect_repo_root(from: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(path.trim()))
 }
 
+/// Detect the Rust project root by finding the nearest `Cargo.toml` ancestor.
+///
+/// Walks up from `from` (inclusive) toward `git_root`. If the git root
+/// itself has a `Cargo.toml`, returns the git root. Otherwise, returns
+/// the nearest ancestor of `from` that contains a `Cargo.toml`.
+/// Falls back to the git root if no `Cargo.toml` is found.
+///
+/// This handles Rust projects nested inside larger git repos (e.g.
+/// monorepos with `tools/my-rust-project/`).
+#[must_use]
+pub fn detect_cargo_root(from: &Path, git_root: &Path) -> PathBuf {
+    // If git root has Cargo.toml, prefer it (standard layout)
+    if git_root.join("Cargo.toml").exists() {
+        return git_root.to_path_buf();
+    }
+
+    // Walk up from CWD looking for Cargo.toml
+    let mut dir = from.to_path_buf();
+    loop {
+        if dir.join("Cargo.toml").exists() {
+            return dir;
+        }
+        if dir == git_root || !dir.starts_with(git_root) {
+            break;
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+
+    // Fallback to git root
+    git_root.to_path_buf()
+}
+
 /// Get the shared git directory (for worktree dedup).
 /// Returns the `.git` dir for regular repos, or the common dir for worktrees.
 pub fn git_common_dir(from: &Path) -> Result<PathBuf, String> {
@@ -102,5 +136,34 @@ mod tests {
     fn detect_repo_root_fails_for_non_repo() {
         let result = detect_repo_root(Path::new("/"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn detect_cargo_root_prefers_git_root_with_cargo_toml() {
+        let cwd = std::env::current_dir().unwrap();
+        let git_root = detect_repo_root(&cwd).unwrap();
+        // This repo has Cargo.toml at git root, so it should return git root
+        let result = detect_cargo_root(&cwd, &git_root);
+        assert_eq!(result, git_root);
+    }
+
+    #[test]
+    fn detect_cargo_root_finds_nested_cargo_toml() {
+        let cwd = std::env::current_dir().unwrap();
+        let git_root = detect_repo_root(&cwd).unwrap();
+        // Simulate: CWD=git_root/src (no Cargo.toml), git_root has Cargo.toml
+        // Should still find git_root since it has Cargo.toml
+        let nested = git_root.join("src");
+        let result = detect_cargo_root(&nested, &git_root);
+        assert_eq!(result, git_root);
+    }
+
+    #[test]
+    fn detect_cargo_root_falls_back_to_git_root() {
+        // When no Cargo.toml exists anywhere, falls back to git root
+        let fake_root = Path::new("/tmp/fake-git-root");
+        let fake_cwd = Path::new("/tmp/fake-git-root/sub/dir");
+        let result = detect_cargo_root(fake_cwd, fake_root);
+        assert_eq!(result, fake_root);
     }
 }
