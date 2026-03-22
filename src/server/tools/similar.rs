@@ -2,7 +2,11 @@ use crate::db::{Database, StoredSymbol};
 use std::collections::HashSet;
 use std::fmt::Write;
 
-type ScoredSymbol<'a> = (usize, &'a StoredSymbol, Vec<String>);
+struct ScoredSymbol<'a> {
+    score: usize,
+    symbol: &'a StoredSymbol,
+    reasons: Vec<String>,
+}
 
 use super::NOISY_CALLEES;
 
@@ -89,17 +93,18 @@ pub fn handle_similar(
     }
 
     let _ = writeln!(output, "### Similar Symbols\n");
-    for (i, (score, sym, reasons)) in scored.iter().enumerate() {
-        let cqname = super::qualified_name(sym);
+    for (i, entry) in scored.iter().enumerate() {
+        let cqname = super::qualified_name(entry.symbol);
         let _ = writeln!(
             output,
-            "{}. **{cqname}** (score: {score}) — {}:{}",
+            "{}. **{cqname}** (score: {}) — {}:{}",
             i + 1,
-            sym.file_path,
-            sym.line_start
+            entry.score,
+            entry.symbol.file_path,
+            entry.symbol.line_start
         );
-        let _ = writeln!(output, "   `{}`", sym.signature);
-        let _ = writeln!(output, "   Shared: {}", reasons.join(", "));
+        let _ = writeln!(output, "   `{}`", entry.symbol.signature);
+        let _ = writeln!(output, "   Shared: {}", entry.reasons.join(", "));
     }
 
     Ok(output)
@@ -137,11 +142,15 @@ fn score_candidates<'a>(
             target_callees,
         )?;
         if score >= 2 {
-            scored.push((score, candidate, reasons));
+            scored.push(ScoredSymbol {
+                score,
+                symbol: candidate,
+                reasons,
+            });
         }
     }
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by(|a, b| b.score.cmp(&a.score));
     scored.truncate(10);
     Ok(scored)
 }

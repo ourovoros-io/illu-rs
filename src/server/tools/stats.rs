@@ -86,13 +86,17 @@ pub fn handle_stats(
         db.get_most_referenced_symbols_filtered(5, prefix, Some("high"), exclude_tests)?;
     if !most_ref.is_empty() {
         let _ = writeln!(output, "### Most Referenced\n");
-        for (name, file, count, impl_type) in &most_ref {
-            let display = if let Some(it) = impl_type {
-                format!("{it}::{name}")
+        for entry in &most_ref {
+            let display = if let Some(it) = &entry.impl_type {
+                format!("{it}::{}", entry.name)
             } else {
-                name.clone()
+                entry.name.clone()
             };
-            let _ = writeln!(output, "- **{display}** ({file}) — {count} refs");
+            let _ = writeln!(
+                output,
+                "- **{display}** ({}) — {} refs",
+                entry.file_path, entry.count
+            );
         }
         let _ = writeln!(output);
     }

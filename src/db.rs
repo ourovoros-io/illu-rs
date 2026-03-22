@@ -26,7 +26,12 @@ newtype_id!(SymbolId);
 newtype_id!(CrateId);
 newtype_id!(DepId);
 
-pub type SymbolRefCount = (String, String, i64, Option<String>);
+pub struct SymbolRefCount {
+    pub name: String,
+    pub file_path: String,
+    pub count: i64,
+    pub impl_type: Option<String>,
+}
 
 fn escape_like(s: &str) -> String {
     s.replace('%', r"\%").replace('_', r"\_")
@@ -1900,7 +1905,12 @@ impl Database {
         let mut results = Vec::new();
         let mut rows = stmt.query(params![pattern, limit, min_confidence])?;
         while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?));
+            results.push(SymbolRefCount {
+                name: row.get(0)?,
+                file_path: row.get(1)?,
+                count: row.get(2)?,
+                impl_type: row.get(3)?,
+            });
         }
         Ok(results)
     }
@@ -3490,10 +3500,10 @@ mod tests {
 
         let results = db.get_most_referenced_symbols(10, "", None).unwrap();
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].0, "a");
-        assert_eq!(results[0].2, 2);
-        assert_eq!(results[1].0, "c");
-        assert_eq!(results[1].2, 1);
+        assert_eq!(results[0].name, "a");
+        assert_eq!(results[0].count, 2);
+        assert_eq!(results[1].name, "c");
+        assert_eq!(results[1].count, 1);
     }
 
     #[test]

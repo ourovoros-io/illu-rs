@@ -18,16 +18,18 @@ pub fn handle_hotspots(
         db.get_most_referenced_symbols_filtered(max, prefix, Some("high"), exclude_tests)?;
     if !most_referenced.is_empty() {
         let _ = writeln!(output, "### Most Referenced (fragile to change)\n");
-        for (i, (name, file, count, impl_type)) in most_referenced.iter().enumerate() {
-            let display = if let Some(it) = impl_type {
-                format!("{it}::{name}")
+        for (i, entry) in most_referenced.iter().enumerate() {
+            let display = if let Some(it) = &entry.impl_type {
+                format!("{it}::{}", entry.name)
             } else {
-                name.clone()
+                entry.name.clone()
             };
             let _ = writeln!(
                 output,
-                "{}. **{display}** ({file}) — {count} references",
-                i + 1
+                "{}. **{display}** ({}) — {} references",
+                i + 1,
+                entry.file_path,
+                entry.count
             );
         }
         let _ = writeln!(output);

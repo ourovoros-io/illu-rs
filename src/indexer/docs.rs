@@ -218,9 +218,9 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
         let dep_names: Vec<String> = pending.iter().map(|p| p.name.clone()).collect();
         match super::cargo_doc::generate_cargo_docs(repo_path, &dep_names) {
             Ok(docs) => {
-                for (name, module_docs) in docs {
-                    if let Some(p) = pending.iter().find(|p| p.name == name) {
-                        for md in module_docs {
+                for crate_docs in docs {
+                    if let Some(p) = pending.iter().find(|p| p.name == crate_docs.name) {
+                        for md in crate_docs.modules {
                             results.push(FetchedDoc {
                                 dep_id: p.dep_id,
                                 source: "cargo_doc",
