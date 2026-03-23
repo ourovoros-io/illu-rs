@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="cyanMagenta" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00fff2"/>
+      <stop offset="100%" stop-color="#d946ef"/>
+    </linearGradient>
+    <radialGradient id="bloomCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00fff2" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#00fff2" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bloomMagenta" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#d946ef" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#d946ef" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="40" fill="#050510"/>
+
+  <!-- Faint grid -->
+  <g stroke="#00fff2" stroke-width="0.3" opacity="0.1">
+    <line x1="0" y1="128" x2="512" y2="128"/>
+    <line x1="0" y1="256" x2="512" y2="256"/>
+    <line x1="0" y1="384" x2="512" y2="384"/>
+    <line x1="128" y1="0" x2="128" y2="512"/>
+    <line x1="256" y1="0" x2="256" y2="512"/>
+    <line x1="384" y1="0" x2="384" y2="512"/>
+  </g>
+
+  <!-- Bloom -->
+  <circle cx="256" cy="210" r="120" fill="url(#bloomCyan)"/>
+  <circle cx="256" cy="210" r="80" fill="url(#bloomMagenta)"/>
+
+  <!-- Outer hexagonal ring — glow layers -->
+  <polygon points="256,60 370,120 370,300 256,360 142,300 142,120"
+           fill="none" stroke="#00fff2" stroke-width="4" opacity="0.06"/>
+  <polygon points="256,60 370,120 370,300 256,360 142,300 142,120"
+           fill="none" stroke="url(#cyanMagenta)" stroke-width="1.5" opacity="0.25"/>
+
+  <!-- Circuit traces -->
+  <g fill="none" stroke="#00fff2" stroke-width="1.2" opacity="0.3" stroke-linecap="round">
+    <polyline points="142,120 110,120 110,80"/>
+    <polyline points="142,120 120,140 80,140"/>
+    <polyline points="370,120 402,120 402,80"/>
+    <polyline points="370,120 392,140 432,140"/>
+    <polyline points="142,300 110,300 110,340"/>
+    <polyline points="142,300 120,280 80,280"/>
+    <polyline points="370,300 402,300 402,340"/>
+    <polyline points="370,300 392,280 432,280"/>
+    <line x1="256" y1="60" x2="256" y2="30"/>
+    <line x1="256" y1="360" x2="256" y2="390"/>
+  </g>
+
+  <!-- Circuit nodes -->
+  <g fill="#00fff2" opacity="0.5">
+    <circle cx="110" cy="80" r="3"/>
+    <circle cx="80" cy="140" r="3"/>
+    <circle cx="402" cy="80" r="3"/>
+    <circle cx="432" cy="140" r="3"/>
+    <circle cx="110" cy="340" r="3"/>
+    <circle cx="80" cy="280" r="3"/>
+    <circle cx="402" cy="340" r="3"/>
+    <circle cx="432" cy="280" r="3"/>
+    <circle cx="256" cy="30" r="3"/>
+    <circle cx="256" cy="390" r="3"/>
+  </g>
+
+  <!-- Inner diamond — glow layers -->
+  <polygon points="256,110 340,210 256,310 172,210"
+           fill="none" stroke="#00fff2" stroke-width="8" opacity="0.06"/>
+  <polygon points="256,110 340,210 256,310 172,210"
+           fill="none" stroke="#00fff2" stroke-width="3" opacity="0.2"/>
+  <polygon points="256,110 340,210 256,310 172,210"
+           fill="none" stroke="#00fff2" stroke-width="1.5" opacity="0.7"/>
+
+  <!-- Code brackets — glow layers -->
+  <g transform="translate(256, 210)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- < -->
+    <polyline points="-38,-32 -60,0 -38,32" stroke="#00fff2" stroke-width="14" opacity="0.08"/>
+    <polyline points="-38,-32 -60,0 -38,32" stroke="#00fff2" stroke-width="7" opacity="0.18"/>
+    <polyline points="-38,-32 -60,0 -38,32" stroke="#00fff2" stroke-width="4" opacity="0.9"/>
+    <!-- > -->
+    <polyline points="38,-32 60,0 38,32" stroke="#d946ef" stroke-width="14" opacity="0.08"/>
+    <polyline points="38,-32 60,0 38,32" stroke="#d946ef" stroke-width="7" opacity="0.18"/>
+    <polyline points="38,-32 60,0 38,32" stroke="#d946ef" stroke-width="4" opacity="0.9"/>
+    <!-- / -->
+    <line x1="-12" y1="35" x2="12" y2="-35" stroke="#ffffff" stroke-width="3" opacity="0.9"/>
+  </g>
+
+  <!-- "illu" text — glow layers -->
+  <text x="256" y="430" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="76" letter-spacing="6"
+        fill="#00fff2" opacity="0.07" stroke="#00fff2" stroke-width="10">illu</text>
+  <text x="256" y="430" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="76" letter-spacing="6"
+        fill="#00fff2" opacity="0.15" stroke="#00fff2" stroke-width="5">illu</text>
+  <text x="256" y="430" text-anchor="middle"
+        font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace"
+        font-weight="800" font-size="76" letter-spacing="6"
+        fill="#00fff2">illu</text>
+
+  <!-- Subtitle -->
+  <text x="256" y="465" text-anchor="middle"
+        font-family="'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-weight="300" font-size="16" letter-spacing="6"
+        fill="#7c3aed" opacity="0.8">CODE INTELLIGENCE</text>
+</svg>
