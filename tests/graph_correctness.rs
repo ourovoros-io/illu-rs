@@ -49,9 +49,7 @@ pub fn func_d() {}
 ",
     );
 
-    let entries = db
-        .impact_dependents_with_depth("func_d", None, 5)
-        .unwrap();
+    let entries = db.impact_dependents_with_depth("func_d", None, 5).unwrap();
 
     assert_eq!(
         entries.len(),
@@ -101,9 +99,7 @@ pub fn top() { left(); right(); }
 ",
     );
 
-    let entries = db
-        .impact_dependents_with_depth("base", None, 3)
-        .unwrap();
+    let entries = db.impact_dependents_with_depth("base", None, 3).unwrap();
 
     let depth1_names: Vec<&str> = entries
         .iter()
@@ -154,9 +150,7 @@ pub fn gamma() { alpha(); }
     );
 
     // The CTE uses UNION (not UNION ALL) so cycles are handled.
-    let entries = db
-        .impact_dependents_with_depth("alpha", None, 5)
-        .unwrap();
+    let entries = db.impact_dependents_with_depth("alpha", None, 5).unwrap();
 
     assert!(
         !entries.is_empty(),
@@ -184,15 +178,10 @@ pub fn d6() { d5(); }
 ",
     );
 
-    let entries = db
-        .impact_dependents_with_depth("d0", None, 3)
-        .unwrap();
+    let entries = db.impact_dependents_with_depth("d0", None, 3).unwrap();
 
     let max_depth = entries.iter().map(|e| e.depth).max().unwrap_or(0);
-    assert!(
-        max_depth <= 3,
-        "max depth should be <= 3, got {max_depth}"
-    );
+    assert!(max_depth <= 3, "max depth should be <= 3, got {max_depth}");
 
     let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
     assert!(
@@ -231,9 +220,7 @@ pub fn outer_fn() { mid_fn(); }
 ",
     );
 
-    let entries = db
-        .impact_dependents_with_depth("core_fn", None, 5)
-        .unwrap();
+    let entries = db.impact_dependents_with_depth("core_fn", None, 5).unwrap();
 
     let outer = entries.iter().find(|e| e.name == "outer_fn");
     assert!(
@@ -299,9 +286,7 @@ pub fn transitive_caller() { high_conf_caller(); }
 ",
     );
 
-    let entries = db
-        .impact_dependents_with_depth("do_work", None, 2)
-        .unwrap();
+    let entries = db.impact_dependents_with_depth("do_work", None, 2).unwrap();
 
     let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
     assert!(
@@ -647,16 +632,9 @@ pub fn isolated_b() {}
 ",
     );
 
-    let output = callpath::handle_callpath(
-        &db,
-        "isolated_a",
-        "isolated_b",
-        None,
-        false,
-        None,
-        false,
-    )
-    .unwrap();
+    let output =
+        callpath::handle_callpath(&db, "isolated_a", "isolated_b", None, false, None, false)
+            .unwrap();
 
     let lower = output.to_lowercase();
     assert!(
@@ -685,8 +663,7 @@ pub fn destination() {}
         .lines()
         .filter(|l| {
             let trimmed = l.trim();
-            trimmed.starts_with("1.") || trimmed.starts_with("2.")
-                || trimmed.starts_with("3.")
+            trimmed.starts_with("1.") || trimmed.starts_with("2.") || trimmed.starts_with("3.")
         })
         .count();
     assert!(
@@ -741,9 +718,7 @@ pub fn caller_b() { target(); }
 ",
     );
 
-    let impact_entries = db
-        .impact_dependents_with_depth("target", None, 1)
-        .unwrap();
+    let impact_entries = db.impact_dependents_with_depth("target", None, 1).unwrap();
     let mut impact_names: Vec<&str> = impact_entries
         .iter()
         .filter(|e| e.depth == 1)

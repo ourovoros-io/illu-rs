@@ -67,9 +67,7 @@ fn index_multi_file(files: &[(&str, &str)]) -> (tempfile::TempDir, Database) {
 
 #[test]
 fn async_fn_preserves_async_in_signature() {
-    let (_dir, db) = index_source(
-        "pub async fn fetch() -> String { String::new() }",
-    );
+    let (_dir, db) = index_source("pub async fn fetch() -> String { String::new() }");
     let syms = db.search_symbols_exact("fetch").unwrap();
     assert!(!syms.is_empty(), "fetch symbol not found");
     let sig = &syms[0].signature;
@@ -81,9 +79,7 @@ fn async_fn_preserves_async_in_signature() {
 
 #[test]
 fn unsafe_fn_preserves_unsafe_in_signature() {
-    let (_dir, db) = index_source(
-        "pub unsafe fn raw_ptr() -> *const u8 { std::ptr::null() }",
-    );
+    let (_dir, db) = index_source("pub unsafe fn raw_ptr() -> *const u8 { std::ptr::null() }");
     let syms = db.search_symbols_exact("raw_ptr").unwrap();
     assert!(!syms.is_empty(), "raw_ptr symbol not found");
     let sig = &syms[0].signature;
@@ -95,9 +91,7 @@ fn unsafe_fn_preserves_unsafe_in_signature() {
 
 #[test]
 fn const_generic_parameter_captured() {
-    let (_dir, db) = index_source(
-        "pub fn fixed_buffer<const N: usize>() -> [u8; N] { [0; N] }",
-    );
+    let (_dir, db) = index_source("pub fn fixed_buffer<const N: usize>() -> [u8; N] { [0; N] }");
     let syms = db.search_symbols_exact("fixed_buffer").unwrap();
     assert!(!syms.is_empty(), "fixed_buffer symbol not found");
     let sig = &syms[0].signature;
@@ -109,9 +103,8 @@ fn const_generic_parameter_captured() {
 
 #[test]
 fn where_clause_not_truncated() {
-    let (_dir, db) = index_source(
-        "pub fn convert<T, U>(t: T) -> U where T: Into<U>, U: Clone { t.into() }",
-    );
+    let (_dir, db) =
+        index_source("pub fn convert<T, U>(t: T) -> U where T: Into<U>, U: Clone { t.into() }");
     let syms = db.search_symbols_exact("convert").unwrap();
     assert!(!syms.is_empty(), "convert symbol not found");
     let sig = &syms[0].signature;
@@ -123,9 +116,7 @@ fn where_clause_not_truncated() {
 
 #[test]
 fn enum_variants_get_parent_as_impl_type() {
-    let (_dir, db) = index_source(
-        "pub enum Color { Red, Green, Blue }",
-    );
+    let (_dir, db) = index_source("pub enum Color { Red, Green, Blue }");
     let syms = db.search_symbols_exact("Red").unwrap();
     assert!(!syms.is_empty(), "Red variant not found");
     assert_eq!(
@@ -142,9 +133,7 @@ fn enum_variants_get_parent_as_impl_type() {
 
 #[test]
 fn impl_method_gets_type_as_impl_type() {
-    let (_dir, db) = index_source(
-        "pub struct Db;\nimpl Db { pub fn open(&self) {} }",
-    );
+    let (_dir, db) = index_source("pub struct Db;\nimpl Db { pub fn open(&self) {} }");
     let syms = db.search_symbols_exact("open").unwrap();
     assert!(!syms.is_empty(), "open symbol not found");
     assert_eq!(
@@ -156,27 +145,21 @@ fn impl_method_gets_type_as_impl_type() {
 
 #[test]
 fn nested_mod_symbols_extracted() {
-    let (_dir, db) = index_source(
-        "mod inner { pub fn nested_helper() {} }",
-    );
+    let (_dir, db) = index_source("mod inner { pub fn nested_helper() {} }");
     let exists = db.symbol_exists("nested_helper").unwrap();
     assert!(exists, "nested_helper inside mod should be extracted");
 }
 
 #[test]
 fn extern_c_functions_extracted() {
-    let (_dir, db) = index_source(
-        "extern \"C\" { fn c_function(x: i32) -> i32; }",
-    );
+    let (_dir, db) = index_source("extern \"C\" { fn c_function(x: i32) -> i32; }");
     let exists = db.symbol_exists("c_function").unwrap();
     assert!(exists, "extern C function should be extracted");
 }
 
 #[test]
 fn union_item_extracted() {
-    let (_dir, db) = index_source(
-        "pub union RawValue { pub int_val: i32, pub float_val: f32 }",
-    );
+    let (_dir, db) = index_source("pub union RawValue { pub int_val: i32, pub float_val: f32 }");
     let syms = db.search_symbols_exact("RawValue").unwrap();
     assert!(!syms.is_empty(), "RawValue union not found");
     assert_eq!(
@@ -188,9 +171,7 @@ fn union_item_extracted() {
 
 #[test]
 fn reexport_use_captured() {
-    let (_dir, db) = index_source(
-        "pub use std::collections::HashMap;",
-    );
+    let (_dir, db) = index_source("pub use std::collections::HashMap;");
     // Use symbol name is the full declaration text, not just the last segment.
     let syms = db.search_symbols("HashMap").unwrap();
     let use_sym = syms.iter().find(|s| s.kind == SymbolKind::Use);
@@ -401,18 +382,14 @@ fn constructor_on_unknown_type_filtered() {
          pub fn create_mine() -> MyType { MyType::new() }\n\
          pub fn create_vec() { Vec::new(); }",
     );
-    let mine_callees = db
-        .get_callees("create_mine", "src/lib.rs", false)
-        .unwrap();
+    let mine_callees = db.get_callees("create_mine", "src/lib.rs", false).unwrap();
     let mine_has_new = mine_callees.iter().any(|c| c.name == "new");
     assert!(
         mine_has_new,
         "MyType::new() on known type should be captured, callees: {mine_callees:?}"
     );
 
-    let vec_callees = db
-        .get_callees("create_vec", "src/lib.rs", false)
-        .unwrap();
+    let vec_callees = db.get_callees("create_vec", "src/lib.rs", false).unwrap();
     let vec_has_new = vec_callees.iter().any(|c| c.name == "new");
     assert!(
         !vec_has_new,
@@ -429,9 +406,7 @@ fn local_variable_shadow_prevents_false_ref() {
              Config + 1\n\
          }",
     );
-    let impact = db
-        .impact_dependents_with_depth("Config", None, 3)
-        .unwrap();
+    let impact = db.impact_dependents_with_depth("Config", None, 3).unwrap();
     let has_misleading = impact.iter().any(|e| e.name == "misleading");
     assert!(
         !has_misleading,

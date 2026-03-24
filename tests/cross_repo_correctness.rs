@@ -12,18 +12,13 @@ use std::path::PathBuf;
 
 /// Create an indexed repo on disk with `.illu/index.db`.
 /// Returns `(TempDir, Database)` -- `TempDir` must stay alive.
-fn create_indexed_repo(
-    name: &str,
-    lib_rs: &str,
-    deps: &str,
-) -> (tempfile::TempDir, Database) {
+fn create_indexed_repo(name: &str, lib_rs: &str, deps: &str) -> (tempfile::TempDir, Database) {
     let dir = tempfile::TempDir::new().unwrap();
     let src = dir.path().join("src");
     std::fs::create_dir_all(&src).unwrap();
 
-    let cargo_toml = format!(
-        "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{deps}"
-    );
+    let cargo_toml =
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{deps}");
     std::fs::write(dir.path().join("Cargo.toml"), &cargo_toml).unwrap();
     std::fs::write(
         dir.path().join("Cargo.lock"),
@@ -43,9 +38,7 @@ fn create_indexed_repo(
     (dir, db)
 }
 
-fn build_registry(
-    entries: &[(&str, &std::path::Path)],
-) -> (tempfile::TempDir, Registry) {
+fn build_registry(entries: &[(&str, &std::path::Path)]) -> (tempfile::TempDir, Registry) {
     let reg_dir = tempfile::TempDir::new().unwrap();
     let reg_path = reg_dir.path().join("registry.toml");
     let mut registry = Registry::load(&reg_path).unwrap();
@@ -184,10 +177,8 @@ fn registry_other_repos_excludes_primary() {
     let dir_a = tempfile::TempDir::new().unwrap();
     let dir_b = tempfile::TempDir::new().unwrap();
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let others = registry.other_repos(dir_a.path());
     assert_eq!(others.len(), 1, "should exclude primary: {others:?}");
@@ -208,21 +199,11 @@ fn registry_other_repos_excludes_primary() {
 
 #[test]
 fn cross_query_finds_symbol_in_other_repo() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "repo-a",
-        "pub fn only_in_a() {}",
-        "",
-    );
-    let (dir_b, _db_b) = create_indexed_repo(
-        "repo-b",
-        "pub fn unique_to_b() -> i32 { 42 }",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("repo-a", "pub fn only_in_a() {}", "");
+    let (dir_b, _db_b) = create_indexed_repo("repo-b", "pub fn unique_to_b() -> i32 { 42 }", "");
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let opts = cross_query::CrossQueryOpts {
         query: "unique_to_b",
@@ -234,9 +215,7 @@ fn cross_query_finds_symbol_in_other_repo() {
         limit: None,
     };
 
-    let result =
-        cross_query::handle_cross_query(&registry, dir_a.path(), &opts)
-            .unwrap();
+    let result = cross_query::handle_cross_query(&registry, dir_a.path(), &opts).unwrap();
 
     assert!(
         result.contains("repo-b"),
@@ -250,21 +229,11 @@ fn cross_query_finds_symbol_in_other_repo() {
 
 #[test]
 fn cross_query_excludes_primary_repo_results() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "repo-a",
-        "pub fn shared_name() -> i32 { 1 }",
-        "",
-    );
-    let (dir_b, _db_b) = create_indexed_repo(
-        "repo-b",
-        "pub fn shared_name() -> i32 { 2 }",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("repo-a", "pub fn shared_name() -> i32 { 1 }", "");
+    let (dir_b, _db_b) = create_indexed_repo("repo-b", "pub fn shared_name() -> i32 { 2 }", "");
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let opts = cross_query::CrossQueryOpts {
         query: "shared_name",
@@ -276,9 +245,7 @@ fn cross_query_excludes_primary_repo_results() {
         limit: None,
     };
 
-    let result =
-        cross_query::handle_cross_query(&registry, dir_a.path(), &opts)
-            .unwrap();
+    let result = cross_query::handle_cross_query(&registry, dir_a.path(), &opts).unwrap();
 
     assert!(
         result.contains("repo-b"),
@@ -292,11 +259,7 @@ fn cross_query_excludes_primary_repo_results() {
 
 #[test]
 fn cross_query_with_kind_filter_works() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "repo-a",
-        "pub fn placeholder() {}",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("repo-a", "pub fn placeholder() {}", "");
     let (dir_b, _db_b) = create_indexed_repo(
         "repo-b",
         r"
@@ -306,10 +269,8 @@ pub fn widget_builder() -> u32 { 0 }
         "",
     );
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let opts = cross_query::CrossQueryOpts {
         query: "Widget",
@@ -321,9 +282,7 @@ pub fn widget_builder() -> u32 { 0 }
         limit: None,
     };
 
-    let result =
-        cross_query::handle_cross_query(&registry, dir_a.path(), &opts)
-            .unwrap();
+    let result = cross_query::handle_cross_query(&registry, dir_a.path(), &opts).unwrap();
 
     assert!(
         result.contains("Widget"),
@@ -352,9 +311,7 @@ fn cross_query_returns_clear_message_when_no_repos() {
         limit: None,
     };
 
-    let result =
-        cross_query::handle_cross_query(&registry, &dummy_path, &opts)
-            .unwrap();
+    let result = cross_query::handle_cross_query(&registry, &dummy_path, &opts).unwrap();
 
     assert!(
         result.contains("No other repos"),
@@ -384,17 +341,11 @@ fn shared_helper(x: i32) -> i32 { x * 2 }
         "",
     );
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
-    let result = cross_impact::handle_cross_impact(
-        &registry,
-        dir_a.path(),
-        "shared_helper",
-    )
-    .unwrap();
+    let result =
+        cross_impact::handle_cross_impact(&registry, dir_a.path(), "shared_helper").unwrap();
 
     assert!(
         result.contains("Cross-Repo Impact"),
@@ -430,55 +381,33 @@ fn user() -> i32 { Bar::process() }
         "",
     );
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
-    let result = cross_impact::handle_cross_impact(
-        &registry,
-        dir_a.path(),
-        "Foo::process",
-    )
-    .unwrap();
+    let result =
+        cross_impact::handle_cross_impact(&registry, dir_a.path(), "Foo::process").unwrap();
 
     // Repo B only has Bar::process, not Foo::process.
     // With impl_type filtering, repo B's refs should not match.
     assert!(
-        result.contains("No references")
-            || !result.contains("repo-b"),
+        result.contains("No references") || !result.contains("repo-b"),
         "Foo::process should NOT match Bar::process in repo-b: {result}"
     );
 }
 
 #[test]
 fn cross_impact_with_no_refs_returns_clear_message() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "repo-a",
-        "pub fn unique_to_a() -> bool { true }",
-        "",
-    );
-    let (dir_b, _db_b) = create_indexed_repo(
-        "repo-b",
-        "pub fn unrelated_fn() -> bool { false }",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("repo-a", "pub fn unique_to_a() -> bool { true }", "");
+    let (dir_b, _db_b) =
+        create_indexed_repo("repo-b", "pub fn unrelated_fn() -> bool { false }", "");
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
-    let result = cross_impact::handle_cross_impact(
-        &registry,
-        dir_a.path(),
-        "unique_to_a",
-    )
-    .unwrap();
+    let result = cross_impact::handle_cross_impact(&registry, dir_a.path(), "unique_to_a").unwrap();
 
     assert!(
-        result.contains("No references")
-            || result.contains("No cross-repo"),
+        result.contains("No references") || result.contains("No cross-repo"),
         "should indicate no cross-repo refs: {result}"
     );
 }
@@ -525,10 +454,8 @@ fn cross_deps_finds_shared_crate_dependencies() {
     .unwrap();
     std::fs::write(src_b.join("lib.rs"), "").unwrap();
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let result = cross_deps::handle_cross_deps(&registry).unwrap();
 
@@ -576,10 +503,8 @@ fn cross_deps_with_no_overlap_returns_clear_message() {
     .unwrap();
     std::fs::write(src_b.join("lib.rs"), "").unwrap();
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let result = cross_deps::handle_cross_deps(&registry).unwrap();
 
@@ -628,10 +553,8 @@ fn cross_deps_detects_path_dependencies() {
     .unwrap();
     std::fs::write(src_b.join("lib.rs"), "").unwrap();
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let result = cross_deps::handle_cross_deps(&registry).unwrap();
 
@@ -651,21 +574,13 @@ fn cross_deps_detects_path_dependencies() {
 
 #[test]
 fn cross_query_skips_repo_with_missing_db() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "repo-a",
-        "pub fn in_a() {}",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("repo-a", "pub fn in_a() {}", "");
 
     // repo-b: directory exists but no .illu/index.db
     let dir_b = tempfile::TempDir::new().unwrap();
     std::fs::create_dir_all(dir_b.path().join("src")).unwrap();
 
-    let (dir_c, _db_c) = create_indexed_repo(
-        "repo-c",
-        "pub fn found_in_c() -> bool { true }",
-        "",
-    );
+    let (dir_c, _db_c) = create_indexed_repo("repo-c", "pub fn found_in_c() -> bool { true }", "");
 
     let (_reg_dir, registry) = build_registry(&[
         ("repo-a", dir_a.path()),
@@ -683,9 +598,7 @@ fn cross_query_skips_repo_with_missing_db() {
         limit: None,
     };
 
-    let result =
-        cross_query::handle_cross_query(&registry, dir_a.path(), &opts)
-            .unwrap();
+    let result = cross_query::handle_cross_query(&registry, dir_a.path(), &opts).unwrap();
 
     assert!(
         result.contains("found_in_c"),
@@ -699,14 +612,9 @@ fn cross_query_skips_repo_with_missing_db() {
 
 #[test]
 fn cross_query_on_empty_other_repos() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "repo-a",
-        "pub fn only_repo() {}",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("repo-a", "pub fn only_repo() {}", "");
 
-    let (_reg_dir, registry) =
-        build_registry(&[("repo-a", dir_a.path())]);
+    let (_reg_dir, registry) = build_registry(&[("repo-a", dir_a.path())]);
 
     let opts = cross_query::CrossQueryOpts {
         query: "anything",
@@ -718,9 +626,7 @@ fn cross_query_on_empty_other_repos() {
         limit: None,
     };
 
-    let result =
-        cross_query::handle_cross_query(&registry, dir_a.path(), &opts)
-            .unwrap();
+    let result = cross_query::handle_cross_query(&registry, dir_a.path(), &opts).unwrap();
 
     assert!(
         result.contains("No other repos"),
@@ -730,21 +636,11 @@ fn cross_query_on_empty_other_repos() {
 
 #[test]
 fn cross_impact_on_nonexistent_symbol_returns_message() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "repo-a",
-        "pub fn real_fn() {}",
-        "",
-    );
-    let (dir_b, _db_b) = create_indexed_repo(
-        "repo-b",
-        "pub fn other_fn() {}",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("repo-a", "pub fn real_fn() {}", "");
+    let (dir_b, _db_b) = create_indexed_repo("repo-b", "pub fn other_fn() {}", "");
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("repo-b", dir_b.path()),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let result = cross_impact::handle_cross_impact(
         &registry,
@@ -754,8 +650,7 @@ fn cross_impact_on_nonexistent_symbol_returns_message() {
     .unwrap();
 
     assert!(
-        result.contains("No references")
-            || result.contains("No cross-repo"),
+        result.contains("No references") || result.contains("No cross-repo"),
         "nonexistent symbol should produce no-refs message: {result}"
     );
 }
@@ -766,16 +661,10 @@ fn cross_tools_handle_stale_registry_path() {
     let stale_path = stale_dir.path().to_path_buf();
     drop(stale_dir);
 
-    let (dir_a, _db_a) = create_indexed_repo(
-        "repo-a",
-        "pub fn alive() {}",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("repo-a", "pub fn alive() {}", "");
 
-    let (_reg_dir, registry) = build_registry(&[
-        ("repo-a", dir_a.path()),
-        ("stale-repo", &stale_path),
-    ]);
+    let (_reg_dir, registry) =
+        build_registry(&[("repo-a", dir_a.path()), ("stale-repo", &stale_path)]);
 
     let opts = cross_query::CrossQueryOpts {
         query: "alive",
@@ -786,21 +675,15 @@ fn cross_tools_handle_stale_registry_path() {
         path: None,
         limit: None,
     };
-    let result =
-        cross_query::handle_cross_query(&registry, dir_a.path(), &opts)
-            .unwrap();
+    let result = cross_query::handle_cross_query(&registry, dir_a.path(), &opts).unwrap();
 
     assert!(
         !result.is_empty(),
         "should return some output, not crash: {result}"
     );
 
-    let impact_result = cross_impact::handle_cross_impact(
-        &registry,
-        dir_a.path(),
-        "alive",
-    )
-    .unwrap();
+    let impact_result =
+        cross_impact::handle_cross_impact(&registry, dir_a.path(), "alive").unwrap();
     assert!(
         !impact_result.is_empty(),
         "cross_impact should not crash on stale path: {impact_result}"
@@ -832,13 +715,11 @@ pub struct QueryableStruct { pub val: u64 }
     );
     assert_eq!(results[0].name, "queryable_fn");
 
-    let cross_refs =
-        ro_db.find_cross_refs("queryable_fn", None).unwrap();
+    let cross_refs = ro_db.find_cross_refs("queryable_fn", None).unwrap();
     // May or may not have refs, but the call must succeed
     let _ = cross_refs;
 
-    let struct_results =
-        ro_db.search_symbols("QueryableStruct").unwrap();
+    let struct_results = ro_db.search_symbols("QueryableStruct").unwrap();
     assert!(
         !struct_results.is_empty(),
         "readonly DB should find structs too"
@@ -847,11 +728,7 @@ pub struct QueryableStruct { pub val: u64 }
 
 #[test]
 fn readonly_db_cannot_write() {
-    let (dir, _db) = create_indexed_repo(
-        "readonly-write-test",
-        "pub fn immutable() {}",
-        "",
-    );
+    let (dir, _db) = create_indexed_repo("readonly-write-test", "pub fn immutable() {}", "");
 
     let db_path = dir.path().join(".illu/index.db");
     let ro_db = Database::open_readonly(&db_path).unwrap();
@@ -863,10 +740,7 @@ fn readonly_db_cannot_write() {
     };
     let result = index_repo(&ro_db, &config);
 
-    assert!(
-        result.is_err(),
-        "index_repo on readonly DB should fail"
-    );
+    assert!(result.is_err(), "index_repo on readonly DB should fail");
 }
 
 // ===========================================================================
@@ -875,21 +749,9 @@ fn readonly_db_cannot_write() {
 
 #[test]
 fn repos_tool_shows_all_registered() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "alpha",
-        "pub fn a() {}",
-        "",
-    );
-    let (dir_b, _db_b) = create_indexed_repo(
-        "beta",
-        "pub fn b() {}",
-        "",
-    );
-    let (dir_c, _db_c) = create_indexed_repo(
-        "gamma",
-        "pub fn c() {}",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("alpha", "pub fn a() {}", "");
+    let (dir_b, _db_b) = create_indexed_repo("beta", "pub fn b() {}", "");
+    let (dir_c, _db_c) = create_indexed_repo("gamma", "pub fn c() {}", "");
 
     let (_reg_dir, registry) = build_registry(&[
         ("alpha", dir_a.path()),
@@ -897,43 +759,24 @@ fn repos_tool_shows_all_registered() {
         ("gamma", dir_c.path()),
     ]);
 
-    let result =
-        repos::handle_repos(&registry, dir_a.path()).unwrap();
+    let result = repos::handle_repos(&registry, dir_a.path()).unwrap();
 
-    assert!(
-        result.contains("alpha"),
-        "should list alpha: {result}"
-    );
-    assert!(
-        result.contains("beta"),
-        "should list beta: {result}"
-    );
-    assert!(
-        result.contains("gamma"),
-        "should list gamma: {result}"
-    );
+    assert!(result.contains("alpha"), "should list alpha: {result}");
+    assert!(result.contains("beta"), "should list beta: {result}");
+    assert!(result.contains("gamma"), "should list gamma: {result}");
 }
 
 #[test]
 fn repos_tool_marks_primary_as_active() {
-    let (dir_a, _db_a) = create_indexed_repo(
-        "primary-repo",
-        "pub fn p() {}",
-        "",
-    );
-    let (dir_b, _db_b) = create_indexed_repo(
-        "secondary-repo",
-        "pub fn s() {}",
-        "",
-    );
+    let (dir_a, _db_a) = create_indexed_repo("primary-repo", "pub fn p() {}", "");
+    let (dir_b, _db_b) = create_indexed_repo("secondary-repo", "pub fn s() {}", "");
 
     let (_reg_dir, registry) = build_registry(&[
         ("primary-repo", dir_a.path()),
         ("secondary-repo", dir_b.path()),
     ]);
 
-    let result =
-        repos::handle_repos(&registry, dir_a.path()).unwrap();
+    let result = repos::handle_repos(&registry, dir_a.path()).unwrap();
 
     assert!(
         result.contains("active"),
@@ -941,19 +784,13 @@ fn repos_tool_marks_primary_as_active() {
     );
 
     let lines: Vec<&str> = result.lines().collect();
-    let secondary_line = lines
-        .iter()
-        .find(|l| l.contains("secondary-repo"))
-        .unwrap();
+    let secondary_line = lines.iter().find(|l| l.contains("secondary-repo")).unwrap();
     assert!(
         secondary_line.contains("indexed"),
         "secondary should be 'indexed', not 'active': {secondary_line}"
     );
 
-    let primary_line = lines
-        .iter()
-        .find(|l| l.contains("primary-repo"))
-        .unwrap();
+    let primary_line = lines.iter().find(|l| l.contains("primary-repo")).unwrap();
     assert!(
         primary_line.contains("active"),
         "primary should be 'active': {primary_line}"

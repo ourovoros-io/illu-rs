@@ -35,9 +35,7 @@ fn setup_git_repo(dir: &std::path::Path) {
 
 /// Create a fully on-disk indexed project with git, suitable for
 /// refresh tests. Returns (dir, db, config).
-fn setup_refresh_project(
-    files: &[(&str, &str)],
-) -> (tempfile::TempDir, Database, IndexConfig) {
+fn setup_refresh_project(files: &[(&str, &str)]) -> (tempfile::TempDir, Database, IndexConfig) {
     let dir = tempfile::TempDir::new().unwrap();
     std::fs::write(
         dir.path().join("Cargo.toml"),
@@ -96,10 +94,7 @@ fn git_commit(dir: &std::path::Path, msg: &str) {
 
 #[test]
 fn refresh_adds_new_symbol() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn original() {}\n",
-    )]);
+    let (dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn original() {}\n")]);
 
     // Add a second function
     std::fs::write(
@@ -125,10 +120,8 @@ fn refresh_adds_new_symbol() {
 
 #[test]
 fn refresh_removes_deleted_symbol() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn keeper() {}\npub fn doomed() {}\n",
-    )]);
+    let (dir, db, config) =
+        setup_refresh_project(&[("lib.rs", "pub fn keeper() {}\npub fn doomed() {}\n")]);
 
     assert!(
         !db.search_symbols_exact("doomed").unwrap().is_empty(),
@@ -136,11 +129,7 @@ fn refresh_removes_deleted_symbol() {
     );
 
     // Rewrite file without doomed
-    std::fs::write(
-        dir.path().join("src/lib.rs"),
-        "pub fn keeper() {}\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn keeper() {}\n").unwrap();
 
     refresh_index(&db, &config).unwrap();
 
@@ -158,10 +147,7 @@ fn refresh_removes_deleted_symbol() {
 
 #[test]
 fn refresh_updates_changed_signature() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn evolve(x: i32) {}\n",
-    )]);
+    let (dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn evolve(x: i32) {}\n")]);
 
     let before = db.search_symbols_exact("evolve").unwrap();
     assert!(
@@ -187,10 +173,7 @@ fn refresh_updates_changed_signature() {
 
 #[test]
 fn refresh_updates_moved_line_numbers() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn target() {}\n",
-    )]);
+    let (dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn target() {}\n")]);
 
     let before = db.search_symbols_exact("target").unwrap();
     assert_eq!(
@@ -273,11 +256,7 @@ fn refresh_removes_refs_from_deleted_file() {
 
     // Delete extra.rs and update lib.rs
     std::fs::remove_file(dir.path().join("src/extra.rs")).unwrap();
-    std::fs::write(
-        dir.path().join("src/lib.rs"),
-        "pub fn target() {}\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn target() {}\n").unwrap();
 
     refresh_index(&db, &config).unwrap();
 
@@ -329,9 +308,7 @@ fn refresh_removes_refs_to_deleted_symbol() {
         "'renamed_helper' should exist after refresh"
     );
 
-    let callees = db
-        .get_callees("caller", "src/lib.rs", false)
-        .unwrap();
+    let callees = db.get_callees("caller", "src/lib.rs", false).unwrap();
     let calls_renamed = callees.iter().any(|c| c.name == "renamed_helper");
     assert!(
         calls_renamed,
@@ -347,9 +324,7 @@ fn refresh_updates_ref_when_call_removed() {
         "pub fn target() {}\npub fn caller() { target(); }\n",
     )]);
 
-    let impact = db
-        .impact_dependents_with_depth("target", None, 5)
-        .unwrap();
+    let impact = db.impact_dependents_with_depth("target", None, 5).unwrap();
     assert!(
         impact.iter().any(|e| e.name == "caller"),
         "caller should be in impact of target initially"
@@ -364,9 +339,7 @@ fn refresh_updates_ref_when_call_removed() {
 
     refresh_index(&db, &config).unwrap();
 
-    let impact = db
-        .impact_dependents_with_depth("target", None, 5)
-        .unwrap();
+    let impact = db.impact_dependents_with_depth("target", None, 5).unwrap();
     assert!(
         !impact.iter().any(|e| e.name == "caller"),
         "caller should NOT be in impact of target after call removal"
@@ -375,14 +348,10 @@ fn refresh_updates_ref_when_call_removed() {
 
 #[test]
 fn refresh_adds_ref_when_call_added() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn target() {}\npub fn caller() {}\n",
-    )]);
+    let (dir, db, config) =
+        setup_refresh_project(&[("lib.rs", "pub fn target() {}\npub fn caller() {}\n")]);
 
-    let impact = db
-        .impact_dependents_with_depth("target", None, 5)
-        .unwrap();
+    let impact = db.impact_dependents_with_depth("target", None, 5).unwrap();
     assert!(
         !impact.iter().any(|e| e.name == "caller"),
         "caller should NOT be in impact of target initially"
@@ -397,9 +366,7 @@ fn refresh_adds_ref_when_call_added() {
 
     refresh_index(&db, &config).unwrap();
 
-    let impact = db
-        .impact_dependents_with_depth("target", None, 5)
-        .unwrap();
+    let impact = db.impact_dependents_with_depth("target", None, 5).unwrap();
     assert!(
         impact.iter().any(|e| e.name == "caller"),
         "caller should appear in impact of target after call added"
@@ -480,11 +447,7 @@ fn no_ghost_symbols_after_file_delete() {
 
     // Delete extra.rs and remove mod declaration
     std::fs::remove_file(dir.path().join("src/extra.rs")).unwrap();
-    std::fs::write(
-        dir.path().join("src/lib.rs"),
-        "pub fn lib_fn() {}\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn lib_fn() {}\n").unwrap();
 
     refresh_index(&db, &config).unwrap();
 
@@ -517,9 +480,7 @@ fn no_ghost_refs_after_symbol_rename() {
         "old symbol name 'helper' should not exist after rename"
     );
 
-    let old_impact = db
-        .impact_dependents_with_depth("helper", None, 5)
-        .unwrap();
+    let old_impact = db.impact_dependents_with_depth("helper", None, 5).unwrap();
     assert!(
         old_impact.is_empty(),
         "no references to old name 'helper' should remain"
@@ -536,10 +497,7 @@ fn no_ghost_refs_after_symbol_rename() {
 
 #[test]
 fn version_match_refresh_returns_zero_when_unchanged() {
-    let (_dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn stable() {}\n",
-    )]);
+    let (_dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn stable() {}\n")]);
 
     // Refresh immediately with no changes
     let refreshed = refresh_index(&db, &config).unwrap();
@@ -599,10 +557,7 @@ fn refresh_handles_file_added_and_deleted_simultaneously() {
 
 #[test]
 fn refresh_handles_empty_file_after_edit() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn doomed() {}\n",
-    )]);
+    let (dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn doomed() {}\n")]);
 
     assert!(
         !db.search_symbols_exact("doomed").unwrap().is_empty(),
@@ -615,18 +570,13 @@ fn refresh_handles_empty_file_after_edit() {
     refresh_index(&db, &config).unwrap();
 
     let syms = db.search_symbols_exact("doomed").unwrap();
-    assert!(
-        syms.is_empty(),
-        "doomed should be gone after file emptied"
-    );
+    assert!(syms.is_empty(), "doomed should be gone after file emptied");
 }
 
 #[test]
 fn refresh_handles_syntax_error_gracefully() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn valid() {}\npub fn also_valid() {}\n",
-    )]);
+    let (dir, db, config) =
+        setup_refresh_project(&[("lib.rs", "pub fn valid() {}\npub fn also_valid() {}\n")]);
 
     // Introduce syntax error (tree-sitter does partial parsing)
     std::fs::write(
@@ -637,10 +587,7 @@ fn refresh_handles_syntax_error_gracefully() {
 
     // Should not panic
     let result = refresh_index(&db, &config);
-    assert!(
-        result.is_ok(),
-        "refresh should not crash on syntax errors"
-    );
+    assert!(result.is_ok(), "refresh should not crash on syntax errors");
 
     // valid() should still be parseable via tree-sitter partial parsing
     let syms = db.search_symbols_exact("valid").unwrap();
@@ -652,16 +599,10 @@ fn refresh_handles_syntax_error_gracefully() {
 
 #[test]
 fn refresh_with_no_changes_is_noop() {
-    let (_dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn stable_fn() {}\n",
-    )]);
+    let (_dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn stable_fn() {}\n")]);
 
     let refreshed = refresh_index(&db, &config).unwrap();
-    assert_eq!(
-        refreshed, 0,
-        "refresh with no file changes should return 0"
-    );
+    assert_eq!(refreshed, 0, "refresh with no file changes should return 0");
 }
 
 // ---------------------------------------------------------------------------
@@ -671,8 +612,7 @@ fn refresh_with_no_changes_is_noop() {
 #[test]
 fn identical_content_rewrite_preserves_symbols() {
     let original = "pub fn idempotent() {}\n";
-    let (dir, db, config) =
-        setup_refresh_project(&[("lib.rs", original)]);
+    let (dir, db, config) = setup_refresh_project(&[("lib.rs", original)]);
 
     // Write identical content back
     std::fs::write(dir.path().join("src/lib.rs"), original).unwrap();
@@ -690,17 +630,10 @@ fn identical_content_rewrite_preserves_symbols() {
 
 #[test]
 fn whitespace_change_triggers_reindex() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn ws_test() {}\n",
-    )]);
+    let (dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn ws_test() {}\n")]);
 
     // Add trailing newlines (different content hash)
-    std::fs::write(
-        dir.path().join("src/lib.rs"),
-        "pub fn ws_test() {}\n\n\n\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn ws_test() {}\n\n\n\n").unwrap();
 
     let refreshed = refresh_index(&db, &config).unwrap();
     // Git should report the file as modified, and the content hash
@@ -781,10 +714,7 @@ fn refresh_preserves_other_file_data_on_partial_refresh() {
 
 #[test]
 fn double_refresh_is_stable() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn alpha() {}\n",
-    )]);
+    let (dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn alpha() {}\n")]);
 
     // First edit + refresh
     std::fs::write(
@@ -806,23 +736,14 @@ fn double_refresh_is_stable() {
     let alpha = db.search_symbols_exact("alpha").unwrap();
     let beta = db.search_symbols_exact("beta").unwrap();
     let gamma = db.search_symbols_exact("gamma").unwrap();
-    assert!(
-        !alpha.is_empty(),
-        "alpha should exist after two refreshes"
-    );
+    assert!(!alpha.is_empty(), "alpha should exist after two refreshes");
     assert!(!beta.is_empty(), "beta should exist after two refreshes");
-    assert!(
-        !gamma.is_empty(),
-        "gamma should exist after two refreshes"
-    );
+    assert!(!gamma.is_empty(), "gamma should exist after two refreshes");
 }
 
 #[test]
 fn refresh_add_then_remove_leaves_no_trace() {
-    let (dir, db, config) = setup_refresh_project(&[(
-        "lib.rs",
-        "pub fn permanent() {}\n",
-    )]);
+    let (dir, db, config) = setup_refresh_project(&[("lib.rs", "pub fn permanent() {}\n")]);
 
     // Add a temporary symbol
     std::fs::write(
@@ -840,11 +761,7 @@ fn refresh_add_then_remove_leaves_no_trace() {
     // Commit so git baseline advances, then remove the temporary symbol
     git_commit(dir.path(), "add temporary");
 
-    std::fs::write(
-        dir.path().join("src/lib.rs"),
-        "pub fn permanent() {}\n",
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("src/lib.rs"), "pub fn permanent() {}\n").unwrap();
     refresh_index(&db, &config).unwrap();
 
     let syms = db.search_symbols_exact("temporary").unwrap();
