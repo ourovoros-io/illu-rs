@@ -14,6 +14,8 @@ tokio = { version = "1.50.0", features = [
     "rt-multi-thread",
     "macros",
     "io-std",
+    "time",
+    "fs",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -22,6 +24,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 clap = { version = "4.6.0", features = ["derive"] }
 walkdir = "2.5.0"
+
+# RA (rust-analyzer) integration
+async-lsp = { version = "0.2", features = ["tokio"] }
+lsp-types = "0.95"
+tower = "0.4"
+async-process = "2"
+futures = "0.3"
+url = "2"
+thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3.27.0"

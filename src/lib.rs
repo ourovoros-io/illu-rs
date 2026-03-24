@@ -1,6 +1,7 @@
 pub mod db;
 pub mod git;
 pub mod indexer;
+pub mod ra;
 pub mod registry;
 pub mod server;
 pub mod status;

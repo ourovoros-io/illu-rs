@@ -20,6 +20,7 @@ pub struct IlluServer {
     registry: std::sync::Arc<crate::registry::Registry>,
     tool_router: ToolRouter<Self>,
     last_refresh: std::sync::Arc<Mutex<std::time::Instant>>,
+    ra: Option<std::sync::Arc<crate::ra::RaClient>>,
 }
 
 impl IlluServer {
@@ -35,7 +36,39 @@ impl IlluServer {
                     .checked_sub(REFRESH_COOLDOWN)
                     .unwrap_or(std::time::Instant::now()),
             )),
+            ra: None,
         }
+    }
+
+    /// Set the rust-analyzer client for LSP-powered tools.
+    #[must_use]
+    pub fn with_ra(mut self, ra: std::sync::Arc<crate::ra::RaClient>) -> Self {
+        self.ra = Some(ra);
+        self
+    }
+
+    /// Get a reference to the RA client, if available.
+    fn ra(&self) -> Result<&crate::ra::RaClient, McpError> {
+        self.ra
+            .as_deref()
+            .ok_or_else(|| McpError::internal_error(
+                "rust-analyzer not available — start illu with RA enabled or ensure rust-analyzer is installed",
+                None,
+            ))
+    }
+
+    /// Get RA client and verify it's ready (indexing complete).
+    /// Use this for tools that modify code (rename, SSR) where incomplete indexing
+    /// could produce wrong results.
+    fn require_ra_ready(&self) -> Result<&crate::ra::RaClient, McpError> {
+        let ra = self.ra()?;
+        if !ra.is_ready() {
+            return Err(McpError::internal_error(
+                "rust-analyzer is still indexing — please wait and try again",
+                None,
+            ));
+        }
+        Ok(ra)
     }
 
     #[must_use]
@@ -409,6 +442,66 @@ struct CrossCallpathParams {
     to: String,
     /// Target repo name (optional — searches all if omitted)
     target_repo: Option<String>,
+}
+
+// ── RA (rust-analyzer) tool parameter structs ──────────────────────────
+
+#[derive(Deserialize, JsonSchema)]
+struct RaPositionParams {
+    /// Position as `file:line:col` (1-indexed)
+    position: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RaCallHierarchyParams {
+    /// Position as `file:line:col` (1-indexed)
+    position: String,
+    /// Direction: "in" (callers), "out" (callees), or "both" (default)
+    direction: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RaRenameParams {
+    /// Position as `file:line:col` (1-indexed)
+    position: String,
+    /// The new name for the symbol
+    new_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RaSafeRenameParams {
+    /// Position as `file:line:col` (1-indexed)
+    position: String,
+    /// The new name for the symbol
+    new_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RaCodeActionsParams {
+    /// Position as `file:line:col` (1-indexed)
+    position: String,
+    /// Filter by action kind (e.g. "quickfix", "refactor")
+    kind: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RaSsrParams {
+    /// SSR pattern, e.g. "foo($a) ==>> bar($a)"
+    pattern: String,
+    /// If true, preview changes without applying (default: false)
+    dry_run: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RaDiagnosticsParams {
+    /// File path (optional — shows all diagnostics if omitted)
+    file: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RaFileParams {
+    /// File path (relative to workspace root)
+    file: String,
 }
 
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
@@ -1191,6 +1284,562 @@ impl IlluServer {
         .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
+
+    // ── RA (rust-analyzer) powered tools ────────────────────────────────
+
+    #[tool(
+        name = "ra_definition",
+        description = "Go to compiler-accurate definition of the symbol at file:line:col. Powered by rust-analyzer — resolves through macros, trait impls, and generics."
+    )]
+    async fn ra_definition(
+        &self,
+        Parameters(params): Parameters<RaPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, "Tool call: ra_definition");
+        let ra = self.ra()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        match ra.definition(&spec).await {
+            Ok(locs) => {
+                let mut out = String::new();
+                if locs.is_empty() {
+                    out.push_str("No definition found.");
+                } else {
+                    for loc in &locs {
+                        let rl = crate::ra::types::RichLocation::from_location(loc);
+                        std::fmt::Write::write_fmt(
+                            &mut out,
+                            format_args!("- `{}:{}:{}`\n", rl.file, rl.line, rl.col),
+                        )
+                        .map_err(to_mcp_err)?;
+                    }
+                }
+                Ok(text_result(out))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_hover",
+        description = "Show type information and documentation for the symbol at file:line:col. Powered by rust-analyzer."
+    )]
+    async fn ra_hover(
+        &self,
+        Parameters(params): Parameters<RaPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, "Tool call: ra_hover");
+        let ra = self.ra()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        match ra.hover(&spec).await {
+            Ok(Some(text)) => Ok(text_result(text)),
+            Ok(None) => Ok(text_result("No hover information available.".to_string())),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_diagnostics",
+        description = "Show compilation errors and warnings from rust-analyzer. Optionally filter to a specific file."
+    )]
+    async fn ra_diagnostics(
+        &self,
+        Parameters(params): Parameters<RaDiagnosticsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(file = ?params.file, "Tool call: ra_diagnostics");
+        let ra = self.ra()?;
+        if let Some(path) = params.file {
+            let path = std::path::PathBuf::from(&path);
+            match ra.get_diagnostics(&path) {
+                Ok(diags) => {
+                    let json = serde_json::to_string_pretty(&diags).unwrap_or_default();
+                    Ok(text_result(format!("```json\n{json}\n```")))
+                }
+                Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            }
+        } else {
+            let all = ra.get_all_diagnostics();
+            let json = serde_json::to_string_pretty(&all).unwrap_or_default();
+            Ok(text_result(format!("```json\n{json}\n```")))
+        }
+    }
+
+    #[tool(
+        name = "ra_call_hierarchy",
+        description = "Show callers and/or callees for the symbol at file:line:col. Direction: 'in' (callers), 'out' (callees), or 'both' (default). Powered by rust-analyzer."
+    )]
+    async fn ra_call_hierarchy(
+        &self,
+        Parameters(params): Parameters<RaCallHierarchyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, "Tool call: ra_call_hierarchy");
+        let ra = self.ra()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let items = match ra.prepare_call_hierarchy(&spec).await {
+            Ok(items) => items,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
+        if items.is_empty() {
+            return Ok(text_result("No call hierarchy item found.".to_string()));
+        }
+        let Some(item) = items.into_iter().next() else {
+            return Ok(text_result("No call hierarchy item found.".to_string()));
+        };
+        let dir = params.direction.unwrap_or_else(|| "both".to_string());
+        let mut out = String::new();
+
+        if dir == "in" || dir == "both" {
+            match ra.incoming_calls(item.clone()).await {
+                Ok(calls) => {
+                    out.push_str("## Incoming Calls (Callers)\n");
+                    for call in &calls {
+                        std::fmt::Write::write_fmt(
+                            &mut out,
+                            format_args!(
+                                "- `{}` ({}) at `{}:{}`\n",
+                                call.name, call.kind, call.file, call.line
+                            ),
+                        )
+                        .map_err(to_mcp_err)?;
+                    }
+                    out.push('\n');
+                }
+                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            }
+        }
+        if dir == "out" || dir == "both" {
+            match ra.outgoing_calls(item).await {
+                Ok(calls) => {
+                    out.push_str("## Outgoing Calls (Callees)\n");
+                    for call in &calls {
+                        std::fmt::Write::write_fmt(
+                            &mut out,
+                            format_args!(
+                                "- `{}` ({}) at `{}:{}`\n",
+                                call.name, call.kind, call.file, call.line
+                            ),
+                        )
+                        .map_err(to_mcp_err)?;
+                    }
+                    out.push('\n');
+                }
+                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            }
+        }
+
+        Ok(text_result(out))
+    }
+
+    #[tool(
+        name = "ra_type_hierarchy",
+        description = "Show supertypes (traits implemented) and subtypes for the type at file:line:col. Powered by rust-analyzer."
+    )]
+    async fn ra_type_hierarchy(
+        &self,
+        Parameters(params): Parameters<RaPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, "Tool call: ra_type_hierarchy");
+        let ra = self.ra()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let items = match ra.prepare_type_hierarchy(&spec).await {
+            Ok(items) => items,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
+        if items.is_empty() {
+            return Ok(text_result("No type hierarchy item found.".to_string()));
+        }
+        let Some(item) = items.into_iter().next() else {
+            return Ok(text_result("No type hierarchy item found.".to_string()));
+        };
+        let mut out = String::new();
+
+        match ra.supertypes(item.clone()).await {
+            Ok(supertypes) if !supertypes.is_empty() => {
+                out.push_str("## Supertypes\n");
+                for sym in &supertypes {
+                    std::fmt::Write::write_fmt(
+                        &mut out,
+                        format_args!(
+                            "- **{}** `{}` ({}:{})\n",
+                            sym.kind, sym.name, sym.file, sym.line
+                        ),
+                    )
+                    .map_err(to_mcp_err)?;
+                }
+                out.push('\n');
+            }
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            _ => {}
+        }
+
+        match ra.subtypes(item).await {
+            Ok(subtypes) if !subtypes.is_empty() => {
+                out.push_str("## Subtypes\n");
+                for sym in &subtypes {
+                    std::fmt::Write::write_fmt(
+                        &mut out,
+                        format_args!(
+                            "- **{}** `{}` ({}:{})\n",
+                            sym.kind, sym.name, sym.file, sym.line
+                        ),
+                    )
+                    .map_err(to_mcp_err)?;
+                }
+                out.push('\n');
+            }
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            _ => {}
+        }
+
+        if out.is_empty() {
+            out.push_str("No supertypes or subtypes found.");
+        }
+        Ok(text_result(out))
+    }
+
+    #[tool(
+        name = "ra_rename",
+        description = "Preview the impact of renaming a symbol. Shows affected files and reference counts. Use ra_safe_rename to actually apply the rename."
+    )]
+    async fn ra_rename(
+        &self,
+        Parameters(params): Parameters<RaRenameParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, new_name = %params.new_name, "Tool call: ra_rename");
+        let ra = self.require_ra_ready()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        match ra.rename_preview(&spec, &params.new_name).await {
+            Ok(impact) => {
+                let mut out = format!(
+                    "## Rename Preview: `{}` → `{}`\n\n**Total references:** {}\n**Files affected:** {}\n\n",
+                    impact.old_name,
+                    impact.new_name,
+                    impact.total_references,
+                    impact.files_affected.len()
+                );
+                for file_ref in &impact.references_by_file {
+                    std::fmt::Write::write_fmt(
+                        &mut out,
+                        format_args!("- `{}` ({} references)\n", file_ref.file, file_ref.count),
+                    )
+                    .map_err(to_mcp_err)?;
+                }
+                Ok(text_result(out))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_safe_rename",
+        description = "Safe rename: previews impact, applies the rename, and checks for new compilation errors. Powered by rust-analyzer."
+    )]
+    async fn ra_safe_rename(
+        &self,
+        Parameters(params): Parameters<RaSafeRenameParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, new_name = %params.new_name, "Tool call: ra_safe_rename");
+        let ra = self.require_ra_ready()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        match ra.safe_rename(&spec, &params.new_name).await {
+            Ok(result) => {
+                let mut out = format!(
+                    "## Rename Complete: `{}` → `{}`\n\n**Edits applied:** {}\n**Files changed:** {}\n\n",
+                    result.old_name,
+                    result.new_name,
+                    result.total_edits,
+                    result.files_changed.len()
+                );
+                for file in &result.files_changed {
+                    std::fmt::Write::write_fmt(&mut out, format_args!("- `{file}`\n"))
+                        .map_err(to_mcp_err)?;
+                }
+                if !result.new_diagnostics.is_empty() {
+                    out.push_str("\n### New Diagnostics\n");
+                    for diag in &result.new_diagnostics {
+                        std::fmt::Write::write_fmt(
+                            &mut out,
+                            format_args!(
+                                "- **{}** `{}:{}`: {}\n",
+                                diag.severity, diag.file, diag.line, diag.message
+                            ),
+                        )
+                        .map_err(to_mcp_err)?;
+                    }
+                }
+                Ok(text_result(out))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_code_actions",
+        description = "List available code actions (quick fixes, refactors) at file:line:col. Optionally filter by kind (e.g. 'quickfix', 'refactor'). Powered by rust-analyzer."
+    )]
+    async fn ra_code_actions(
+        &self,
+        Parameters(params): Parameters<RaCodeActionsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, "Tool call: ra_code_actions");
+        let ra = self.ra()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        match ra.code_actions(&spec, params.kind.as_deref()).await {
+            Ok(actions) => {
+                let mut out = String::new();
+                if actions.is_empty() {
+                    out.push_str("No code actions available.");
+                } else {
+                    for action in &actions {
+                        match action {
+                            lsp_types::CodeActionOrCommand::CodeAction(ca) => {
+                                let kind = ca.kind.as_ref().map_or("", |k| k.as_str());
+                                std::fmt::Write::write_fmt(
+                                    &mut out,
+                                    format_args!("- **{}** [{}]\n", ca.title, kind),
+                                )
+                                .map_err(to_mcp_err)?;
+                            }
+                            lsp_types::CodeActionOrCommand::Command(cmd) => {
+                                std::fmt::Write::write_fmt(
+                                    &mut out,
+                                    format_args!("- {}\n", cmd.title),
+                                )
+                                .map_err(to_mcp_err)?;
+                            }
+                        }
+                    }
+                }
+                Ok(text_result(out))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_expand_macro",
+        description = "Expand the macro at file:line:col, showing the generated Rust code. Powered by rust-analyzer."
+    )]
+    async fn ra_expand_macro(
+        &self,
+        Parameters(params): Parameters<RaPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, "Tool call: ra_expand_macro");
+        let ra = self.ra()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        match ra.expand_macro(&spec).await {
+            Ok(Some(expanded)) => {
+                let out = format!(
+                    "## Macro: {}\n```rust\n{}\n```",
+                    expanded.name, expanded.expansion
+                );
+                Ok(text_result(out))
+            }
+            Ok(None) => Ok(text_result("No macro at this position.".to_string())),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_ssr",
+        description = "Structural search and replace using rust-analyzer's SSR engine. Pattern format: 'foo($a) ==>> bar($a)'. Set dry_run=true to preview."
+    )]
+    async fn ra_ssr(
+        &self,
+        Parameters(params): Parameters<RaSsrParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(pattern = %params.pattern, "Tool call: ra_ssr");
+        let ra = self.require_ra_ready()?;
+        match ra.ssr(&params.pattern).await {
+            Ok(edit) => {
+                if params.dry_run.unwrap_or(false) {
+                    let json = serde_json::to_string_pretty(&edit).unwrap_or_default();
+                    Ok(text_result(format!("```json\n{json}\n```")))
+                } else {
+                    match crate::ra::ops::apply_workspace_edit(&edit) {
+                        Ok(changed) => {
+                            let mut out = String::from("## SSR Applied\nFiles changed:\n");
+                            for f in &changed {
+                                std::fmt::Write::write_fmt(&mut out, format_args!("  - {f}\n"))
+                                    .map_err(to_mcp_err)?;
+                            }
+                            Ok(text_result(out))
+                        }
+                        Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                    }
+                }
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_context",
+        description = "Get full compiler-accurate context for a symbol at file:line:col: definition, hover, callers, callees, implementations, and related tests. Powered by rust-analyzer."
+    )]
+    async fn ra_context(
+        &self,
+        Parameters(params): Parameters<RaPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, "Tool call: ra_context");
+        let ra = self.ra()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        match ra.symbol_context(&spec).await {
+            Ok(ctx) => {
+                let mut out = format!("## {}\n\n", ctx.name);
+                if let Some(hover) = &ctx.hover {
+                    std::fmt::Write::write_fmt(&mut out, format_args!("{hover}\n\n"))
+                        .map_err(to_mcp_err)?;
+                }
+                std::fmt::Write::write_fmt(
+                    &mut out,
+                    format_args!(
+                        "**Definition:** `{}:{}:{}`\n",
+                        ctx.definition.file, ctx.definition.line, ctx.definition.col
+                    ),
+                )
+                .map_err(to_mcp_err)?;
+                if !ctx.definition.text.is_empty() {
+                    std::fmt::Write::write_fmt(
+                        &mut out,
+                        format_args!("```rust\n{}\n```\n\n", ctx.definition.text),
+                    )
+                    .map_err(to_mcp_err)?;
+                }
+                std::fmt::Write::write_fmt(
+                    &mut out,
+                    format_args!("**References:** {}\n\n", ctx.reference_count),
+                )
+                .map_err(to_mcp_err)?;
+                if !ctx.incoming_calls.is_empty() {
+                    out.push_str("### Callers\n");
+                    for call in &ctx.incoming_calls {
+                        std::fmt::Write::write_fmt(
+                            &mut out,
+                            format_args!(
+                                "- `{}` ({}) at `{}:{}`\n",
+                                call.name, call.kind, call.file, call.line
+                            ),
+                        )
+                        .map_err(to_mcp_err)?;
+                    }
+                    out.push('\n');
+                }
+                if !ctx.outgoing_calls.is_empty() {
+                    out.push_str("### Callees\n");
+                    for call in &ctx.outgoing_calls {
+                        std::fmt::Write::write_fmt(
+                            &mut out,
+                            format_args!(
+                                "- `{}` ({}) at `{}:{}`\n",
+                                call.name, call.kind, call.file, call.line
+                            ),
+                        )
+                        .map_err(to_mcp_err)?;
+                    }
+                    out.push('\n');
+                }
+                if !ctx.implementations.is_empty() {
+                    out.push_str("### Implementations\n");
+                    for loc in &ctx.implementations {
+                        std::fmt::Write::write_fmt(
+                            &mut out,
+                            format_args!("- `{}:{}:{}`\n", loc.file, loc.line, loc.col),
+                        )
+                        .map_err(to_mcp_err)?;
+                    }
+                    out.push('\n');
+                }
+                if !ctx.related_tests.is_empty() {
+                    out.push_str("### Related Tests\n");
+                    for test in &ctx.related_tests {
+                        std::fmt::Write::write_fmt(&mut out, format_args!("- `{test}`\n"))
+                            .map_err(to_mcp_err)?;
+                    }
+                    out.push('\n');
+                }
+                Ok(text_result(out))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_syntax_tree",
+        description = "Show the syntax tree for a file. Useful for debugging macro expansion and understanding parse structure. Powered by rust-analyzer."
+    )]
+    async fn ra_syntax_tree(
+        &self,
+        Parameters(params): Parameters<RaFileParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(file = %params.file, "Tool call: ra_syntax_tree");
+        let ra = self.ra()?;
+        let path = std::path::PathBuf::from(&params.file);
+        match ra.syntax_tree(&path).await {
+            Ok(tree) => Ok(text_result(tree)),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        name = "ra_related_tests",
+        description = "Find tests related to the symbol at file:line:col. Uses rust-analyzer's test discovery — more accurate than text-based matching."
+    )]
+    async fn ra_related_tests(
+        &self,
+        Parameters(params): Parameters<RaPositionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(position = %params.position, "Tool call: ra_related_tests");
+        let ra = self.ra()?;
+        let spec: crate::ra::PositionSpec = params
+            .position
+            .parse()
+            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        match ra.related_tests(&spec).await {
+            Ok(tests) => {
+                if tests.is_empty() {
+                    Ok(text_result("No related tests found.".to_string()))
+                } else {
+                    let mut out = String::new();
+                    for test in &tests {
+                        std::fmt::Write::write_fmt(
+                            &mut out,
+                            format_args!("- {}\n", test.runnable.label),
+                        )
+                        .map_err(to_mcp_err)?;
+                    }
+                    Ok(text_result(out))
+                }
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
 }
 
 #[tool_handler]
@@ -1234,7 +1883,21 @@ impl ServerHandler for IlluServer {
              'cross_query' for searching symbols across all registered repos, \
              'cross_impact' for finding cross-repo references to a symbol, \
              'cross_deps' for showing inter-repo dependency relationships, \
-             'cross_callpath' for finding call chains spanning repo boundaries.",
+             'cross_callpath' for finding call chains spanning repo boundaries. \
+             When rust-analyzer is available, additional 'ra_*' tools provide compiler-accurate intelligence: \
+             'ra_definition' for precise go-to-definition, \
+             'ra_hover' for type info and docs, \
+             'ra_diagnostics' for compilation errors, \
+             'ra_call_hierarchy' for compiler-accurate callers/callees, \
+             'ra_type_hierarchy' for supertypes/subtypes, \
+             'ra_rename' for safe workspace-wide rename, \
+             'ra_safe_rename' for rename with diagnostic verification, \
+             'ra_code_actions' for quick fixes and refactors, \
+             'ra_expand_macro' for macro expansion, \
+             'ra_ssr' for structural search and replace, \
+             'ra_context' for full compiler-accurate symbol context, \
+             'ra_syntax_tree' for debugging parse structure, \
+             'ra_related_tests' for compiler-accurate test discovery.",
         )
     }
 }
