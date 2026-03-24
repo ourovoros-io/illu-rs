@@ -74,9 +74,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i + 1;
         for (j, &cb) in b.iter().enumerate() {
             let cost = usize::from(!ca.eq_ignore_ascii_case(&cb));
-            curr[j + 1] = (prev[j] + cost)
-                .min(prev[j + 1] + 1)
-                .min(curr[j] + 1);
+            curr[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(curr[j] + 1);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -85,10 +83,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
 
 /// Fuzzy-match a query against all symbol names using edit distance.
 /// Returns top 3 matches within a reasonable distance threshold.
-fn levenshtein_suggestions(
-    db: &Database,
-    query: &str,
-) -> Vec<(String, Option<String>)> {
+fn levenshtein_suggestions(db: &Database, query: &str) -> Vec<(String, Option<String>)> {
     let all_names = db.get_all_distinct_symbol_names().unwrap_or_default();
     let max_dist = (query.len() * 2 / 5).max(2);
     let mut scored: Vec<(usize, String, Option<String>)> = all_names
@@ -154,9 +149,7 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
     let lev_matches = levenshtein_suggestions(db, name);
     if !lev_matches.is_empty() {
         use std::fmt::Write;
-        let mut out = format!(
-            "No symbol found matching '{name}'.\n\nDid you mean:\n",
-        );
+        let mut out = format!("No symbol found matching '{name}'.\n\nDid you mean:\n",);
         for (sym_name, impl_type) in &lev_matches {
             let qname = if let Some(it) = impl_type {
                 format!("{it}::{sym_name}")

@@ -1327,9 +1327,18 @@ mod tests {
 
     #[test]
     fn test_signature_matches_type_alias_suffix() {
-        assert!(signature_matches("pub fn open() -> SqlResult<Self>", "-> Result"));
-        assert!(signature_matches("fn foo() -> anyhow::Result<()>", "-> Result"));
-        assert!(!signature_matches("pub fn open() -> SqlResult<Self>", "-> String"));
+        assert!(signature_matches(
+            "pub fn open() -> SqlResult<Self>",
+            "-> Result"
+        ));
+        assert!(signature_matches(
+            "fn foo() -> anyhow::Result<()>",
+            "-> Result"
+        ));
+        assert!(!signature_matches(
+            "pub fn open() -> SqlResult<Self>",
+            "-> String"
+        ));
     }
 
     #[test]

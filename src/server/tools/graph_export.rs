@@ -92,14 +92,8 @@ fn collect_file_edges(
     let edges: Vec<(String, String)> = deps
         .into_iter()
         .map(|(src, tgt)| {
-            let short_src = src
-                .strip_prefix(path_prefix)
-                .unwrap_or(&src)
-                .to_owned();
-            let short_tgt = tgt
-                .strip_prefix(path_prefix)
-                .unwrap_or(&tgt)
-                .to_owned();
+            let short_src = src.strip_prefix(path_prefix).unwrap_or(&src).to_owned();
+            let short_tgt = tgt.strip_prefix(path_prefix).unwrap_or(&tgt).to_owned();
             (short_src, short_tgt)
         })
         .collect();
@@ -140,11 +134,7 @@ fn render_dot(
     out
 }
 
-fn render_edges_format(
-    edges: &[(String, String)],
-    node_count: usize,
-    edge_count: usize,
-) -> String {
+fn render_edges_format(edges: &[(String, String)], node_count: usize, edge_count: usize) -> String {
     let mut out = String::new();
     for (src, tgt) in edges {
         let _ = writeln!(out, "{src} -> {tgt}");
@@ -153,11 +143,7 @@ fn render_edges_format(
     out
 }
 
-fn render_summary(
-    edges: &[(String, String)],
-    node_count: usize,
-    edge_count: usize,
-) -> String {
+fn render_summary(edges: &[(String, String)], node_count: usize, edge_count: usize) -> String {
     let mut sources = HashSet::new();
     let mut targets = HashSet::new();
     for (src, tgt) in edges {
