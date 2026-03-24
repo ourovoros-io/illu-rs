@@ -19,6 +19,10 @@ struct Cli {
     /// Path to the repo
     #[arg(long, short, global = true, default_value = ".")]
     repo: PathBuf,
+
+    /// Disable rust-analyzer integration (RA tools will not be available)
+    #[arg(long, global = true)]
+    no_ra: bool,
 }
 
 #[derive(Subcommand)]
@@ -554,7 +558,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Vec::new()
             };
 
-            let server = IlluServer::new(db, config.clone(), registry);
+            let mut server = IlluServer::new(db, config.clone(), registry);
+
+            // Start rust-analyzer in the background if available
+            if !cli.no_ra && has_cargo {
+                match illu_rs::ra::RaClient::start(repo_path).await {
+                    Ok(ra) => {
+                        let ra = std::sync::Arc::new(ra);
+                        server = server.with_ra(ra.clone());
+                        tokio::spawn(async move {
+                            match ra.wait_for_ready(std::time::Duration::from_secs(120)).await {
+                                Ok(()) => tracing::info!("rust-analyzer is ready"),
+                                Err(e) => {
+                                    tracing::warn!("rust-analyzer readiness timeout: {e}");
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Could not start rust-analyzer: {e}. RA tools will be unavailable."
+                        );
+                    }
+                }
+            }
+
             let db_arc = server.db();
             let transport = stdio();
             tracing::info!("MCP transport ready, starting handshake");

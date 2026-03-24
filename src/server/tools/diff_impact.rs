@@ -738,7 +738,10 @@ diff --git a/src/lib.rs b/src/lib.rs
             ),
         ];
         let result = render_diff_output(&db, &changed, false, false, "").unwrap();
-        assert!(result.contains("do_thing"), "Should include function, got:\n{result}");
+        assert!(
+            result.contains("do_thing"),
+            "Should include function, got:\n{result}"
+        );
         assert!(
             !result.contains("**tests** (mod"),
             "Should filter out mod, got:\n{result}"

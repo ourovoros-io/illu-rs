@@ -4046,8 +4046,7 @@ pub fn caller(db: &Database) {
         assert!(
             callees
                 .iter()
-                .any(|c| c.name == "open"
-                    && c.impl_type.as_deref() == Some("Database")),
+                .any(|c| c.name == "open" && c.impl_type.as_deref() == Some("Database")),
             "ensure_indexed should have Database::open as callee, got: {callees:#?}"
         );
         assert!(
@@ -4061,16 +4060,12 @@ pub fn caller(db: &Database) {
         assert!(
             oor_callees
                 .iter()
-                .any(|c| c.name == "open"
-                    && c.impl_type.as_deref() == Some("Database")),
+                .any(|c| c.name == "open" && c.impl_type.as_deref() == Some("Database")),
             "open_or_index should have Database::open as callee, got: {oor_callees:#?}"
         );
         assert!(
-            oor_callees
-                .iter()
-                .any(|c| c.name == "ensure_indexed"),
+            oor_callees.iter().any(|c| c.name == "ensure_indexed"),
             "open_or_index should have ensure_indexed as callee, got: {oor_callees:#?}"
         );
     }
-
 }

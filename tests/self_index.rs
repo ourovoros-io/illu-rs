@@ -519,7 +519,8 @@ fn self_graph_export_produces_dot() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let result =
-        graph_export::handle_graph_export(&db, Some("Database"), None, Some(1), None, None).unwrap();
+        graph_export::handle_graph_export(&db, Some("Database"), None, Some(1), None, None)
+            .unwrap();
     assert!(
         result.contains("digraph"),
         "should produce DOT format: {result}"

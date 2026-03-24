@@ -15,7 +15,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-dea584?style=flat-square&logo=rust" alt="Rust 2024"/>
-  <img src="https://img.shields.io/badge/tools-36-blue?style=flat-square" alt="36 tools"/>
+  <img src="https://img.shields.io/badge/tools-49-blue?style=flat-square" alt="49 tools"/>
   <img src="https://img.shields.io/badge/tests-575_passing-brightgreen?style=flat-square" alt="575 tests"/>
 </p>
 
@@ -38,7 +38,7 @@ That's it. Open **Claude Code** or **Gemini CLI** in any Rust project — illu a
 
 `install` writes MCP config to `~/.claude/settings.json` and `~/.gemini/settings.json`, adds usage instructions to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, installs a [statusline](#statusline) for Claude Code, and sets up a global gitignore for `.illu/`.
 
-> **Requirements:** Rust toolchain and a C compiler (Xcode CLI tools on macOS, `build-essential` on Linux). All C dependencies (SQLite, tree-sitter) are compiled from source — no system libraries needed.
+> **Requirements:** Rust toolchain and a C compiler (Xcode CLI tools on macOS, `build-essential` on Linux). All C dependencies (SQLite, tree-sitter) are compiled from source — no system libraries needed. For `ra_*` tools, install rust-analyzer: `rustup component add rust-analyzer` (optional — core tools work without it).
 
 <details>
 <summary>Per-repo setup (alternative to global install)</summary>
@@ -77,7 +77,7 @@ Without `--repo`, illu auto-detects the repo from CWD via `git rev-parse --show-
 
 ## What Your AI Gets
 
-illu gives your AI agent **36 tools** through the [Model Context Protocol](https://modelcontextprotocol.io/), organized into six categories, including cross-repo intelligence:
+illu gives your AI agent **49 tools** through the [Model Context Protocol](https://modelcontextprotocol.io/), organized into seven categories — including cross-repo intelligence and optional **rust-analyzer integration** for compiler-accurate operations:
 
 ### Search and Navigate
 
@@ -408,6 +408,121 @@ See whether the index is current or stale. Shows the indexed commit vs HEAD and 
 
 Reports ref confidence distribution, signature quality, noise sources, and coverage metrics.
 
+### Compiler-Accurate Intelligence (rust-analyzer)
+
+When rust-analyzer is installed, illu automatically spawns it in the background and exposes **13 additional tools** prefixed with `ra_`. These provide compiler-accurate results — resolving through macros, trait impls, and generics — complementing the fast tree-sitter-based tools.
+
+> **Optional:** If rust-analyzer isn't installed or fails to start, all 36 core tools work normally. Use `--no-ra` to skip RA entirely.
+
+#### Go-to-definition — `ra_definition`
+
+Compiler-accurate definition lookup. Resolves through macros, generic impls, and re-exports that tree-sitter can't follow.
+
+```
+position: "src/db.rs:42:10"   → exact definition, even through macro-generated code
+```
+
+#### Type info and docs — `ra_hover`
+
+Full type information and documentation for any position.
+
+```
+position: "src/server/mod.rs:100:15"   → type signature, doc comments, trait bounds
+```
+
+#### Compilation diagnostics — `ra_diagnostics`
+
+Real compilation errors and warnings from the Rust compiler, not just syntax issues.
+
+```
+file: "src/db.rs"   → errors and warnings in this file
+(omit file)         → all diagnostics across the workspace
+```
+
+#### Call hierarchy — `ra_call_hierarchy`
+
+Compiler-accurate callers and callees, including calls through trait objects and dynamic dispatch.
+
+```
+position: "src/db.rs:42:10", direction: "in"    → who calls this
+position: "src/db.rs:42:10", direction: "out"   → what this calls
+position: "src/db.rs:42:10", direction: "both"  → both (default)
+```
+
+#### Type hierarchy — `ra_type_hierarchy`
+
+Supertypes (traits implemented) and subtypes, including blanket impls and generics.
+
+```
+position: "src/db.rs:10:10"   → traits this type implements + types that extend it
+```
+
+#### Rename preview — `ra_rename`
+
+Preview the impact of renaming a symbol — files affected and reference counts. Does not apply changes.
+
+```
+position: "src/db.rs:42:10", new_name: "open_connection"
+```
+
+#### Safe rename — `ra_safe_rename`
+
+Applies a rename across the workspace, then verifies no new compilation errors were introduced.
+
+```
+position: "src/db.rs:42:10", new_name: "open_connection"
+```
+
+#### Code actions — `ra_code_actions`
+
+Quick fixes and refactoring suggestions from rust-analyzer.
+
+```
+position: "src/db.rs:42:10"                    → all available actions
+position: "src/db.rs:42:10", kind: "refactor"  → only refactoring actions
+```
+
+#### Macro expansion — `ra_expand_macro`
+
+See the generated Rust code from a macro invocation.
+
+```
+position: "src/server/mod.rs:422:1"   → expanded code from #[tool_router]
+```
+
+#### Structural search and replace — `ra_ssr`
+
+Pattern-based search and replace using rust-analyzer's SSR engine. Understands Rust syntax, not just text.
+
+```
+pattern: "foo($a, $b) ==>> bar($b, $a)"             → swap arguments
+pattern: "Vec::new() ==>> Vec::with_capacity(16)"    → replace pattern
+```
+
+#### Full symbol context — `ra_context`
+
+Combines definition, hover, references, callers, callees, implementations, and related tests in one call.
+
+```
+position: "src/db.rs:42:10"   → everything about this symbol
+```
+
+#### Related tests — `ra_related_tests`
+
+Compiler-accurate test discovery — finds tests that exercise a symbol through any call path.
+
+```
+position: "src/db.rs:42:10"   → tests that cover this function
+```
+
+#### Syntax tree — `ra_syntax_tree`
+
+Debug view of the parsed syntax tree. Useful for understanding macro expansion and parse structure.
+
+```
+file: "src/db.rs"   → full syntax tree
+```
+
 ### Multi-Repo Intelligence
 
 #### See all your repos — `repos`
@@ -460,7 +575,7 @@ from: "process_request", to: "handle_event", target_repo: "event-service"
 
 Auto-configured via `illu-rs install` (global) or `illu-rs init` (per-repo)
 
-36 tools: `mcp__illu__query`, `mcp__illu__context`, `mcp__illu__cross_query`, etc.
+49 tools: `mcp__illu__query`, `mcp__illu__context`, `mcp__illu__ra_definition`, etc.
 
 </td>
 <td width="50%" align="center">
@@ -469,7 +584,7 @@ Auto-configured via `illu-rs install` (global) or `illu-rs init` (per-repo)
 
 Auto-configured via `illu-rs install` (global) or `illu-rs init` (per-repo)
 
-36 tools: `@illu query`, `@illu context`, `@illu cross_query`, etc.
+49 tools: `@illu query`, `@illu context`, `@illu ra_definition`, etc.
 
 </td>
 </tr>
@@ -522,6 +637,13 @@ Any MCP client with stdio transport support works — illu speaks standard MCP.
 | **Constructor tracking** | `new`, `from`, `default`, `clone` calls are tracked as refs with impl_type disambiguation |
 | **Version-pinned docs** | Two-tier: crate summary + per-module detail from rustdoc JSON |
 | **Full body on demand** | `full_body: true` reads untruncated source from disk |
+| **rust-analyzer integration** | Optional LSP backend for compiler-accurate definitions, hover, diagnostics, rename, and more |
+| **Safe rename** | `ra_safe_rename` applies rename across workspace and verifies no new compilation errors |
+| **Macro expansion** | `ra_expand_macro` shows generated code from any macro invocation |
+| **Structural search & replace** | `ra_ssr` uses RA's syntax-aware engine for pattern-based refactoring |
+| **Type hierarchy** | `ra_type_hierarchy` shows supertypes and subtypes including blanket impls |
+| **Compiler diagnostics** | `ra_diagnostics` shows real compilation errors, not just parse errors |
+| **Background RA startup** | rust-analyzer spawns in background; core tools work immediately while RA indexes |
 
 ## Statusline
 
@@ -565,26 +687,32 @@ The script requires `jq` and `git` on PATH.
             ┌──────────────────────────────────────┐
             │          Your Rust Project            │
             │  src/*.rs  Cargo.toml  Cargo.lock     │
-            └─────────────────┬────────────────────┘
-                              │
-                     ┌────────▼────────┐
-                     │   tree-sitter    │  parse every .rs file
-                     └────────┬────────┘
-                              │
-          symbols, refs, trait impls, deps, docs
-                              │
-                     ┌────────▼────────┐
-                     │  SQLite + FTS5   │  .illu/index.db
-                     └────────┬────────┘
-                              │
-                     ┌────────▼────────┐
-                     │   MCP server     │  stdio transport
-                     └────────┬────────┘
-                              │
-          ┌───────────────────┼───────────────────┐
-          │                   │                    │
-    Claude Code         Gemini CLI          Any MCP client
+            └──────────┬───────────────┬───────────┘
+                       │               │
+              ┌────────▼────────┐  ┌───▼──────────────┐
+              │   tree-sitter    │  │  rust-analyzer    │  optional
+              │  (fast, offline) │  │  (compiler-exact) │
+              └────────┬────────┘  └───┬──────────────┘
+                       │               │
+          symbols, refs, deps      definitions, types,
+          trait impls, docs        diagnostics, rename
+                       │               │
+              ┌────────▼────────┐      │
+              │  SQLite + FTS5   │     │
+              │  .illu/index.db  │     │
+              └────────┬────────┘      │
+                       │               │
+              ┌────────▼───────────────▼──┐
+              │       MCP server           │  stdio transport
+              │  36 core + 13 ra_* tools   │
+              └────────────┬──────────────┘
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                 │
+    Claude Code      Gemini CLI       Any MCP client
 ```
+
+**Two engines:** tree-sitter provides fast offline indexing (36 tools). rust-analyzer provides compiler-accurate intelligence (13 `ra_*` tools) when available. Both run simultaneously.
 
 **Multi-repo:** Each repo gets its own index. A global registry at `~/.illu/registry.toml` tracks all repos. Cross-repo tools open other indexes read-only on demand.
 
@@ -593,7 +721,7 @@ The script requires `jq` and `git` on PATH.
 
 ```
 src/
-├── main.rs              # CLI, init, MCP server startup
+├── main.rs              # CLI, init, MCP server startup (+ RA lifecycle)
 ├── lib.rs               # Shared utilities
 ├── status.rs            # Real-time status file (.illu/status)
 ├── git.rs               # Git operations (worktree detection, toplevel)
@@ -607,9 +735,19 @@ src/
 │   ├── workspace.rs     # Workspace detection + member resolution
 │   ├── cargo_doc.rs     # Nightly rustdoc JSON parsing
 │   └── docs.rs          # Doc fetching (cargo doc → docs.rs → GitHub)
+├── ra/                  # rust-analyzer LSP client (optional at runtime)
+│   ├── client.rs        # RaClient: spawn, initialize, shutdown
+│   ├── transport.rs     # async-lsp notification router, progress tracking
+│   ├── document.rs      # File open/sync tracker for LSP session
+│   ├── retry.rs         # Exponential backoff on CONTENT_MODIFIED
+│   ├── lsp.rs           # Typed LSP wrappers (definition, hover, rename, etc.)
+│   ├── extensions.rs    # rust-analyzer custom requests (macro expand, SSR, etc.)
+│   ├── ops.rs           # Composed operations (symbol_context, safe_rename)
+│   ├── types.rs         # PositionSpec, RichLocation, SymbolContext, etc.
+│   └── error.rs         # RaError enum
 └── server/
-    ├── mod.rs           # MCP server (rmcp, tool routing)
-    └── tools/           # 36 tool handlers
+    ├── mod.rs           # MCP server (rmcp, tool routing, 36 core + 13 RA tools)
+    └── tools/           # 36 core tool handlers (RA tools inline in mod.rs)
         ├── query.rs         # Symbol/doc/file/body search
         ├── context.rs       # Full symbol context with callers/callees
         ├── batch_context.rs # Multi-symbol context
@@ -654,10 +792,11 @@ src/
 <summary>Development</summary>
 
 ```bash
-cargo test                                                    # 575 tests
-cargo clippy --all-targets --all-features -- -D warnings      # strict lints
+cargo test                                                    # 397+ tests
+cargo clippy --all-targets -- -D warnings                     # strict lints
 cargo fmt --all -- --check                                    # formatting
 RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
+RUST_LOG=debug cargo run -- --no-ra serve                     # without rust-analyzer
 ```
 
 | Test Suite | Count | What it guards |

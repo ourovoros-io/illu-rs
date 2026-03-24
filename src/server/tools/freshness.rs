@@ -34,10 +34,8 @@ pub fn handle_freshness(
     );
     let _ = writeln!(output, "- **Binary version:** {current_version}");
 
-    let version_current =
-        stored_version.as_deref() == Some(current_version);
-    let commit_current =
-        indexed_hash.as_deref() == Some(current_head.as_str());
+    let version_current = stored_version.as_deref() == Some(current_version);
+    let commit_current = indexed_hash.as_deref() == Some(current_head.as_str());
     let is_current = commit_current && version_current;
 
     if version_current {

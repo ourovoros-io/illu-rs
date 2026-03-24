@@ -323,9 +323,8 @@ impl Database {
             |row| row.get(0),
         )?;
         if !has_version {
-            self.conn.execute_batch(
-                "ALTER TABLE metadata ADD COLUMN index_version TEXT;",
-            )?;
+            self.conn
+                .execute_batch("ALTER TABLE metadata ADD COLUMN index_version TEXT;")?;
         }
 
         Ok(())
@@ -498,9 +497,9 @@ impl Database {
     }
 
     pub fn get_index_version(&self, repo_path: &str) -> SqlResult<Option<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT index_version FROM metadata WHERE repo_path = ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT index_version FROM metadata WHERE repo_path = ?1")?;
         let mut rows = stmt.query_map(params![repo_path], |row| row.get(0))?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
@@ -576,9 +575,7 @@ impl Database {
     }
 
     /// Get all distinct (name, `impl_type`) pairs for fuzzy matching.
-    pub fn get_all_distinct_symbol_names(
-        &self,
-    ) -> SqlResult<Vec<(String, Option<String>)>> {
+    pub fn get_all_distinct_symbol_names(&self) -> SqlResult<Vec<(String, Option<String>)>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT s.name, s.impl_type FROM symbols s \
              WHERE s.kind != 'use' AND s.kind != 'mod'",
