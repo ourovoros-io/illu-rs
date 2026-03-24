@@ -188,6 +188,19 @@ before grep, before guessing at code structure.
 3. **Chain tools**: `{cmd_prefix} query` to find candidates → `{cmd_prefix} context` for the one you need → `{cmd_prefix} impact` before changing it
 4. **Save tokens**: use `sections: [\"source\", \"callers\"]` on context/batch_context to fetch only what you need
 5. **Production focus**: use `exclude_tests: true` on context/neighborhood/callpath to filter out test functions
+
+### Cross-repo workflow
+
+**NEVER navigate to or read files from other repositories directly.** Use cross-repo tools instead — they query other repos' indexes without leaving this repo.
+
+1. `{cmd_prefix} repos` — confirm the other repo is indexed and available
+2. `{cmd_prefix} cross_query <term>` — search symbols across all indexed repos
+3. `{cmd_prefix} cross_impact <symbol>` — find which code in other repos references a symbol
+4. `{cmd_prefix} cross_deps` — show inter-repo dependency relationships
+5. `{cmd_prefix} cross_callpath <from> <to>` — find call chains spanning repo boundaries
+
+Cross-repo tools open other repos' indexes read-only. They work as long as the other repo has been indexed by illu (check with `{cmd_prefix} repos`). \
+If a repo is not indexed, ask the user to run illu on it first.
 {ILLU_SECTION_END}"
     )
 }
