@@ -289,17 +289,4 @@ This repo is indexed by illu (49 tools: 36 core + 13 rust-analyzer). **Use illu 
 3. **Chain tools**: `illu query` to find candidates → `illu context` for the one you need → `illu impact` before changing it
 4. **Save tokens**: use `sections: ["source", "callers"]` on context/batch_context to fetch only what you need
 5. **Production focus**: use `exclude_tests: true` on context/neighborhood/callpath to filter out test functions
-6. **Core first, RA for precision**: use core tools (`context`, `impact`, `query`) for fast lookups. Use `ra_*` tools when you need compiler accuracy (macro resolution, type inference, safe rename)
-
-### Cross-repo workflow
-
-**NEVER navigate to or read files from other repositories directly.** Use cross-repo tools instead — they query other repos' indexes without leaving this repo.
-
-1. `illu repos` — confirm the other repo is indexed and available
-2. `illu cross_query <term>` — search symbols across all indexed repos
-3. `illu cross_impact <symbol>` — find which code in other repos references a symbol
-4. `illu cross_deps` — show inter-repo dependency relationships
-5. `illu cross_callpath <from> <to>` — find call chains spanning repo boundaries
-
-Cross-repo tools open other repos' indexes read-only. They work as long as the other repo has been indexed by illu (check with `illu repos`). If a repo is not indexed, ask the user to run illu on it first.
 <!-- illu:end -->
