@@ -128,6 +128,25 @@ fn illu_agent_section(cmd_prefix: &str, tool_prefix: &str) -> String {
 This repo is indexed by illu (36 tools). **Use illu tools as your first step** — before reading files, \
 before grep, before guessing at code structure.
 
+### Tool priority (IMPORTANT)
+
+When illu tools are available, use them INSTEAD of built-in alternatives for Rust code intelligence. \
+Do NOT use Grep, Glob, or Read for code exploration when illu can answer the question.
+
+| Instead of | Use |
+|------------|-----|
+| Grep to find a symbol or function | `{tool_prefix}query` |
+| Grep to find callers or references | `{tool_prefix}references` or `{tool_prefix}neighborhood` |
+| Grep to understand a function | `{tool_prefix}context` (includes source, callers, callees) |
+| Glob to find files or modules | `{tool_prefix}tree` or `{tool_prefix}overview` |
+| Read to understand code structure | `{tool_prefix}context` or `{tool_prefix}batch_context` |
+| Grep to find tests for a function | `{tool_prefix}test_impact` |
+| Grep to find trait implementations | `{tool_prefix}implements` |
+| Grep to find type usage | `{tool_prefix}type_usage` |
+
+Only fall back to Grep/Glob/Read when searching for non-code content (config files, text, logs) \
+or when illu tools return no results.
+
 ### When to use illu
 
 - **Starting any task**: `{cmd_prefix} query` the relevant symbols to understand what exists
