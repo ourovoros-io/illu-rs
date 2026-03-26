@@ -22,6 +22,14 @@ When illu tools are available, use them INSTEAD of built-in alternatives for Rus
 
 Only fall back to Grep/Glob/Read when searching for non-code content (config files, text, logs) or when illu tools return no results.
 
+### Subagent instructions (IMPORTANT)
+
+When spawning Agent subagents for Rust code tasks, ALWAYS include this instruction in the prompt:
+
+"Use mcp_illu_* tools instead of Grep/Glob/Read for Rust code exploration. Use mcp_illu_query to find symbols, mcp_illu_context for definitions and callers, mcp_illu_neighborhood for call graphs. Only fall back to Grep/Glob/Read for non-code content."
+
+Prefer dedicated illu agents when available: `illu-explore` (codebase questions), `illu-review` (change analysis), `illu-refactor` (refactoring support).
+
 ### When to use illu
 
 - **Starting any task**: `@illu query` the relevant symbols to understand what exists
