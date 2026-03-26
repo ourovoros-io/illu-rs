@@ -473,7 +473,7 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Add .illu/ to .gitignore if not already there
     if ensure_gitignore(&repo_path)? {
-        println!("  added .illu/ to .gitignore");
+        println!("  updated .gitignore with illu entries");
     }
 
     println!("\nDone. Start Claude Code or Gemini CLI in this repo — illu will run automatically.");
@@ -482,19 +482,27 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
 fn append_gitignore_entry(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path).unwrap_or_default();
-    if content
-        .lines()
-        .any(|l| l.trim() == ".illu/" || l.trim() == ".illu")
-    {
-        return Ok(false);
-    }
+    let entries = [
+        ".illu/",
+        ".claude/agents/illu-*.md",
+        ".gemini/agents/illu-*.md",
+    ];
+    let mut added = false;
     let mut out = content;
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
+    for entry in entries {
+        if !out.lines().any(|l| l.trim() == entry) {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(entry);
+            out.push('\n');
+            added = true;
+        }
     }
-    out.push_str(".illu/\n");
-    std::fs::write(path, out)?;
-    Ok(true)
+    if added {
+        std::fs::write(path, out)?;
+    }
+    Ok(added)
 }
 
 fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
