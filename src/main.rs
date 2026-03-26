@@ -239,6 +239,121 @@ If a repo is not indexed, ask the user to run illu on it first.
     )
 }
 
+/// Agent definitions: (name, description, tool short names, body text).
+const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
+    (
+        "illu-explore",
+        "Explore Rust codebases using illu code intelligence",
+        &[
+            "Read",
+            "Glob",
+            "Grep",
+            "query",
+            "context",
+            "batch_context",
+            "overview",
+            "tree",
+            "neighborhood",
+            "callpath",
+            "implements",
+            "docs",
+            "symbols_at",
+            "file_graph",
+            "stats",
+            "freshness",
+        ],
+        "You are an illu-powered codebase exploration agent. \
+         Use illu MCP tools instead of Grep/Glob/Read for all \
+         Rust code exploration. \
+         Only fall back to Grep/Glob/Read for non-Rust content \
+         (configs, docs, logs). \
+         Report findings back to the main agent \
+         — do not edit files.",
+    ),
+    (
+        "illu-review",
+        "Review code changes using illu code intelligence",
+        &[
+            "Read",
+            "Glob",
+            "Grep",
+            "impact",
+            "diff_impact",
+            "test_impact",
+            "boundary",
+            "references",
+            "blame",
+            "history",
+            "context",
+            "doc_coverage",
+        ],
+        "You are an illu-powered code review agent. \
+         Use illu MCP tools to analyze changes, assess impact, \
+         check test coverage, and review code boundaries. \
+         Only fall back to Grep/Glob/Read for non-Rust content. \
+         Report findings back to the main agent \
+         — do not edit files.",
+    ),
+    (
+        "illu-refactor",
+        "Plan refactoring using illu code intelligence",
+        &[
+            "Read",
+            "Glob",
+            "Grep",
+            "rename_plan",
+            "unused",
+            "orphaned",
+            "similar",
+            "type_usage",
+            "hotspots",
+            "context",
+            "impact",
+            "references",
+        ],
+        "You are an illu-powered refactoring agent. \
+         Use illu MCP tools to identify dead code, plan renames, \
+         find similar symbols, and assess refactoring impact. \
+         Only fall back to Grep/Glob/Read for non-Rust content. \
+         Report findings back to the main agent \
+         — do not edit files.",
+    ),
+];
+
+const BUILTIN_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
+
+fn generate_agent_files(
+    agents_dir: &Path,
+    tool_prefix: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fmt::Write;
+
+    std::fs::create_dir_all(agents_dir)?;
+
+    for (name, description, tools, body) in AGENT_DEFS {
+        let mut tools_str = String::new();
+        for (i, tool) in tools.iter().enumerate() {
+            if i > 0 {
+                tools_str.push_str(", ");
+            }
+            if BUILTIN_TOOLS.contains(tool) {
+                tools_str.push_str(tool);
+            } else {
+                let _ = write!(tools_str, "{tool_prefix}{tool}");
+            }
+        }
+        let content = format!(
+            "---\nname: {name}\n\
+             description: {description}\n\
+             tools: {tools_str}\n\
+             ---\n\n{body}\n"
+        );
+        std::fs::write(agents_dir.join(format!("{name}.md")), content)?;
+    }
+
+    Ok(())
+}
+
 fn write_md_section(
     repo_path: &Path,
     file_name: &str,
@@ -344,13 +459,19 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     write_gemini_md_section(&repo_path)?;
     println!("  updated GEMINI.md");
 
-    // 3. Build initial index
+    // 3. Generate agent definition files
+    generate_agent_files(&repo_path.join(".claude/agents"), "mcp__illu__")?;
+    println!("  wrote .claude/agents/ (Claude agent files)");
+    generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
+    println!("  wrote .gemini/agents/ (Gemini agent files)");
+
+    // 4. Build initial index
     println!("  indexing...");
     illu_rs::status::init(&repo_path);
     ensure_indexed(&repo_path)?;
     println!("  index built");
 
-    // 4. Add .illu/ to .gitignore if not already there
+    // 5. Add .illu/ to .gitignore if not already there
     if ensure_gitignore(&repo_path)? {
         println!("  added .illu/ to .gitignore");
     }
@@ -502,6 +623,11 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
         &illu_agent_section("@illu", "mcp_illu_"),
     )?;
     println!("  updated {}", home.join(".gemini/GEMINI.md").display());
+
+    generate_agent_files(&home.join(".claude/agents"), "mcp__illu__")?;
+    println!("  wrote {}", home.join(".claude/agents/").display());
+    generate_agent_files(&home.join(".gemini/agents"), "mcp_illu_")?;
+    println!("  wrote {}", home.join(".gemini/agents/").display());
 
     install_statusline(&home)?;
 
@@ -695,4 +821,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_agent_files_creates_three_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let agents_dir = dir.path().join("agents");
+
+        // Test Claude variant
+        generate_agent_files(&agents_dir, "mcp__illu__").unwrap();
+
+        let explore = std::fs::read_to_string(agents_dir.join("illu-explore.md")).unwrap();
+        let review = std::fs::read_to_string(agents_dir.join("illu-review.md")).unwrap();
+        let refactor = std::fs::read_to_string(agents_dir.join("illu-refactor.md")).unwrap();
+
+        // All three exist and have frontmatter
+        assert!(explore.starts_with("---"));
+        assert!(review.starts_with("---"));
+        assert!(refactor.starts_with("---"));
+
+        // Each has the correct name
+        assert!(explore.contains("name: illu-explore"));
+        assert!(review.contains("name: illu-review"));
+        assert!(refactor.contains("name: illu-refactor"));
+
+        // None allow Edit, Write, or Bash
+        for content in [&explore, &review, &refactor] {
+            assert!(!content.contains("Edit"));
+            assert!(!content.contains("Write"));
+            assert!(!content.contains("Bash"));
+        }
+
+        // Each has illu tools with correct prefix
+        assert!(explore.contains("mcp__illu__query"));
+        assert!(review.contains("mcp__illu__impact"));
+        assert!(refactor.contains("mcp__illu__rename_plan"));
+
+        // Test Gemini variant
+        let gemini_dir = dir.path().join("gemini_agents");
+        generate_agent_files(&gemini_dir, "mcp_illu_").unwrap();
+
+        let explore_g = std::fs::read_to_string(gemini_dir.join("illu-explore.md")).unwrap();
+        assert!(explore_g.contains("mcp_illu_query"));
+        assert!(!explore_g.contains("mcp__illu__query"));
+    }
 }
