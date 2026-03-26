@@ -147,6 +147,17 @@ Do NOT use Grep, Glob, or Read for code exploration when illu can answer the que
 Only fall back to Grep/Glob/Read when searching for non-code content (config files, text, logs) \
 or when illu tools return no results.
 
+### Subagent instructions (IMPORTANT)
+
+When spawning Agent subagents for Rust code tasks, ALWAYS include this instruction in the prompt:
+
+\"Use {tool_prefix}* tools instead of Grep/Glob/Read for Rust code exploration. \
+Use {tool_prefix}query to find symbols, {tool_prefix}context for definitions and callers, \
+{tool_prefix}neighborhood for call graphs. Only fall back to Grep/Glob/Read for non-code content.\"
+
+Prefer dedicated illu agents when available: `illu-explore` (codebase questions), \
+`illu-review` (change analysis), `illu-refactor` (refactoring support).
+
 ### When to use illu
 
 - **Starting any task**: `{cmd_prefix} query` the relevant symbols to understand what exists
@@ -226,6 +237,124 @@ Cross-repo tools open other repos' indexes read-only. They work as long as the o
 If a repo is not indexed, ask the user to run illu on it first.
 {ILLU_SECTION_END}"
     )
+}
+
+/// Agent definitions: (name, description, tool short names, body text).
+const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
+    (
+        "illu-explore",
+        "Explore Rust codebases using illu code intelligence",
+        &[
+            "Read",
+            "Glob",
+            "Grep",
+            "query",
+            "context",
+            "batch_context",
+            "overview",
+            "tree",
+            "neighborhood",
+            "callpath",
+            "implements",
+            "docs",
+            "symbols_at",
+            "file_graph",
+            "crate_graph",
+            "stats",
+            "freshness",
+        ],
+        "You are an illu-powered codebase exploration agent. \
+         Use illu MCP tools instead of Grep/Glob/Read for all \
+         Rust code exploration. \
+         Only fall back to Grep/Glob/Read for non-Rust content \
+         (configs, docs, logs). \
+         Report findings back to the main agent \
+         — do not edit files.",
+    ),
+    (
+        "illu-review",
+        "Review code changes using illu code intelligence",
+        &[
+            "Read",
+            "Glob",
+            "Grep",
+            "query",
+            "impact",
+            "diff_impact",
+            "test_impact",
+            "boundary",
+            "references",
+            "blame",
+            "history",
+            "context",
+            "doc_coverage",
+        ],
+        "You are an illu-powered code review agent. \
+         Use illu MCP tools to analyze changes, assess impact, \
+         check test coverage, and review code boundaries. \
+         Only fall back to Grep/Glob/Read for non-Rust content. \
+         Report findings back to the main agent \
+         — do not edit files.",
+    ),
+    (
+        "illu-refactor",
+        "Plan refactoring using illu code intelligence",
+        &[
+            "Read",
+            "Glob",
+            "Grep",
+            "rename_plan",
+            "unused",
+            "orphaned",
+            "similar",
+            "type_usage",
+            "hotspots",
+            "context",
+            "impact",
+            "references",
+            "boundary",
+        ],
+        "You are an illu-powered refactoring agent. \
+         Use illu MCP tools to identify dead code, plan renames, \
+         find similar symbols, and assess refactoring impact. \
+         Only fall back to Grep/Glob/Read for non-Rust content. \
+         Report findings back to the main agent \
+         — do not edit files.",
+    ),
+];
+
+const BUILTIN_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
+
+fn generate_agent_files(
+    agents_dir: &Path,
+    tool_prefix: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::fmt::Write;
+
+    std::fs::create_dir_all(agents_dir)?;
+
+    for (name, description, tools, body) in AGENT_DEFS {
+        let mut tools_str = String::new();
+        for (i, tool) in tools.iter().enumerate() {
+            if i > 0 {
+                tools_str.push_str(", ");
+            }
+            if BUILTIN_TOOLS.contains(tool) {
+                tools_str.push_str(tool);
+            } else {
+                write!(tools_str, "{tool_prefix}{tool}")?;
+            }
+        }
+        let content = format!(
+            "---\nname: {name}\n\
+             description: {description}\n\
+             tools: {tools_str}\n\
+             ---\n\n{body}\n"
+        );
+        std::fs::write(agents_dir.join(format!("{name}.md")), content)?;
+    }
+
+    Ok(())
 }
 
 fn write_md_section(
@@ -333,15 +462,21 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     write_gemini_md_section(&repo_path)?;
     println!("  updated GEMINI.md");
 
-    // 3. Build initial index
+    // 3. Generate agent definition files
+    generate_agent_files(&repo_path.join(".claude/agents"), "mcp__illu__")?;
+    println!("  wrote .claude/agents/ (Claude agent files)");
+    generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
+    println!("  wrote .gemini/agents/ (Gemini agent files)");
+
+    // 4. Build initial index
     println!("  indexing...");
     illu_rs::status::init(&repo_path);
     ensure_indexed(&repo_path)?;
     println!("  index built");
 
-    // 4. Add .illu/ to .gitignore if not already there
+    // 5. Add .illu/ to .gitignore if not already there
     if ensure_gitignore(&repo_path)? {
-        println!("  added .illu/ to .gitignore");
+        println!("  updated .gitignore with illu entries");
     }
 
     println!("\nDone. Start Claude Code or Gemini CLI in this repo — illu will run automatically.");
@@ -350,19 +485,30 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
 fn append_gitignore_entry(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path).unwrap_or_default();
-    if content
-        .lines()
-        .any(|l| l.trim() == ".illu/" || l.trim() == ".illu")
-    {
-        return Ok(false);
-    }
+    let entries = [
+        ".illu/",
+        ".claude/agents/illu-*.md",
+        ".gemini/agents/illu-*.md",
+    ];
+    let mut added = false;
     let mut out = content;
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
+    for entry in entries {
+        if !out.lines().any(|l| {
+            let trimmed = l.trim();
+            trimmed == entry || trimmed == entry.trim_end_matches('/')
+        }) {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(entry);
+            out.push('\n');
+            added = true;
+        }
     }
-    out.push_str(".illu/\n");
-    std::fs::write(path, out)?;
-    Ok(true)
+    if added {
+        std::fs::write(path, out)?;
+    }
+    Ok(added)
 }
 
 fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
@@ -492,6 +638,11 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!("  updated {}", home.join(".gemini/GEMINI.md").display());
 
+    generate_agent_files(&home.join(".claude/agents"), "mcp__illu__")?;
+    println!("  wrote {}", home.join(".claude/agents/").display());
+    generate_agent_files(&home.join(".gemini/agents"), "mcp_illu_")?;
+    println!("  wrote {}", home.join(".gemini/agents/").display());
+
     install_statusline(&home)?;
 
     ensure_global_gitignore(&home)?;
@@ -534,6 +685,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 write_claude_md_section(repo_path)?;
                 write_gemini_config(repo_path)?;
                 write_gemini_md_section(repo_path)?;
+                generate_agent_files(&repo_path.join(".claude/agents"), "mcp__illu__")?;
+                generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
 
                 let config = IndexConfig {
                     repo_path: repo_path.clone(),
@@ -684,4 +837,110 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_agent_files_creates_three_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let agents_dir = dir.path().join("agents");
+
+        // Test Claude variant
+        generate_agent_files(&agents_dir, "mcp__illu__").unwrap();
+
+        let explore = std::fs::read_to_string(agents_dir.join("illu-explore.md")).unwrap();
+        let review = std::fs::read_to_string(agents_dir.join("illu-review.md")).unwrap();
+        let refactor = std::fs::read_to_string(agents_dir.join("illu-refactor.md")).unwrap();
+
+        // All three exist and have frontmatter
+        assert!(explore.starts_with("---"));
+        assert!(review.starts_with("---"));
+        assert!(refactor.starts_with("---"));
+
+        // Each has the correct name
+        assert!(explore.contains("name: illu-explore"));
+        assert!(review.contains("name: illu-review"));
+        assert!(refactor.contains("name: illu-refactor"));
+
+        // None allow Edit, Write, or Bash in tools line
+        for content in [&explore, &review, &refactor] {
+            let tools_line = content.lines().find(|l| l.starts_with("tools:")).unwrap();
+            assert!(
+                !tools_line.contains("Edit"),
+                "tools line should not contain Edit"
+            );
+            assert!(
+                !tools_line.contains("Write"),
+                "tools line should not contain Write"
+            );
+            assert!(
+                !tools_line.contains("Bash"),
+                "tools line should not contain Bash"
+            );
+        }
+
+        // Frontmatter structure validation
+        for content in [&explore, &review, &refactor] {
+            assert!(
+                content.matches("---").count() >= 2,
+                "should have opening and closing frontmatter"
+            );
+        }
+
+        // Each has illu tools with correct prefix
+        assert!(explore.contains("mcp__illu__query"));
+        assert!(review.contains("mcp__illu__impact"));
+        assert!(refactor.contains("mcp__illu__rename_plan"));
+
+        // Test Gemini variant
+        let gemini_dir = dir.path().join("gemini_agents");
+        generate_agent_files(&gemini_dir, "mcp_illu_").unwrap();
+
+        let explore_g = std::fs::read_to_string(gemini_dir.join("illu-explore.md")).unwrap();
+        assert!(explore_g.contains("mcp_illu_query"));
+        assert!(!explore_g.contains("mcp__illu__query"));
+    }
+
+    #[test]
+    fn test_append_gitignore_entry_manages_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let gitignore = dir.path().join(".gitignore");
+
+        // Empty file -> adds all 3
+        std::fs::write(&gitignore, "").unwrap();
+        assert!(append_gitignore_entry(&gitignore).unwrap());
+        let content = std::fs::read_to_string(&gitignore).unwrap();
+        assert!(content.contains(".illu/"));
+        assert!(content.contains(".claude/agents/illu-*.md"));
+        assert!(content.contains(".gemini/agents/illu-*.md"));
+
+        // Idempotency: second call returns false, no duplicates
+        assert!(!append_gitignore_entry(&gitignore).unwrap());
+        let content2 = std::fs::read_to_string(&gitignore).unwrap();
+        assert_eq!(content, content2);
+
+        // File with old `.illu` (no slash) -> recognizes it, adds only agent entries
+        let gitignore2 = dir.path().join(".gitignore2");
+        std::fs::write(&gitignore2, ".illu\n").unwrap();
+        assert!(append_gitignore_entry(&gitignore2).unwrap());
+        let content3 = std::fs::read_to_string(&gitignore2).unwrap();
+        // Only original `.illu`, no `.illu/` added
+        assert_eq!(
+            content3.matches(".illu").count() - content3.matches(".illu/").count(),
+            1
+        );
+        assert!(content3.contains(".claude/agents/illu-*.md"));
+
+        // No trailing newline
+        let gitignore3 = dir.path().join(".gitignore3");
+        std::fs::write(&gitignore3, "/target").unwrap();
+        assert!(append_gitignore_entry(&gitignore3).unwrap());
+        let content4 = std::fs::read_to_string(&gitignore3).unwrap();
+        assert!(content4.starts_with("/target\n"));
+        assert!(content4.contains(".illu/"));
+    }
 }
