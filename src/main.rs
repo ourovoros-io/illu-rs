@@ -259,6 +259,7 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
             "docs",
             "symbols_at",
             "file_graph",
+            "crate_graph",
             "stats",
             "freshness",
         ],
@@ -277,6 +278,7 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
             "Read",
             "Glob",
             "Grep",
+            "query",
             "impact",
             "diff_impact",
             "test_impact",
@@ -310,6 +312,7 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
             "context",
             "impact",
             "references",
+            "boundary",
         ],
         "You are an illu-powered refactoring agent. \
          Use illu MCP tools to identify dead code, plan renames, \
@@ -339,7 +342,7 @@ fn generate_agent_files(
             if BUILTIN_TOOLS.contains(tool) {
                 tools_str.push_str(tool);
             } else {
-                let _ = write!(tools_str, "{tool_prefix}{tool}");
+                write!(tools_str, "{tool_prefix}{tool}")?;
             }
         }
         let content = format!(
@@ -490,7 +493,10 @@ fn append_gitignore_entry(path: &Path) -> Result<bool, Box<dyn std::error::Error
     let mut added = false;
     let mut out = content;
     for entry in entries {
-        if !out.lines().any(|l| l.trim() == entry) {
+        if !out.lines().any(|l| {
+            let trimmed = l.trim();
+            trimmed == entry || trimmed == entry.trim_end_matches('/')
+        }) {
             if !out.is_empty() && !out.ends_with('\n') {
                 out.push('\n');
             }
@@ -679,6 +685,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 write_claude_md_section(repo_path)?;
                 write_gemini_config(repo_path)?;
                 write_gemini_md_section(repo_path)?;
+                generate_agent_files(&repo_path.join(".claude/agents"), "mcp__illu__")?;
+                generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
 
                 let config = IndexConfig {
                     repo_path: repo_path.clone(),
@@ -858,11 +866,29 @@ mod tests {
         assert!(review.contains("name: illu-review"));
         assert!(refactor.contains("name: illu-refactor"));
 
-        // None allow Edit, Write, or Bash
+        // None allow Edit, Write, or Bash in tools line
         for content in [&explore, &review, &refactor] {
-            assert!(!content.contains("Edit"));
-            assert!(!content.contains("Write"));
-            assert!(!content.contains("Bash"));
+            let tools_line = content.lines().find(|l| l.starts_with("tools:")).unwrap();
+            assert!(
+                !tools_line.contains("Edit"),
+                "tools line should not contain Edit"
+            );
+            assert!(
+                !tools_line.contains("Write"),
+                "tools line should not contain Write"
+            );
+            assert!(
+                !tools_line.contains("Bash"),
+                "tools line should not contain Bash"
+            );
+        }
+
+        // Frontmatter structure validation
+        for content in [&explore, &review, &refactor] {
+            assert!(
+                content.matches("---").count() >= 2,
+                "should have opening and closing frontmatter"
+            );
         }
 
         // Each has illu tools with correct prefix
@@ -877,5 +903,44 @@ mod tests {
         let explore_g = std::fs::read_to_string(gemini_dir.join("illu-explore.md")).unwrap();
         assert!(explore_g.contains("mcp_illu_query"));
         assert!(!explore_g.contains("mcp__illu__query"));
+    }
+
+    #[test]
+    fn test_append_gitignore_entry_manages_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let gitignore = dir.path().join(".gitignore");
+
+        // Empty file -> adds all 3
+        std::fs::write(&gitignore, "").unwrap();
+        assert!(append_gitignore_entry(&gitignore).unwrap());
+        let content = std::fs::read_to_string(&gitignore).unwrap();
+        assert!(content.contains(".illu/"));
+        assert!(content.contains(".claude/agents/illu-*.md"));
+        assert!(content.contains(".gemini/agents/illu-*.md"));
+
+        // Idempotency: second call returns false, no duplicates
+        assert!(!append_gitignore_entry(&gitignore).unwrap());
+        let content2 = std::fs::read_to_string(&gitignore).unwrap();
+        assert_eq!(content, content2);
+
+        // File with old `.illu` (no slash) -> recognizes it, adds only agent entries
+        let gitignore2 = dir.path().join(".gitignore2");
+        std::fs::write(&gitignore2, ".illu\n").unwrap();
+        assert!(append_gitignore_entry(&gitignore2).unwrap());
+        let content3 = std::fs::read_to_string(&gitignore2).unwrap();
+        // Only original `.illu`, no `.illu/` added
+        assert_eq!(
+            content3.matches(".illu").count() - content3.matches(".illu/").count(),
+            1
+        );
+        assert!(content3.contains(".claude/agents/illu-*.md"));
+
+        // No trailing newline
+        let gitignore3 = dir.path().join(".gitignore3");
+        std::fs::write(&gitignore3, "/target").unwrap();
+        assert!(append_gitignore_entry(&gitignore3).unwrap());
+        let content4 = std::fs::read_to_string(&gitignore3).unwrap();
+        assert!(content4.starts_with("/target\n"));
+        assert!(content4.contains(".illu/"));
     }
 }
