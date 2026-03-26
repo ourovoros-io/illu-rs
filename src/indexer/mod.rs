@@ -636,7 +636,10 @@ pub(crate) fn generate_claude_skill(direct_dep_names: &[&str]) -> String {
     if direct_dep_names.is_empty() {
         let _ = writeln!(out, "No direct dependencies found.");
     } else {
-        for dep in direct_dep_names {
+        let mut unique: Vec<&str> = direct_dep_names.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        for dep in &unique {
             let _ = writeln!(out, "- {dep}");
         }
     }
