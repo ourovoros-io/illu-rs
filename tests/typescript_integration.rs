@@ -216,9 +216,11 @@ fn test_ts_query_tool() {
 fn test_ts_context_tool() {
     let (_dir, db) = setup_ts_project();
 
-    let result =
-        context::handle_context(&db, "createApp", false, None, None, None, false).unwrap();
-    assert!(result.contains("createApp"), "context should show createApp");
+    let result = context::handle_context(&db, "createApp", false, None, None, None, false).unwrap();
+    assert!(
+        result.contains("createApp"),
+        "context should show createApp"
+    );
 }
 
 #[test]
@@ -226,8 +228,14 @@ fn test_ts_overview_tool() {
     let (_dir, db) = setup_ts_project();
 
     let result = overview::handle_overview(&db, "src/", false, None).unwrap();
-    assert!(result.contains("UserService"), "overview should show UserService");
-    assert!(result.contains("Config"), "overview should show Config interface");
+    assert!(
+        result.contains("UserService"),
+        "overview should show UserService"
+    );
+    assert!(
+        result.contains("Config"),
+        "overview should show Config interface"
+    );
 }
 
 #[test]
@@ -235,7 +243,10 @@ fn test_ts_impact_tool() {
     let (_dir, db) = setup_ts_project();
 
     let result = impact::handle_impact(&db, "UserService", None, false, false).unwrap();
-    assert!(result.contains("UserService"), "impact should mention UserService: {result}");
+    assert!(
+        result.contains("UserService"),
+        "impact should mention UserService: {result}"
+    );
 }
 
 #[test]
@@ -247,8 +258,7 @@ fn test_ts_test_detection() {
     let tests = db.get_related_tests("UserService", None).unwrap();
     // The __tests__/service.test.ts uses UserService,
     // but we mainly verify test symbols are marked
-    let test_file_syms =
-        db.get_symbols_by_path_prefix("src/__tests__/").unwrap();
+    let test_file_syms = db.get_symbols_by_path_prefix("src/__tests__/").unwrap();
     assert!(
         test_file_syms.iter().all(|s| {
             // Check attributes contain "test"
@@ -276,7 +286,10 @@ fn test_ts_doc_comments() {
     let results = db.search_symbols("formatDate").unwrap();
     assert!(!results.is_empty());
     assert!(
-        results[0].doc_comment.as_ref().is_some_and(|d| d.contains("Format a date")),
+        results[0]
+            .doc_comment
+            .as_ref()
+            .is_some_and(|d| d.contains("Format a date")),
         "formatDate should have JSDoc: {:?}",
         results[0].doc_comment
     );
@@ -288,8 +301,14 @@ fn test_ts_npm_deps_stored() {
 
     let deps = db.get_direct_dependencies().unwrap();
     let dep_names: Vec<&str> = deps.iter().map(|d| d.name.as_str()).collect();
-    assert!(dep_names.contains(&"react"), "react should be a dep: {dep_names:?}");
-    assert!(dep_names.contains(&"vitest"), "vitest should be a dep: {dep_names:?}");
+    assert!(
+        dep_names.contains(&"react"),
+        "react should be a dep: {dep_names:?}"
+    );
+    assert!(
+        dep_names.contains(&"vitest"),
+        "vitest should be a dep: {dep_names:?}"
+    );
 }
 
 #[test]
@@ -307,6 +326,8 @@ fn test_ts_user_interface() {
     let (_dir, db) = setup_ts_project();
 
     let results = db.search_symbols("User").unwrap();
-    let user = results.iter().find(|s| s.kind == SymbolKind::Interface && s.name == "User");
+    let user = results
+        .iter()
+        .find(|s| s.kind == SymbolKind::Interface && s.name == "User");
     assert!(user.is_some(), "User interface should be indexed");
 }

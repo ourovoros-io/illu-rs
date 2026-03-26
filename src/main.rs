@@ -296,8 +296,8 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     // Verify it's a supported project
     let has_cargo = repo_path.join("Cargo.toml").exists();
-    let has_ts = repo_path.join("tsconfig.json").exists()
-        || repo_path.join("package.json").exists();
+    let has_ts =
+        repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
     if !has_cargo && !has_ts {
         return Err(format!(
             "No Cargo.toml, tsconfig.json, or package.json found in {}",
@@ -511,8 +511,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None | Some(Command::Serve) => {
             tracing::info!(repo = %repo_path.display(), "Starting illu server");
             let has_cargo = repo_path.join("Cargo.toml").exists();
-            let has_ts = repo_path.join("tsconfig.json").exists()
-                || repo_path.join("package.json").exists();
+            let has_ts =
+                repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
             let has_project = has_cargo || has_ts;
 
             let (db, config) = if has_project {
@@ -541,7 +541,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 (db, config)
             } else {
-                tracing::warn!("No Cargo.toml/tsconfig.json — starting with empty index (cross-repo tools only)");
+                tracing::warn!(
+                    "No Cargo.toml/tsconfig.json — starting with empty index (cross-repo tools only)"
+                );
                 let db = Database::open_in_memory()?;
                 let config = IndexConfig {
                     repo_path: repo_path.clone(),
