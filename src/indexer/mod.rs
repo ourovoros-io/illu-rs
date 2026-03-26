@@ -227,7 +227,7 @@ pub fn refresh_index(
     tracing::info!(files = count, "Re-indexing changed files");
     crate::status::set(&format!("refreshing ▸ {count} files"));
 
-    reindex_dirty_files(db, &dirty_files)?;
+    reindex_dirty_files(db, &dirty_files, &config.repo_path)?;
 
     let stale = db.delete_stale_refs()?;
     if stale > 0 {
@@ -244,6 +244,7 @@ pub fn refresh_index(
 fn reindex_dirty_files(
     db: &Database,
     dirty_files: &[DirtyFile],
+    repo_path: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let count = dirty_files.len();
     for (i, df) in dirty_files.iter().enumerate() {
@@ -268,13 +269,14 @@ fn reindex_dirty_files(
         store::store_trait_impls(db, file_id, &trait_impls)?;
     }
 
-    rebuild_refs_for_files(db, dirty_files)?;
+    rebuild_refs_for_files(db, dirty_files, repo_path)?;
     Ok(())
 }
 
 fn rebuild_refs_for_files(
     db: &Database,
     dirty_files: &[DirtyFile],
+    repo_path: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let known_symbols = db.get_all_symbol_names()?;
     if known_symbols.is_empty() {
@@ -292,7 +294,7 @@ fn rebuild_refs_for_files(
     db.begin_transaction()?;
     for df in dirty_files {
         let refs = if is_ts_file(&df.relative_path) {
-            ts_parser::extract_ts_refs(&df.source, &df.relative_path, &known_symbols)
+            ts_parser::extract_ts_refs(&df.source, &df.relative_path, &known_symbols, repo_path)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
         } else {
             parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
@@ -430,16 +432,12 @@ fn index_workspace(
     Ok(())
 }
 
-fn index_typescript(
-    db: &Database,
-    config: &IndexConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn index_typescript(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
     // Parse package.json for name and dependencies
     let pkg_json_path = config.repo_path.join("package.json");
     let (pkg_name, pkg_content) = if pkg_json_path.exists() {
         let content = std::fs::read_to_string(&pkg_json_path)?;
-        let name = package_name_from_json(&content)
-            .unwrap_or_else(|| "ts-frontend".to_string());
+        let name = package_name_from_json(&content).unwrap_or_else(|| "ts-frontend".to_string());
         (name, Some(content))
     } else {
         ("ts-frontend".to_string(), None)
@@ -464,10 +462,8 @@ fn index_typescript(
 
     // Handle npm workspaces
     let workspace_patterns = ts_imports::parse_npm_workspaces(&config.repo_path);
-    let workspace_members = ts_imports::resolve_workspace_members(
-        &config.repo_path,
-        &workspace_patterns,
-    );
+    let workspace_members =
+        ts_imports::resolve_workspace_members(&config.repo_path, &workspace_patterns);
 
     if workspace_members.is_empty() {
         // Single package
@@ -475,13 +471,9 @@ fn index_typescript(
         index_ts_files(db, config, &config.repo_path, crate_id)?;
     } else {
         // npm workspace — register each member
-        tracing::info!(
-            members = workspace_members.len(),
-            "Detected npm workspace"
-        );
+        tracing::info!(members = workspace_members.len(), "Detected npm workspace");
         for member_path in &workspace_members {
-            let member_pkg =
-                member_path.join("package.json");
+            let member_pkg = member_path.join("package.json");
             let member_name = std::fs::read_to_string(&member_pkg)
                 .ok()
                 .and_then(|c| package_name_from_json(&c))
@@ -510,7 +502,6 @@ fn index_ts_files(
     root: &std::path::Path,
     crate_id: crate::db::CrateId,
 ) -> Result<(), Box<dyn std::error::Error>> {
-
     // Walk for TS/TSX files (excluding node_modules, etc.)
     let ts_files: Vec<_> = walkdir::WalkDir::new(root)
         .into_iter()
@@ -519,8 +510,7 @@ fn index_ts_files(
                 return true;
             }
             let name = e.file_name().to_string_lossy();
-            !is_excluded_dir(&name)
-                && name != "src-tauri" // Skip Rust side in Tauri projects
+            !is_excluded_dir(&name) && name != "src-tauri" // Skip Rust side in Tauri projects
         })
         .filter_map(|r| match r {
             Ok(e)
@@ -649,7 +639,7 @@ fn extract_all_symbol_refs(
             }
         };
         let refs = if is_ts_file(relative) {
-            ts_parser::extract_ts_refs(&source, relative, &known_symbols)
+            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
         } else {
             parser::extract_refs(&source, relative, &known_symbols, &crate_map)

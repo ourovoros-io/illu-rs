@@ -2,9 +2,8 @@ use std::collections::{HashMap, HashSet};
 use tree_sitter::{Node, Parser};
 
 use super::parser::{
-    extract_body, find_child_by_kind, get_signature, line_range,
-    node_text, ImportInfo, RefKind, Symbol, SymbolKind, SymbolRef,
-    TraitImpl, Visibility,
+    ImportInfo, RefKind, Symbol, SymbolKind, SymbolRef, TraitImpl, Visibility, extract_body,
+    find_child_by_kind, get_signature, line_range, node_text,
 };
 
 fn parse_ts(source: &str) -> Result<tree_sitter::Tree, String> {
@@ -15,9 +14,7 @@ fn parse_ts(source: &str) -> Result<tree_sitter::Tree, String> {
     PARSER.with_borrow_mut(|slot| {
         let parser = slot.get_or_insert_with(|| {
             let mut p = Parser::new();
-            let _ = p.set_language(
-                &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            );
+            let _ = p.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into());
             p
         });
         parser
@@ -34,9 +31,7 @@ fn parse_tsx(source: &str) -> Result<tree_sitter::Tree, String> {
     PARSER.with_borrow_mut(|slot| {
         let parser = slot.get_or_insert_with(|| {
             let mut p = Parser::new();
-            let _ = p.set_language(
-                &tree_sitter_typescript::LANGUAGE_TSX.into(),
-            );
+            let _ = p.set_language(&tree_sitter_typescript::LANGUAGE_TSX.into());
             p
         });
         parser
@@ -45,10 +40,7 @@ fn parse_tsx(source: &str) -> Result<tree_sitter::Tree, String> {
     })
 }
 
-fn parse_ts_source_tree(
-    source: &str,
-    file_path: &str,
-) -> Result<tree_sitter::Tree, String> {
+fn parse_ts_source_tree(source: &str, file_path: &str) -> Result<tree_sitter::Tree, String> {
     if std::path::Path::new(file_path)
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("tsx"))
@@ -83,19 +75,14 @@ pub fn parse_ts_source(
 /// For exported declarations, also checks the parent
 /// `export_statement`'s preceding siblings since the comment
 /// is a sibling of `export_statement`, not `function_declaration`.
-fn extract_doc_comment(
-    node: &Node,
-    source: &str,
-) -> Option<String> {
+fn extract_doc_comment(node: &Node, source: &str) -> Option<String> {
     let mut lines = Vec::new();
     // For exported decls, the prev sibling of the inner node
     // is the `export` keyword, not a comment. Check parent.
     let mut sibling = node.prev_sibling();
     // If prev sibling is the `export` keyword (or absent),
     // look at the export_statement's prev sibling instead
-    let should_check_parent = sibling
-        .as_ref()
-        .is_none_or(|s| s.kind() == "export");
+    let should_check_parent = sibling.as_ref().is_none_or(|s| s.kind() == "export");
     if should_check_parent
         && let Some(parent) = node.parent()
         && parent.kind() == "export_statement"
@@ -107,8 +94,7 @@ fn extract_doc_comment(
             "comment" => {
                 let text = node_text(&sib, source);
                 if let Some(inner) = text.strip_prefix("/**") {
-                    let inner =
-                        inner.strip_suffix("*/").unwrap_or(inner);
+                    let inner = inner.strip_suffix("*/").unwrap_or(inner);
                     // Parse multi-line JSDoc
                     for line in inner.lines() {
                         let trimmed = line.trim();
@@ -126,8 +112,7 @@ fn extract_doc_comment(
                         .strip_prefix("///")
                         .or_else(|| text.strip_prefix("//"))
                         .unwrap_or(&text);
-                    let stripped =
-                        stripped.strip_prefix(' ').unwrap_or(stripped);
+                    let stripped = stripped.strip_prefix(' ').unwrap_or(stripped);
                     lines.push(stripped.trim_end().to_string());
                 } else {
                     break;
@@ -148,15 +133,10 @@ fn extract_doc_comment(
 }
 
 /// Extract `@decorator(...)` from preceding siblings.
-fn extract_decorators(
-    node: &Node,
-    source: &str,
-) -> Option<String> {
+fn extract_decorators(node: &Node, source: &str) -> Option<String> {
     let mut attrs = Vec::new();
     let mut sibling = node.prev_sibling();
-    let should_check_parent = sibling
-        .as_ref()
-        .is_none_or(|s| s.kind() == "export");
+    let should_check_parent = sibling.as_ref().is_none_or(|s| s.kind() == "export");
     if should_check_parent
         && let Some(parent) = node.parent()
         && parent.kind() == "export_statement"
@@ -167,8 +147,7 @@ fn extract_decorators(
         match sib.kind() {
             "decorator" => {
                 let text = node_text(&sib, source);
-                let inner =
-                    text.strip_prefix('@').unwrap_or(&text);
+                let inner = text.strip_prefix('@').unwrap_or(&text);
                 attrs.push(inner.trim().to_string());
             }
             "comment" => {}
@@ -229,36 +208,23 @@ fn extract_symbols(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "function_declaration"
-            | "generator_function_declaration" => {
-                if let Some(mut sym) =
-                    extract_function(&child, source, file_path)
-                {
+            "function_declaration" | "generator_function_declaration" => {
+                if let Some(mut sym) = extract_function(&child, source, file_path) {
                     if exported {
                         sym.visibility = Visibility::Public;
                     }
-                    sym.impl_type =
-                        class_name.map(String::from);
+                    sym.impl_type = class_name.map(String::from);
                     symbols.push(sym);
                 }
             }
-            "class_declaration"
-            | "abstract_class_declaration" => {
-                extract_class(
-                    &child, source, file_path, exported,
-                    symbols, trait_impls,
-                );
+            "class_declaration" | "abstract_class_declaration" => {
+                extract_class(&child, source, file_path, exported, symbols, trait_impls);
             }
             "interface_declaration" => {
-                extract_interface(
-                    &child, source, file_path, exported,
-                    symbols, trait_impls,
-                );
+                extract_interface(&child, source, file_path, exported, symbols, trait_impls);
             }
             "type_alias_declaration" => {
-                if let Some(mut sym) = extract_type_alias(
-                    &child, source, file_path,
-                ) {
+                if let Some(mut sym) = extract_type_alias(&child, source, file_path) {
                     if exported {
                         sym.visibility = Visibility::Public;
                     }
@@ -266,48 +232,37 @@ fn extract_symbols(
                 }
             }
             "enum_declaration" => {
-                extract_enum(
-                    &child, source, file_path, exported,
-                    symbols,
-                );
+                extract_enum(&child, source, file_path, exported, symbols);
             }
-            "lexical_declaration"
-            | "variable_declaration" => {
-                extract_variable_declarations(
-                    &child, source, file_path, exported, symbols,
-                );
+            "lexical_declaration" | "variable_declaration" => {
+                extract_variable_declarations(&child, source, file_path, exported, symbols);
             }
             "export_statement" => {
                 extract_symbols(
-                    &child, source, file_path, class_name,
-                    true, symbols, trait_impls,
+                    &child,
+                    source,
+                    file_path,
+                    class_name,
+                    true,
+                    symbols,
+                    trait_impls,
                 );
             }
             "import_statement" => {
-                extract_import(
-                    &child, source, file_path, symbols,
-                );
+                extract_import(&child, source, file_path, symbols);
             }
-            "method_definition"
-            | "public_field_definition"
-            | "abstract_method_definition" => {
-                if class_name.is_some() && let Some(sym) = extract_class_member(
-                    &child, source, file_path, class_name,
-                ) {
+            "method_definition" | "public_field_definition" | "abstract_method_definition" => {
+                if class_name.is_some()
+                    && let Some(sym) = extract_class_member(&child, source, file_path, class_name)
+                {
                     symbols.push(sym);
                 }
             }
             "module" | "internal_module" => {
-                extract_module(
-                    &child, source, file_path, exported,
-                    symbols, trait_impls,
-                );
+                extract_module(&child, source, file_path, exported, symbols, trait_impls);
             }
             "statement_block" if class_name.is_none() => {
-                extract_symbols(
-                    &child, source, file_path, None, false,
-                    symbols, trait_impls,
-                );
+                extract_symbols(&child, source, file_path, None, false, symbols, trait_impls);
             }
             _ => {}
         }
@@ -322,9 +277,7 @@ fn extract_module(
     symbols: &mut Vec<Symbol>,
     trait_impls: &mut Vec<TraitImpl>,
 ) {
-    if let Some(name_node) =
-        find_child_by_kind(child, "identifier")
-    {
+    if let Some(name_node) = find_child_by_kind(child, "identifier") {
         let name = node_text(&name_node, source);
         let (line_start, line_end) = line_range(child);
         let mut vis = get_visibility(child);
@@ -346,21 +299,20 @@ fn extract_module(
             impl_type: None,
         });
     }
-    if let Some(body) =
-        find_child_by_kind(child, "statement_block")
-    {
+    if let Some(body) = find_child_by_kind(child, "statement_block") {
         extract_symbols(
-            &body, source, file_path, None, exported,
-            symbols, trait_impls,
+            &body,
+            source,
+            file_path,
+            None,
+            exported,
+            symbols,
+            trait_impls,
         );
     }
 }
 
-fn extract_function(
-    node: &Node,
-    source: &str,
-    file_path: &str,
-) -> Option<Symbol> {
+fn extract_function(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
     let name_node = find_child_by_kind(node, "identifier")?;
     let name = node_text(&name_node, source);
     let (line_start, line_end) = line_range(node);
@@ -389,9 +341,7 @@ fn extract_class(
     symbols: &mut Vec<Symbol>,
     trait_impls: &mut Vec<TraitImpl>,
 ) {
-    let Some(name_node) =
-        find_child_by_kind(node, "type_identifier")
-    else {
+    let Some(name_node) = find_child_by_kind(node, "type_identifier") else {
         return;
     };
     let class_name = node_text(&name_node, source);
@@ -473,18 +423,13 @@ fn extract_heritage(
                     "implements_clause" => "implements",
                     _ => continue,
                 };
-                let names =
-                    collect_type_names(&heritage, source);
+                let names = collect_type_names(&heritage, source);
                 for name in &names {
-                    details.push(format!(
-                        "{keyword} {name}"
-                    ));
+                    details.push(format!("{keyword} {name}"));
                     trait_impls.push(TraitImpl {
-                        type_name: hctx.class_name
-                            .to_string(),
+                        type_name: hctx.class_name.to_string(),
                         trait_name: name.clone(),
-                        file_path: hctx.file_path
-                            .to_string(),
+                        file_path: hctx.file_path.to_string(),
                         line_start: hctx.line_start,
                         line_end: hctx.line_end,
                     });
@@ -495,10 +440,7 @@ fn extract_heritage(
 }
 
 /// Collect type names from extends/implements clauses.
-fn collect_type_names(
-    clause: &Node,
-    source: &str,
-) -> Vec<String> {
+fn collect_type_names(clause: &Node, source: &str) -> Vec<String> {
     let mut names = Vec::new();
     let mut cursor = clause.walk();
     for child in clause.children(&mut cursor) {
@@ -508,9 +450,7 @@ fn collect_type_names(
             }
             "generic_type" => {
                 // Extract the base type from Generic<T>
-                if let Some(base) =
-                    find_child_by_kind(&child, "type_identifier")
-                {
+                if let Some(base) = find_child_by_kind(&child, "type_identifier") {
                     names.push(node_text(&base, source));
                 }
             }
@@ -535,9 +475,7 @@ fn extract_interface(
     symbols: &mut Vec<Symbol>,
     trait_impls: &mut Vec<TraitImpl>,
 ) {
-    let Some(name_node) =
-        find_child_by_kind(node, "type_identifier")
-    else {
+    let Some(name_node) = find_child_by_kind(node, "type_identifier") else {
         return;
     };
     let name = node_text(&name_node, source);
@@ -548,8 +486,7 @@ fn extract_interface(
     }
 
     // Extract interface body as details
-    let details =
-        extract_interface_details(node, source);
+    let details = extract_interface_details(node, source);
 
     symbols.push(Symbol {
         name: name.clone(),
@@ -584,24 +521,19 @@ fn extract_interface(
     }
 }
 
-fn extract_interface_details(
-    node: &Node,
-    source: &str,
-) -> Option<String> {
+fn extract_interface_details(node: &Node, source: &str) -> Option<String> {
     let body = find_child_by_kind(node, "object_type")
-        .or_else(|| {
-            find_child_by_kind(node, "interface_body")
-        })?;
+        .or_else(|| find_child_by_kind(node, "interface_body"))?;
     let mut members = Vec::new();
     let mut cursor = body.walk();
     for child in body.children(&mut cursor) {
         match child.kind() {
-            "property_signature" | "method_signature"
-            | "call_signature" | "construct_signature"
+            "property_signature"
+            | "method_signature"
+            | "call_signature"
+            | "construct_signature"
             | "index_signature" => {
-                let text = node_text(&child, source)
-                    .trim_end()
-                    .to_string();
+                let text = node_text(&child, source).trim_end().to_string();
                 let text = text
                     .strip_suffix(';')
                     .or_else(|| text.strip_suffix(','))
@@ -618,13 +550,8 @@ fn extract_interface_details(
     Some(members.join("\n"))
 }
 
-fn extract_type_alias(
-    node: &Node,
-    source: &str,
-    file_path: &str,
-) -> Option<Symbol> {
-    let name_node =
-        find_child_by_kind(node, "type_identifier")?;
+fn extract_type_alias(node: &Node, source: &str, file_path: &str) -> Option<Symbol> {
+    let name_node = find_child_by_kind(node, "type_identifier")?;
     let name = node_text(&name_node, source);
     let (line_start, line_end) = line_range(node);
 
@@ -651,9 +578,7 @@ fn extract_enum(
     exported: bool,
     symbols: &mut Vec<Symbol>,
 ) {
-    let Some(name_node) =
-        find_child_by_kind(node, "identifier")
-    else {
+    let Some(name_node) = find_child_by_kind(node, "identifier") else {
         return;
     };
     let enum_name = node_text(&name_node, source);
@@ -685,17 +610,8 @@ fn extract_enum(
     if let Some(body) = find_child_by_kind(node, "enum_body") {
         let mut cursor = body.walk();
         for child in body.children(&mut cursor) {
-            if child.kind() == "enum_assignment"
-                || child.kind() == "property_identifier"
-            {
-                extract_enum_member(
-                    &child,
-                    source,
-                    file_path,
-                    &enum_name,
-                    &vis,
-                    symbols,
-                );
+            if child.kind() == "enum_assignment" || child.kind() == "property_identifier" {
+                extract_enum_member(&child, source, file_path, &enum_name, &vis, symbols);
             }
         }
     }
@@ -714,9 +630,7 @@ fn extract_enum_member(
     } else {
         // enum_assignment: member = value
         find_child_by_kind(node, "property_identifier")
-            .or_else(|| {
-                find_child_by_kind(node, "identifier")
-            })
+            .or_else(|| find_child_by_kind(node, "identifier"))
             .map_or_else(String::new, |n| node_text(&n, source))
     };
     if name.is_empty() {
@@ -724,10 +638,7 @@ fn extract_enum_member(
     }
     let (line_start, line_end) = line_range(node);
     let text = node_text(node, source).trim_end().to_string();
-    let text = text
-        .strip_suffix(',')
-        .unwrap_or(&text)
-        .to_string();
+    let text = text.strip_suffix(',').unwrap_or(&text).to_string();
 
     symbols.push(Symbol {
         name,
@@ -745,23 +656,15 @@ fn extract_enum_member(
     });
 }
 
-fn extract_enum_body_details(
-    node: &Node,
-    source: &str,
-) -> Option<String> {
+fn extract_enum_body_details(node: &Node, source: &str) -> Option<String> {
     let body = find_child_by_kind(node, "enum_body")?;
     let mut variants = Vec::new();
     let mut cursor = body.walk();
     for child in body.children(&mut cursor) {
         match child.kind() {
             "enum_assignment" | "property_identifier" => {
-                let text = node_text(&child, source)
-                    .trim_end()
-                    .to_string();
-                let text = text
-                    .strip_suffix(',')
-                    .unwrap_or(&text)
-                    .to_string();
+                let text = node_text(&child, source).trim_end().to_string();
+                let text = text.strip_suffix(',').unwrap_or(&text).to_string();
                 variants.push(text);
             }
             _ => {}
@@ -785,14 +688,8 @@ fn extract_variable_declarations(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "variable_declarator" {
-            let name_node =
-                find_child_by_kind(&child, "identifier")
-                    .or_else(|| {
-                        find_child_by_kind(
-                            &child,
-                            "type_identifier",
-                        )
-                    });
+            let name_node = find_child_by_kind(&child, "identifier")
+                .or_else(|| find_child_by_kind(&child, "type_identifier"));
             let Some(name_node) = name_node else {
                 continue;
             };
@@ -804,11 +701,10 @@ fn extract_variable_declarations(
             }
 
             // Check if the value is an arrow function
-            let value_node =
-                child.child_by_field_name("value");
-            let is_arrow = value_node.as_ref().is_some_and(
-                |v| v.kind() == "arrow_function",
-            );
+            let value_node = child.child_by_field_name("value");
+            let is_arrow = value_node
+                .as_ref()
+                .is_some_and(|v| v.kind() == "arrow_function");
 
             let kind = if is_arrow {
                 SymbolKind::Function
@@ -826,12 +722,9 @@ fn extract_variable_declarations(
                 line_start,
                 line_end,
                 signature: get_signature(node, source),
-                doc_comment: extract_doc_comment(
-                    node, source,
-                ),
+                doc_comment: extract_doc_comment(node, source),
                 body: if is_arrow {
-                    value_node
-                        .map(|v| extract_body(&v, source))
+                    value_node.map(|v| extract_body(&v, source))
                 } else {
                     None
                 },
@@ -849,16 +742,12 @@ fn extract_class_member(
     file_path: &str,
     class_name: Option<&str>,
 ) -> Option<Symbol> {
-    let name_node =
-        find_child_by_kind(node, "property_identifier")
-            .or_else(|| {
-                find_child_by_kind(node, "identifier")
-            })?;
+    let name_node = find_child_by_kind(node, "property_identifier")
+        .or_else(|| find_child_by_kind(node, "identifier"))?;
     let name = node_text(&name_node, source);
     let (line_start, line_end) = line_range(node);
 
-    let kind = if node.kind() == "method_definition"
-        || node.kind() == "abstract_method_definition"
+    let kind = if node.kind() == "method_definition" || node.kind() == "abstract_method_definition"
     {
         SymbolKind::Function
     } else {
@@ -886,12 +775,7 @@ fn extract_class_member(
     })
 }
 
-fn extract_import(
-    node: &Node,
-    source: &str,
-    file_path: &str,
-    symbols: &mut Vec<Symbol>,
-) {
+fn extract_import(node: &Node, source: &str, file_path: &str, symbols: &mut Vec<Symbol>) {
     let text = node_text(node, source);
     let (line_start, line_end) = line_range(node);
     symbols.push(Symbol {
@@ -914,14 +798,8 @@ fn extract_import(
 #[must_use]
 pub fn is_test_ts_file(path: &str) -> bool {
     let p = std::path::Path::new(path);
-    let stem = p
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-    let ext = p
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
 
     // Check for double extensions: .test.ts, .spec.ts, etc
     let stem_ext = std::path::Path::new(stem)
@@ -932,8 +810,7 @@ pub fn is_test_ts_file(path: &str) -> bool {
     }
 
     // Check for __tests__ directory
-    path.contains("__tests__/")
-        || path.contains("__tests__\\")
+    path.contains("__tests__/") || path.contains("__tests__\\")
 }
 
 /// Noisy symbols for TypeScript — common built-in methods
@@ -1017,14 +894,37 @@ struct TsRefContext<'a, S: std::hash::BuildHasher> {
 }
 
 /// Extract references from TS source code.
+/// `repo_path` is used to resolve import specifiers to filesystem
+/// paths for high-confidence ref matching.
 pub fn extract_ts_refs<S: std::hash::BuildHasher>(
     source: &str,
     file_path: &str,
     known_symbols: &HashSet<String, S>,
+    repo_path: &std::path::Path,
 ) -> Result<Vec<SymbolRef>, String> {
     let tree = parse_ts_source_tree(source, file_path)?;
     let root = tree.root_node();
-    let import_map = build_ts_import_map(&root, source);
+    let raw_import_map = build_ts_import_map(&root, source);
+
+    // Resolve raw import specifiers (e.g. "./service") to actual
+    // filesystem paths (e.g. "src/service.ts") for high-confidence
+    // DB matching
+    let tsconfig = super::ts_imports::parse_tsconfig_paths(repo_path);
+    let import_map: HashMap<String, ImportInfo> = raw_import_map
+        .into_iter()
+        .map(|(name, info)| {
+            let resolved = super::ts_imports::resolve_ts_import(
+                &info.qualified_path,
+                file_path,
+                repo_path,
+                &tsconfig,
+            );
+            let qualified_path = resolved
+                .unwrap_or(info.qualified_path);
+            (name, ImportInfo { qualified_path })
+        })
+        .collect();
+
     let ctx = TsRefContext {
         source,
         file_path,
@@ -1037,10 +937,7 @@ pub fn extract_ts_refs<S: std::hash::BuildHasher>(
 }
 
 /// Build import map from `import` declarations.
-fn build_ts_import_map(
-    root: &Node,
-    source: &str,
-) -> HashMap<String, ImportInfo> {
+fn build_ts_import_map(root: &Node, source: &str) -> HashMap<String, ImportInfo> {
     let mut map = HashMap::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
@@ -1051,18 +948,12 @@ fn build_ts_import_map(
     map
 }
 
-fn parse_import_statement(
-    node: &Node,
-    source: &str,
-    map: &mut HashMap<String, ImportInfo>,
-) {
+fn parse_import_statement(node: &Node, source: &str, map: &mut HashMap<String, ImportInfo>) {
     // Extract the source module path
-    let source_path = find_child_by_kind(node, "string")
-        .map(|n| {
-            let text = node_text(&n, source);
-            text.trim_matches(|c| c == '\'' || c == '"')
-                .to_string()
-        });
+    let source_path = find_child_by_kind(node, "string").map(|n| {
+        let text = node_text(&n, source);
+        text.trim_matches(|c| c == '\'' || c == '"').to_string()
+    });
     let Some(module_path) = source_path else {
         return;
     };
@@ -1071,12 +962,7 @@ fn parse_import_statement(
     let mut inner = node.walk();
     for child in node.children(&mut inner) {
         if child.kind() == "import_clause" {
-            parse_import_clause(
-                &child,
-                source,
-                &module_path,
-                map,
-            );
+            parse_import_clause(&child, source, &module_path, map);
         }
     }
 }
@@ -1096,8 +982,7 @@ fn parse_import_clause(
                 map.insert(
                     name,
                     ImportInfo {
-                        qualified_path: module_path
-                            .to_string(),
+                        qualified_path: module_path.to_string(),
                     },
                 );
             }
@@ -1110,20 +995,14 @@ fn parse_import_clause(
                         let alias = spec
                             .child_by_field_name("alias")
                             .map(|n| node_text(&n, source));
-                        let name = find_child_by_kind(
-                            &spec,
-                            "identifier",
-                        )
-                        .map(|n| node_text(&n, source));
-                        let local_name =
-                            alias.or(name);
+                        let name =
+                            find_child_by_kind(&spec, "identifier").map(|n| node_text(&n, source));
+                        let local_name = alias.or(name);
                         if let Some(local) = local_name {
                             map.insert(
                                 local,
                                 ImportInfo {
-                                    qualified_path:
-                                        module_path
-                                            .to_string(),
+                                    qualified_path: module_path.to_string(),
                                 },
                             );
                         }
@@ -1132,16 +1011,12 @@ fn parse_import_clause(
             }
             // Namespace import: import * as Foo from '...'
             "namespace_import" => {
-                if let Some(name_node) =
-                    find_child_by_kind(&child, "identifier")
-                {
-                    let name =
-                        node_text(&name_node, source);
+                if let Some(name_node) = find_child_by_kind(&child, "identifier") {
+                    let name = node_text(&name_node, source);
                     map.insert(
                         name,
                         ImportInfo {
-                            qualified_path: module_path
-                                .to_string(),
+                            qualified_path: module_path.to_string(),
                         },
                     );
                 }
@@ -1160,99 +1035,53 @@ fn collect_ts_refs<S: std::hash::BuildHasher>(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "function_declaration"
-            | "generator_function_declaration" => {
-                let Some(name_node) =
-                    find_child_by_kind(&child, "identifier")
-                else {
+            "function_declaration" | "generator_function_declaration" => {
+                let Some(name_node) = find_child_by_kind(&child, "identifier") else {
                     continue;
                 };
-                let fn_name =
-                    node_text(&name_node, ctx.source);
-                collect_ts_body_refs(
-                    &child, &fn_name, class_name, ctx, refs,
-                );
+                let fn_name = node_text(&name_node, ctx.source);
+                collect_ts_body_refs(&child, &fn_name, class_name, ctx, refs);
             }
-            "class_declaration"
-            | "abstract_class_declaration" => {
-                let type_name =
-                    find_child_by_kind(&child, "type_identifier")
-                        .map(|n| node_text(&n, ctx.source));
-                if let Some(body) =
-                    find_child_by_kind(&child, "class_body")
-                {
-                    collect_ts_refs(
-                        &body,
-                        ctx,
-                        type_name.as_deref(),
-                        refs,
-                    );
+            "class_declaration" | "abstract_class_declaration" => {
+                let type_name = find_child_by_kind(&child, "type_identifier")
+                    .map(|n| node_text(&n, ctx.source));
+                if let Some(body) = find_child_by_kind(&child, "class_body") {
+                    collect_ts_refs(&body, ctx, type_name.as_deref(), refs);
                 }
             }
-            "method_definition"
-            | "abstract_method_definition" => {
-                let name_node = find_child_by_kind(
-                    &child,
-                    "property_identifier",
-                )
-                .or_else(|| {
-                    find_child_by_kind(&child, "identifier")
-                });
+            "method_definition" | "abstract_method_definition" => {
+                let name_node = find_child_by_kind(&child, "property_identifier")
+                    .or_else(|| find_child_by_kind(&child, "identifier"));
                 let Some(name_node) = name_node else {
                     continue;
                 };
-                let method_name =
-                    node_text(&name_node, ctx.source);
-                collect_ts_body_refs(
-                    &child,
-                    &method_name,
-                    class_name,
-                    ctx,
-                    refs,
-                );
+                let method_name = node_text(&name_node, ctx.source);
+                collect_ts_body_refs(&child, &method_name, class_name, ctx, refs);
             }
             "lexical_declaration" => {
                 // const foo = (...) => { ... }
                 let mut inner = child.walk();
                 for decl in child.children(&mut inner) {
                     if decl.kind() == "variable_declarator" {
-                        let name = find_child_by_kind(
-                            &decl,
-                            "identifier",
-                        )
-                        .map(|n| node_text(&n, ctx.source));
-                        let value =
-                            decl.child_by_field_name("value");
-                        if let (Some(name), Some(value)) =
-                            (name, value)
+                        let name = find_child_by_kind(&decl, "identifier")
+                            .map(|n| node_text(&n, ctx.source));
+                        let value = decl.child_by_field_name("value");
+                        if let (Some(name), Some(value)) = (name, value)
                             && (value.kind() == "arrow_function"
                                 || value.kind() == "function"
                                 || value.kind() == "function_expression")
                         {
-                            collect_ts_body_refs(
-                                &value,
-                                &name,
-                                class_name,
-                                ctx,
-                                refs,
-                            );
+                            collect_ts_body_refs(&value, &name, class_name, ctx, refs);
                         }
                     }
                 }
             }
             "export_statement" => {
-                collect_ts_refs(
-                    &child, ctx, class_name, refs,
-                );
+                collect_ts_refs(&child, ctx, class_name, refs);
             }
             "module" | "internal_module" => {
-                if let Some(body) = find_child_by_kind(
-                    &child,
-                    "statement_block",
-                ) {
-                    collect_ts_refs(
-                        &body, ctx, None, refs,
-                    );
+                if let Some(body) = find_child_by_kind(&child, "statement_block") {
+                    collect_ts_refs(&body, ctx, None, refs);
                 }
             }
             _ => {}
@@ -1260,22 +1089,15 @@ fn collect_ts_refs<S: std::hash::BuildHasher>(
     }
 }
 
-fn collect_ts_locals(
-    node: &Node,
-    source: &str,
-) -> HashSet<String> {
+fn collect_ts_locals(node: &Node, source: &str) -> HashSet<String> {
     let mut locals = HashSet::new();
     let mut stack = vec![*node];
     while let Some(n) = stack.pop() {
         let mut cursor = n.walk();
         for child in n.children(&mut cursor) {
             match child.kind() {
-                "required_parameter"
-                | "optional_parameter"
-                | "variable_declarator" => {
-                    if let Some(id) =
-                        find_child_by_kind(&child, "identifier")
-                    {
+                "required_parameter" | "optional_parameter" | "variable_declarator" => {
+                    if let Some(id) = find_child_by_kind(&child, "identifier") {
                         locals.insert(node_text(&id, source));
                     }
                 }
@@ -1304,28 +1126,21 @@ fn collect_ts_body_refs<S: std::hash::BuildHasher>(
                 // Function call: foo(...)
                 "call_expression" => {
                     if let Some(func) = child.child(0) {
-                        process_ts_call(
-                            &func, fn_name, impl_type, ctx,
-                            &locals, &mut seen, refs,
-                        );
+                        process_ts_call(&func, fn_name, impl_type, ctx, &locals, &mut seen, refs);
                     }
                     stack.push(child);
                 }
                 // new Foo(...)
                 "new_expression" => {
                     if let Some(constructor) = child.child(1) {
-                        let name =
-                            node_text(&constructor, ctx.source);
+                        let name = node_text(&constructor, ctx.source);
                         try_add_ts_ref(
                             &name,
                             &TsRefInfo {
                                 source_name: fn_name,
                                 target_context: None,
                                 kind: RefKind::Call,
-                                ref_line: i64::try_from(
-                                    child.start_position().row,
-                                )
-                                .unwrap_or(0)
+                                ref_line: i64::try_from(child.start_position().row).unwrap_or(0)
                                     + 1,
                             },
                             ctx,
@@ -1338,19 +1153,14 @@ fn collect_ts_body_refs<S: std::hash::BuildHasher>(
                 }
                 // Type references in annotations
                 "type_identifier" => {
-                    let name =
-                        node_text(&child, ctx.source);
+                    let name = node_text(&child, ctx.source);
                     try_add_ts_ref(
                         &name,
                         &TsRefInfo {
                             source_name: fn_name,
                             target_context: None,
                             kind: RefKind::TypeRef,
-                            ref_line: i64::try_from(
-                                child.start_position().row,
-                            )
-                            .unwrap_or(0)
-                                + 1,
+                            ref_line: i64::try_from(child.start_position().row).unwrap_or(0) + 1,
                         },
                         ctx,
                         &locals,
@@ -1359,9 +1169,7 @@ fn collect_ts_body_refs<S: std::hash::BuildHasher>(
                     );
                 }
                 // Skip nested function/class defs
-                "function_declaration"
-                | "class_declaration"
-                | "arrow_function"
+                "function_declaration" | "class_declaration" | "arrow_function"
                     if n.kind() != node.kind() =>
                 {
                     // Don't descend into nested definitions
@@ -1383,10 +1191,7 @@ fn process_ts_call<S: std::hash::BuildHasher>(
     seen: &mut HashSet<String>,
     refs: &mut Vec<SymbolRef>,
 ) {
-    let ref_line =
-        i64::try_from(func.start_position().row)
-            .unwrap_or(0)
-            + 1;
+    let ref_line = i64::try_from(func.start_position().row).unwrap_or(0) + 1;
     match func.kind() {
         "identifier" => {
             let name = node_text(func, ctx.source);
@@ -1398,36 +1203,26 @@ fn process_ts_call<S: std::hash::BuildHasher>(
                     kind: RefKind::Call,
                     ref_line,
                 },
-                ctx, locals, seen, refs,
+                ctx,
+                locals,
+                seen,
+                refs,
             );
         }
         "member_expression" => {
             // obj.method() — extract method name and
             // try to resolve obj type
-            if let Some(prop) = find_child_by_kind(
-                func,
-                "property_identifier",
-            ) {
-                let method_name =
-                    node_text(&prop, ctx.source);
+            if let Some(prop) = find_child_by_kind(func, "property_identifier") {
+                let method_name = node_text(&prop, ctx.source);
                 let obj = func.child(0);
                 let target_context = obj.and_then(|o| {
                     match o.kind() {
                         // this.method() → use class name
-                        "this" => {
-                            impl_type.map(String::from)
-                        }
+                        "this" => impl_type.map(String::from),
                         "identifier" => {
-                            let name =
-                                node_text(&o, ctx.source);
+                            let name = node_text(&o, ctx.source);
                             // Uppercase = likely type
-                            if name
-                                .chars()
-                                .next()
-                                .is_some_and(
-                                    char::is_uppercase,
-                                )
-                            {
+                            if name.chars().next().is_some_and(char::is_uppercase) {
                                 Some(name)
                             } else {
                                 None
@@ -1440,8 +1235,7 @@ fn process_ts_call<S: std::hash::BuildHasher>(
                     &method_name,
                     &TsRefInfo {
                         source_name: fn_name,
-                        target_context: target_context
-                            .as_deref(),
+                        target_context: target_context.as_deref(),
                         kind: RefKind::Call,
                         ref_line,
                     },
@@ -1476,12 +1270,11 @@ fn try_add_ts_ref<S: std::hash::BuildHasher>(
     }
 
     // Dedup key includes context
-    let dedup_key =
-        if let Some(tc) = info.target_context {
-            format!("{tc}::{name}")
-        } else {
-            name.to_string()
-        };
+    let dedup_key = if let Some(tc) = info.target_context {
+        format!("{tc}::{name}")
+    } else {
+        name.to_string()
+    };
     if !seen.insert(dedup_key) {
         return;
     }
@@ -1492,9 +1285,7 @@ fn try_add_ts_ref<S: std::hash::BuildHasher>(
     }
 
     // Skip noisy symbols unless qualified
-    if info.target_context.is_none()
-        && is_noisy_ts_symbol(name)
-    {
+    if info.target_context.is_none() && is_noisy_ts_symbol(name) {
         return;
     }
 
@@ -1533,12 +1324,8 @@ export function greet(name: string): string {
     return `Hello, ${name}!`;
 }
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/lib.ts").unwrap();
-        let func = symbols
-            .iter()
-            .find(|s| s.name == "greet")
-            .unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/lib.ts").unwrap();
+        let func = symbols.iter().find(|s| s.name == "greet").unwrap();
         assert_eq!(func.kind, SymbolKind::Function);
         assert_eq!(func.visibility, Visibility::Public);
     }
@@ -1558,27 +1345,17 @@ export class UserService {
     }
 }
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/service.ts").unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/service.ts").unwrap();
 
-        let class = symbols
-            .iter()
-            .find(|s| s.name == "UserService")
-            .unwrap();
+        let class = symbols.iter().find(|s| s.name == "UserService").unwrap();
         assert_eq!(class.kind, SymbolKind::Class);
         assert_eq!(class.visibility, Visibility::Public);
 
         let method = symbols
             .iter()
-            .find(|s| {
-                s.name == "getName"
-                    && s.kind == SymbolKind::Function
-            })
+            .find(|s| s.name == "getName" && s.kind == SymbolKind::Function)
             .unwrap();
-        assert_eq!(
-            method.impl_type.as_deref(),
-            Some("UserService")
-        );
+        assert_eq!(method.impl_type.as_deref(), Some("UserService"));
     }
 
     #[test]
@@ -1589,12 +1366,8 @@ export interface Serializable {
     deserialize(data: string): void;
 }
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/types.ts").unwrap();
-        let iface = symbols
-            .iter()
-            .find(|s| s.name == "Serializable")
-            .unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/types.ts").unwrap();
+        let iface = symbols.iter().find(|s| s.name == "Serializable").unwrap();
         assert_eq!(iface.kind, SymbolKind::Interface);
         assert_eq!(iface.visibility, Visibility::Public);
         assert!(iface.details.is_some());
@@ -1611,8 +1384,7 @@ class Task implements Runnable {
     run(): void {}
 }
 ";
-        let (_, trait_impls) =
-            parse_ts_source(source, "src/task.ts").unwrap();
+        let (_, trait_impls) = parse_ts_source(source, "src/task.ts").unwrap();
         assert_eq!(trait_impls.len(), 1);
         assert_eq!(trait_impls[0].type_name, "Task");
         assert_eq!(trait_impls[0].trait_name, "Runnable");
@@ -1629,8 +1401,7 @@ class Dog extends Animal {
     breed: string;
 }
 ";
-        let (_, trait_impls) =
-            parse_ts_source(source, "src/animals.ts").unwrap();
+        let (_, trait_impls) = parse_ts_source(source, "src/animals.ts").unwrap();
         assert_eq!(trait_impls.len(), 1);
         assert_eq!(trait_impls[0].type_name, "Dog");
         assert_eq!(trait_impls[0].trait_name, "Animal");
@@ -1645,14 +1416,10 @@ export enum Color {
     Blue = "BLUE",
 }
 "#;
-        let (symbols, _) =
-            parse_ts_source(source, "src/color.ts").unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/color.ts").unwrap();
         let enum_sym = symbols
             .iter()
-            .find(|s| {
-                s.name == "Color"
-                    && s.kind == SymbolKind::Enum
-            })
+            .find(|s| s.name == "Color" && s.kind == SymbolKind::Enum)
             .unwrap();
         assert_eq!(enum_sym.visibility, Visibility::Public);
 
@@ -1661,10 +1428,11 @@ export enum Color {
             .filter(|s| s.kind == SymbolKind::EnumVariant)
             .collect();
         assert_eq!(variants.len(), 3);
-        assert!(variants
-            .iter()
-            .all(|v| v.impl_type.as_deref()
-                == Some("Color")));
+        assert!(
+            variants
+                .iter()
+                .all(|v| v.impl_type.as_deref() == Some("Color"))
+        );
     }
 
     #[test]
@@ -1672,12 +1440,8 @@ export enum Color {
         let source = r"
 export type Result<T> = { ok: true; value: T } | { ok: false; error: Error };
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/types.ts").unwrap();
-        let ta = symbols
-            .iter()
-            .find(|s| s.name == "Result")
-            .unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/types.ts").unwrap();
+        let ta = symbols.iter().find(|s| s.name == "Result").unwrap();
         assert_eq!(ta.kind, SymbolKind::TypeAlias);
     }
 
@@ -1686,12 +1450,8 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: Error };
         let source = r"
 export const MAX_RETRIES = 3;
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/config.ts").unwrap();
-        let c = symbols
-            .iter()
-            .find(|s| s.name == "MAX_RETRIES")
-            .unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/config.ts").unwrap();
+        let c = symbols.iter().find(|s| s.name == "MAX_RETRIES").unwrap();
         assert_eq!(c.kind, SymbolKind::Const);
         assert_eq!(c.visibility, Visibility::Public);
     }
@@ -1701,12 +1461,8 @@ export const MAX_RETRIES = 3;
         let source = r"
 export const add = (a: number, b: number): number => a + b;
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/math.ts").unwrap();
-        let f = symbols
-            .iter()
-            .find(|s| s.name == "add")
-            .unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/math.ts").unwrap();
+        let f = symbols.iter().find(|s| s.name == "add").unwrap();
         assert_eq!(f.kind, SymbolKind::Function);
         assert_eq!(f.visibility, Visibility::Public);
     }
@@ -1717,8 +1473,7 @@ export const add = (a: number, b: number): number => a + b;
 import { Foo, Bar } from './foo';
 import type { Baz } from './baz';
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/main.ts").unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/main.ts").unwrap();
         let imports: Vec<_> = symbols
             .iter()
             .filter(|s| s.kind == SymbolKind::Use)
@@ -1730,9 +1485,7 @@ import type { Baz } from './baz';
     fn test_is_test_file() {
         assert!(is_test_ts_file("src/utils.test.ts"));
         assert!(is_test_ts_file("src/utils.spec.ts"));
-        assert!(is_test_ts_file(
-            "src/__tests__/utils.ts"
-        ));
+        assert!(is_test_ts_file("src/__tests__/utils.ts"));
         assert!(is_test_ts_file("src/App.test.tsx"));
         assert!(!is_test_ts_file("src/utils.ts"));
         assert!(!is_test_ts_file("src/test-utils.ts"));
@@ -1755,23 +1508,13 @@ export function createApp(config: Config): void {
         known.insert("getName".to_string());
         known.insert("createApp".to_string());
 
-        let refs =
-            extract_ts_refs(source, "src/app.ts", &known)
-                .unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let refs = extract_ts_refs(source, "src/app.ts", &known, tmp.path()).unwrap();
 
         // Should find refs to UserService, Config, getName
-        let names: Vec<&str> = refs
-            .iter()
-            .map(|r| r.target_name.as_str())
-            .collect();
-        assert!(
-            names.contains(&"UserService"),
-            "refs: {names:?}"
-        );
-        assert!(
-            names.contains(&"Config"),
-            "refs: {names:?}"
-        );
+        let names: Vec<&str> = refs.iter().map(|r| r.target_name.as_str()).collect();
+        assert!(names.contains(&"UserService"), "refs: {names:?}");
+        assert!(names.contains(&"Config"), "refs: {names:?}");
     }
 
     #[test]
@@ -1787,12 +1530,8 @@ export function add(a: number, b: number): number {
     return a + b;
 }
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/math.ts").unwrap();
-let f = symbols
-            .iter()
-            .find(|s| s.name == "add")
-            .unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/math.ts").unwrap();
+        let f = symbols.iter().find(|s| s.name == "add").unwrap();
         let doc = f.doc_comment.as_ref().unwrap();
         assert!(doc.contains("Adds two numbers"));
         assert!(doc.contains("@param a"));
@@ -1811,23 +1550,12 @@ export function Greeting({ name }: Props): JSX.Element {
     return <div>Hello, {name}!</div>;
 }
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/Greeting.tsx")
-                .unwrap();
-        let component = symbols
-            .iter()
-            .find(|s| s.name == "Greeting")
-            .unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/Greeting.tsx").unwrap();
+        let component = symbols.iter().find(|s| s.name == "Greeting").unwrap();
         assert_eq!(component.kind, SymbolKind::Function);
-        assert_eq!(
-            component.visibility,
-            Visibility::Public
-        );
+        assert_eq!(component.visibility, Visibility::Public);
 
-        let iface = symbols
-            .iter()
-            .find(|s| s.name == "Props")
-            .unwrap();
+        let iface = symbols.iter().find(|s| s.name == "Props").unwrap();
         assert_eq!(iface.kind, SymbolKind::Interface);
     }
 
@@ -1841,35 +1569,22 @@ class Foo {
     qux(): void {}
 }
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/foo.ts").unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/foo.ts").unwrap();
 
-        let bar = symbols
-            .iter()
-            .find(|s| s.name == "bar")
-            .unwrap();
+        let bar = symbols.iter().find(|s| s.name == "bar").unwrap();
         assert_eq!(
             bar.visibility,
             Visibility::Restricted,
             "protected should be Restricted"
         );
 
-        let secret = symbols
-            .iter()
-            .find(|s| s.name == "secret")
-            .unwrap();
+        let secret = symbols.iter().find(|s| s.name == "secret").unwrap();
         assert_eq!(secret.visibility, Visibility::Private);
 
-        let baz = symbols
-            .iter()
-            .find(|s| s.name == "baz")
-            .unwrap();
+        let baz = symbols.iter().find(|s| s.name == "baz").unwrap();
         assert_eq!(baz.visibility, Visibility::Public);
 
-        let qux = symbols
-            .iter()
-            .find(|s| s.name == "qux")
-            .unwrap();
+        let qux = symbols.iter().find(|s| s.name == "qux").unwrap();
         assert_eq!(
             qux.visibility,
             Visibility::Public,
@@ -1888,10 +1603,12 @@ interface Extended extends Base {
     name: string;
 }
 ";
-        let (symbols, trait_impls) =
-            parse_ts_source(source, "src/types.ts").unwrap();
-        assert!(symbols.iter().any(|s| s.name == "Extended"
-            && s.kind == SymbolKind::Interface));
+        let (symbols, trait_impls) = parse_ts_source(source, "src/types.ts").unwrap();
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Extended" && s.kind == SymbolKind::Interface)
+        );
         assert_eq!(trait_impls.len(), 1);
         assert_eq!(trait_impls[0].type_name, "Extended");
         assert_eq!(trait_impls[0].trait_name, "Base");
@@ -1902,12 +1619,8 @@ interface Extended extends Base {
         let source = r"
 export var legacyConfig = { debug: true };
 ";
-        let (symbols, _) =
-            parse_ts_source(source, "src/legacy.ts").unwrap();
-        let sym = symbols
-            .iter()
-            .find(|s| s.name == "legacyConfig")
-            .unwrap();
+        let (symbols, _) = parse_ts_source(source, "src/legacy.ts").unwrap();
+        let sym = symbols.iter().find(|s| s.name == "legacyConfig").unwrap();
         assert_eq!(sym.kind, SymbolKind::Static);
     }
 }
