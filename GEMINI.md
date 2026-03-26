@@ -5,6 +5,31 @@
 
 This repo is indexed by illu (36 tools). **Use illu tools as your first step** — before reading files, before grep, before guessing at code structure.
 
+### Tool priority (IMPORTANT)
+
+When illu tools are available, use them INSTEAD of built-in alternatives for Rust code intelligence. Do NOT use Grep, Glob, or Read for code exploration when illu can answer the question.
+
+| Instead of | Use |
+|------------|-----|
+| Grep to find a symbol or function | `mcp_illu_query` |
+| Grep to find callers or references | `mcp_illu_references` or `mcp_illu_neighborhood` |
+| Grep to understand a function | `mcp_illu_context` (includes source, callers, callees) |
+| Glob to find files or modules | `mcp_illu_tree` or `mcp_illu_overview` |
+| Read to understand code structure | `mcp_illu_context` or `mcp_illu_batch_context` |
+| Grep to find tests for a function | `mcp_illu_test_impact` |
+| Grep to find trait implementations | `mcp_illu_implements` |
+| Grep to find type usage | `mcp_illu_type_usage` |
+
+Only fall back to Grep/Glob/Read when searching for non-code content (config files, text, logs) or when illu tools return no results.
+
+### Subagent instructions (IMPORTANT)
+
+When spawning Agent subagents for Rust code tasks, ALWAYS include this instruction in the prompt:
+
+"Use mcp_illu_* tools instead of Grep/Glob/Read for Rust code exploration. Use mcp_illu_query to find symbols, mcp_illu_context for definitions and callers, mcp_illu_neighborhood for call graphs. Only fall back to Grep/Glob/Read for non-code content."
+
+Prefer dedicated illu agents when available: `illu-explore` (codebase questions), `illu-review` (change analysis), `illu-refactor` (refactoring support).
+
 ### When to use illu
 
 - **Starting any task**: `@illu query` the relevant symbols to understand what exists
@@ -69,4 +94,16 @@ This repo is indexed by illu (36 tools). **Use illu tools as your first step** �
 3. **Chain tools**: `@illu query` to find candidates → `@illu context` for the one you need → `@illu impact` before changing it
 4. **Save tokens**: use `sections: ["source", "callers"]` on context/batch_context to fetch only what you need
 5. **Production focus**: use `exclude_tests: true` on context/neighborhood/callpath to filter out test functions
+
+### Cross-repo workflow
+
+**NEVER navigate to or read files from other repositories directly.** Use cross-repo tools instead — they query other repos' indexes without leaving this repo.
+
+1. `@illu repos` — confirm the other repo is indexed and available
+2. `@illu cross_query <term>` — search symbols across all indexed repos
+3. `@illu cross_impact <symbol>` — find which code in other repos references a symbol
+4. `@illu cross_deps` — show inter-repo dependency relationships
+5. `@illu cross_callpath <from> <to>` — find call chains spanning repo boundaries
+
+Cross-repo tools open other repos' indexes read-only. They work as long as the other repo has been indexed by illu (check with `@illu repos`). If a repo is not indexed, ask the user to run illu on it first.
 <!-- illu:end -->

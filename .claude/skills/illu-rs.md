@@ -60,16 +60,23 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 
 ## Direct Dependencies
 
+- async-lsp
+- async-process
 - clap
+- futures
+- lsp-types
 - reqwest
 - rmcp
 - rusqlite
 - serde
 - serde_json
+- thiserror
 - tokio
 - toml
+- tower
 - tracing
 - tracing-subscriber
 - tree-sitter
 - tree-sitter-rust
+- url
 - walkdir
