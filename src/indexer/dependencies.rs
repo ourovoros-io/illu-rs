@@ -111,6 +111,34 @@ pub fn resolve_dependencies(direct: &[DirectDep], locked: &[LockedDep]) -> Vec<R
     result
 }
 
+/// Parse `package.json` to extract dependencies as `DirectDep` entries.
+pub fn parse_package_json(
+    content: &str,
+) -> Result<Vec<DirectDep>, serde_json::Error> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(content)?;
+
+    let mut result = Vec::new();
+
+    for section in &["dependencies", "devDependencies"] {
+        if let Some(obj) = parsed.get(section).and_then(serde_json::Value::as_object) {
+                for (name, value) in obj {
+                    let version_req = value
+                        .as_str()
+                        .unwrap_or("*")
+                        .to_string();
+                    result.push(DirectDep {
+                        name: name.clone(),
+                        version_req,
+                        features: Vec::new(),
+                    });
+                }
+        }
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
@@ -217,6 +245,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
         }];
         let resolved = resolve_dependencies(&direct, &locked);
         assert!(resolved[0].repository_url.is_none());
+    }
+
+    #[test]
+    fn test_parse_package_json_deps() {
+        let content = r#"{
+  "name": "my-app",
+  "version": "1.0.0",
+  "dependencies": {
+    "react": "^18.0.0",
+    "@tauri-apps/api": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}"#;
+        let deps = parse_package_json(content).unwrap();
+        assert_eq!(deps.len(), 4);
+        assert!(deps.iter().any(|d| d.name == "react"));
+        assert!(deps.iter().any(|d| d.name == "@tauri-apps/api"));
+        assert!(deps.iter().any(|d| d.name == "typescript"));
+        assert!(deps.iter().any(|d| d.name == "vitest"));
     }
 
     #[test]

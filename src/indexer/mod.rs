@@ -3,10 +3,61 @@ pub mod dependencies;
 pub mod docs;
 pub mod parser;
 pub mod store;
+pub mod tauri_bridge;
+pub mod ts_imports;
+pub mod ts_parser;
 pub mod workspace;
 
 use crate::db::Database;
 use std::path::PathBuf;
+
+/// Directories to exclude from file scanning.
+const EXCLUDED_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    "dist",
+    ".next",
+    "build",
+    ".nuxt",
+    ".output",
+];
+
+fn is_excluded_dir(name: &str) -> bool {
+    EXCLUDED_DIRS.contains(&name) || name.starts_with('.')
+}
+
+fn is_source_file(ext: &std::ffi::OsStr) -> bool {
+    matches!(ext.to_str(), Some("rs" | "ts" | "tsx"))
+}
+
+fn is_ts_file(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    p.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts") || ext.eq_ignore_ascii_case("tsx"))
+}
+
+/// Mark all symbols in a TS test file with a `"test"` attribute
+/// so that `is_test_attribute` in `store.rs` sets `is_test = 1`.
+fn mark_ts_test_symbols(symbols: &mut [parser::Symbol], path: &str) {
+    if ts_parser::is_test_ts_file(path) {
+        for sym in symbols.iter_mut() {
+            sym.attributes = Some(
+                sym.attributes
+                    .as_ref()
+                    .map_or_else(|| "test".to_string(), |a| format!("{a}, test")),
+            );
+        }
+    }
+}
+
+/// Extract the `"name"` field from a `package.json` content string.
+fn package_name_from_json(content: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()?
+        .get("name")?
+        .as_str()
+        .map(String::from)
+}
 
 #[derive(Clone)]
 pub struct IndexConfig {
@@ -16,29 +67,56 @@ pub struct IndexConfig {
 pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
     db.clear_code_index()?;
 
-    let cargo_toml = std::fs::read_to_string(config.repo_path.join("Cargo.toml"))?;
-    let ws_info = workspace::parse_workspace_toml(&cargo_toml)?;
+    let has_cargo = config.repo_path.join("Cargo.toml").exists();
+    let has_ts = config.repo_path.join("tsconfig.json").exists()
+        || config.repo_path.join("package.json").exists();
 
-    if ws_info.is_workspace {
-        tracing::info!(
-            members = ws_info.members.len(),
-            "Phase 1/4: indexing workspace"
-        );
-        crate::status::set("indexing ▸ parsing workspace");
-        index_workspace(db, config, &ws_info)?;
-    } else {
-        tracing::info!("Phase 1/4: indexing single crate");
-        crate::status::set("indexing ▸ parsing crate");
-        index_single_crate(db, config, &cargo_toml)?;
+    // Phase 1: Parse sources
+    if has_cargo {
+        let cargo_toml = std::fs::read_to_string(config.repo_path.join("Cargo.toml"))?;
+        let ws_info = workspace::parse_workspace_toml(&cargo_toml)?;
+        if ws_info.is_workspace {
+            tracing::info!(
+                members = ws_info.members.len(),
+                "Phase 1: indexing Rust workspace"
+            );
+            crate::status::set("indexing ▸ parsing workspace");
+            index_workspace(db, config, &ws_info)?;
+        } else {
+            tracing::info!("Phase 1: indexing single Rust crate");
+            crate::status::set("indexing ▸ parsing crate");
+            index_single_crate(db, config, &cargo_toml)?;
+        }
     }
 
-    tracing::info!("Phase 2/4: extracting symbol references");
+    if has_ts {
+        tracing::info!("Phase 1: indexing TypeScript sources");
+        crate::status::set("indexing ▸ parsing TypeScript");
+        index_typescript(db, config)?;
+    }
+
+    if !has_cargo && !has_ts {
+        return Err("No Cargo.toml, tsconfig.json, or package.json found".into());
+    }
+
+    tracing::info!("Phase 2: extracting symbol references");
     crate::status::set("indexing ▸ extracting refs");
     extract_all_symbol_refs(db, config)?;
-    tracing::info!("Phase 3/4: generating skill file");
+
+    // Phase 2b: resolve Tauri cross-language bridge
+    if has_cargo && has_ts && tauri_bridge::is_tauri_project(&config.repo_path) {
+        tracing::info!("Phase 2b: resolving Tauri bridge");
+        crate::status::set("indexing ▸ Tauri bridge");
+        let bridge_refs = tauri_bridge::resolve_tauri_bridge(db)?;
+        if bridge_refs > 0 {
+            tracing::info!(refs = bridge_refs, "Tauri bridge references resolved");
+        }
+    }
+
+    tracing::info!("Phase 3: generating skill file");
     crate::status::set("indexing ▸ writing skill file");
     generate_skill_file(db, config)?;
-    tracing::info!("Phase 4/4: updating metadata");
+    tracing::info!("Phase 4: updating metadata");
     update_metadata(db, config)?;
 
     let file_count = db.file_count()?;
@@ -103,7 +181,7 @@ pub fn refresh_index(
     };
     let committed_changes = if head_changed {
         if let Some(old) = &stored_hash {
-            committed_changed_rs_files(&config.repo_path, old)
+            committed_changed_source_files(&config.repo_path, old)
         } else {
             Vec::new()
         }
@@ -112,7 +190,7 @@ pub fn refresh_index(
     };
 
     // Try git-based detection first, fall back to full walk
-    let mut candidate_files = git_changed_rs_files(&config.repo_path, &existing);
+    let mut candidate_files = git_changed_source_files(&config.repo_path, &existing);
 
     // Merge in committed changes not already in the candidate list
     if !committed_changes.is_empty() {
@@ -149,22 +227,7 @@ pub fn refresh_index(
     tracing::info!(files = count, "Re-indexing changed files");
     crate::status::set(&format!("refreshing ▸ {count} files"));
 
-    for (i, df) in dirty_files.iter().enumerate() {
-        crate::status::set(&format!("refreshing ▸ [{}/{}]", i + 1, count));
-        tracing::debug!("[{}/{}] Re-indexing {}", i + 1, count, df.relative_path);
-        db.delete_file_data(&df.relative_path)?;
-        let file_id = if let Some(cid) = df.crate_id {
-            db.insert_file_with_crate(&df.relative_path, &df.hash, cid)?
-        } else {
-            db.insert_file(&df.relative_path, &df.hash)?
-        };
-        let (symbols, trait_impls) = parser::parse_rust_source(&df.source, &df.relative_path)
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-        store::store_symbols(db, file_id, &symbols)?;
-        store::store_trait_impls(db, file_id, &trait_impls)?;
-    }
-
-    rebuild_refs_for_files(db, &dirty_files)?;
+    reindex_dirty_files(db, &dirty_files)?;
 
     let stale = db.delete_stale_refs()?;
     if stale > 0 {
@@ -176,6 +239,37 @@ pub fn refresh_index(
 
     crate::status::set(crate::status::READY);
     Ok(count)
+}
+
+fn reindex_dirty_files(
+    db: &Database,
+    dirty_files: &[DirtyFile],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let count = dirty_files.len();
+    for (i, df) in dirty_files.iter().enumerate() {
+        crate::status::set(&format!("refreshing ▸ [{}/{}]", i + 1, count));
+        tracing::debug!("[{}/{}] Re-indexing {}", i + 1, count, df.relative_path);
+        db.delete_file_data(&df.relative_path)?;
+        let file_id = if let Some(cid) = df.crate_id {
+            db.insert_file_with_crate(&df.relative_path, &df.hash, cid)?
+        } else {
+            db.insert_file(&df.relative_path, &df.hash)?
+        };
+        let (symbols, trait_impls) = if is_ts_file(&df.relative_path) {
+            let (mut syms, ti) = ts_parser::parse_ts_source(&df.source, &df.relative_path)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            mark_ts_test_symbols(&mut syms, &df.relative_path);
+            (syms, ti)
+        } else {
+            parser::parse_rust_source(&df.source, &df.relative_path)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+        };
+        store::store_symbols(db, file_id, &symbols)?;
+        store::store_trait_impls(db, file_id, &trait_impls)?;
+    }
+
+    rebuild_refs_for_files(db, dirty_files)?;
+    Ok(())
 }
 
 fn rebuild_refs_for_files(
@@ -197,8 +291,13 @@ fn rebuild_refs_for_files(
 
     db.begin_transaction()?;
     for df in dirty_files {
-        let refs = parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        let refs = if is_ts_file(&df.relative_path) {
+            ts_parser::extract_ts_refs(&df.source, &df.relative_path, &known_symbols)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+        } else {
+            parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+        };
         db.store_symbol_refs_fast(&refs, &symbol_map)?;
     }
     db.commit()?;
@@ -331,6 +430,136 @@ fn index_workspace(
     Ok(())
 }
 
+fn index_typescript(
+    db: &Database,
+    config: &IndexConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Parse package.json for name and dependencies
+    let pkg_json_path = config.repo_path.join("package.json");
+    let (pkg_name, pkg_content) = if pkg_json_path.exists() {
+        let content = std::fs::read_to_string(&pkg_json_path)?;
+        let name = package_name_from_json(&content)
+            .unwrap_or_else(|| "ts-frontend".to_string());
+        (name, Some(content))
+    } else {
+        ("ts-frontend".to_string(), None)
+    };
+
+    // Store npm dependencies
+    if let Some(content) = &pkg_content
+        && let Ok(deps) = dependencies::parse_package_json(content)
+    {
+        let resolved: Vec<_> = deps
+            .iter()
+            .map(|d| dependencies::ResolvedDep {
+                name: d.name.clone(),
+                version: d.version_req.clone(),
+                is_direct: true,
+                repository_url: None,
+                features: Vec::new(),
+            })
+            .collect();
+        store::store_dependencies(db, &resolved)?;
+    }
+
+    // Handle npm workspaces
+    let workspace_patterns = ts_imports::parse_npm_workspaces(&config.repo_path);
+    let workspace_members = ts_imports::resolve_workspace_members(
+        &config.repo_path,
+        &workspace_patterns,
+    );
+
+    if workspace_members.is_empty() {
+        // Single package
+        let crate_id = db.insert_crate(&pkg_name, ".")?;
+        index_ts_files(db, config, &config.repo_path, crate_id)?;
+    } else {
+        // npm workspace — register each member
+        tracing::info!(
+            members = workspace_members.len(),
+            "Detected npm workspace"
+        );
+        for member_path in &workspace_members {
+            let member_pkg =
+                member_path.join("package.json");
+            let member_name = std::fs::read_to_string(&member_pkg)
+                .ok()
+                .and_then(|c| package_name_from_json(&c))
+                .or_else(|| {
+                    member_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            let member_rel = member_path
+                .strip_prefix(&config.repo_path)
+                .unwrap_or(member_path)
+                .to_string_lossy()
+                .to_string();
+            let crate_id = db.insert_crate(&member_name, &member_rel)?;
+            index_ts_files(db, config, member_path, crate_id)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn index_ts_files(
+    db: &Database,
+    config: &IndexConfig,
+    root: &std::path::Path,
+    crate_id: crate::db::CrateId,
+) -> Result<(), Box<dyn std::error::Error>> {
+
+    // Walk for TS/TSX files (excluding node_modules, etc.)
+    let ts_files: Vec<_> = walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|e| {
+            if !e.file_type().is_dir() || e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            !is_excluded_dir(&name)
+                && name != "src-tauri" // Skip Rust side in Tauri projects
+        })
+        .filter_map(|r| match r {
+            Ok(e)
+                if e.path()
+                    .extension()
+                    .is_some_and(|ext| ext == "ts" || ext == "tsx") =>
+            {
+                Some(e.into_path())
+            }
+            _ => None,
+        })
+        .collect();
+
+    let total = ts_files.len();
+    tracing::info!(files = total, "Found TypeScript files");
+
+    for (i, path) in ts_files.iter().enumerate() {
+        crate::status::set(&format!("indexing ▸ TS [{}/{}]", i + 1, total));
+        let source = std::fs::read_to_string(path)?;
+        let relative = path
+            .strip_prefix(&config.repo_path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        tracing::debug!("[{}/{}] Parsing TS {relative}", i + 1, total);
+        let hash = content_hash(&source);
+        let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
+        let (mut symbols, trait_impls) = ts_parser::parse_ts_source(&source, &relative)
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+
+        mark_ts_test_symbols(&mut symbols, &relative);
+
+        store::store_symbols(db, file_id, &symbols)?;
+        store::store_trait_impls(db, file_id, &trait_impls)?;
+    }
+    tracing::info!(files = total, "Parsed TypeScript files");
+    Ok(())
+}
+
 fn index_crate_sources(
     db: &Database,
     config: &IndexConfig,
@@ -345,7 +574,7 @@ fn index_crate_sources(
                 return true;
             }
             let name = e.file_name().to_string_lossy();
-            name != "target" && !name.starts_with('.')
+            !is_excluded_dir(&name)
         })
         .filter_map(|r| match r {
             Ok(e) if e.path().extension().is_some_and(|ext| ext == "rs") => Some(e.into_path()),
@@ -419,8 +648,13 @@ fn extract_all_symbol_refs(
                 continue;
             }
         };
-        let refs = parser::extract_refs(&source, relative, &known_symbols, &crate_map)
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        let refs = if is_ts_file(relative) {
+            ts_parser::extract_ts_refs(&source, relative, &known_symbols)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+        } else {
+            parser::extract_refs(&source, relative, &known_symbols, &crate_map)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+        };
         ref_count += db.store_symbol_refs_fast(&refs, &symbol_map)?;
     }
     db.commit()?;
@@ -654,8 +888,8 @@ fn content_hash(content: &str) -> String {
     format!("{hash:x}")
 }
 
-/// Find `.rs` files changed in commits since `since_hash` up to HEAD.
-fn committed_changed_rs_files(repo_path: &std::path::Path, since_hash: &str) -> Vec<String> {
+/// Find source files changed in commits since `since_hash` up to HEAD.
+fn committed_changed_source_files(repo_path: &std::path::Path, since_hash: &str) -> Vec<String> {
     let output = std::process::Command::new("git")
         .args(["diff", "--name-only", &format!("{since_hash}..HEAD")])
         .current_dir(repo_path)
@@ -673,16 +907,16 @@ fn committed_changed_rs_files(repo_path: &std::path::Path, since_hash: &str) -> 
         .filter(|l| {
             std::path::Path::new(l)
                 .extension()
-                .is_some_and(|ext| ext == "rs")
+                .is_some_and(is_source_file)
         })
         .map(String::from)
         .collect()
 }
 
-/// Use `git status` to find changed/new/deleted `.rs` files.
+/// Use `git status` to find changed/new/deleted source files.
 /// Returns a list of relative paths to check. If git fails, returns all
 /// indexed files plus walks for new ones (full scan fallback).
-fn git_changed_rs_files(
+fn git_changed_source_files(
     repo_path: &std::path::Path,
     existing: &std::collections::HashMap<String, (String, Option<crate::db::CrateId>)>,
 ) -> Vec<String> {
@@ -698,11 +932,11 @@ fn git_changed_rs_files(
 
     let Ok(output) = output else {
         tracing::debug!("git status failed, falling back to full scan");
-        return full_scan_rs_files(repo_path);
+        return full_scan_source_files(repo_path);
     };
     if !output.status.success() {
         tracing::debug!("git status returned non-zero, falling back to full scan");
-        return full_scan_rs_files(repo_path);
+        return full_scan_source_files(repo_path);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -715,7 +949,7 @@ fn git_changed_rs_files(
         let path = line[3..].trim();
         if std::path::Path::new(path)
             .extension()
-            .is_some_and(|ext| ext == "rs")
+            .is_some_and(is_source_file)
         {
             changed.push(path.to_string());
         }
@@ -737,12 +971,12 @@ fn git_changed_rs_files(
         }
     }
 
-    tracing::debug!(count = changed.len(), "git detected changed .rs files");
+    tracing::debug!(count = changed.len(), "git detected changed source files");
     changed
 }
 
-/// Fallback: walk the repo for all `.rs` files.
-fn full_scan_rs_files(repo_path: &std::path::Path) -> Vec<String> {
+/// Fallback: walk the repo for all source files.
+fn full_scan_source_files(repo_path: &std::path::Path) -> Vec<String> {
     let mut files = Vec::new();
     let walker = walkdir::WalkDir::new(repo_path)
         .into_iter()
@@ -751,12 +985,12 @@ fn full_scan_rs_files(repo_path: &std::path::Path) -> Vec<String> {
                 return true;
             }
             let name = e.file_name().to_string_lossy();
-            name != "target" && !name.starts_with('.')
+            !is_excluded_dir(&name)
         });
     for result in walker {
         let Ok(entry) = result else { continue };
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "rs") {
+        if path.extension().is_some_and(is_source_file) {
             let relative = path
                 .strip_prefix(repo_path)
                 .unwrap_or(path)

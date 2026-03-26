@@ -188,7 +188,7 @@ pub(crate) fn qualified_name(sym: &StoredSymbol) -> String {
 }
 
 /// Check if a `SymbolKind` matches a user-provided kind filter string.
-pub(crate) fn kind_matches(kind: &SymbolKind, filter: &str) -> bool {
+pub(crate) fn kind_matches(kind: SymbolKind, filter: &str) -> bool {
     kind.to_string().eq_ignore_ascii_case(filter)
 }
 
