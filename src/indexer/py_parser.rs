@@ -437,6 +437,7 @@ fn extract_decorated(
                 return;
             }
             "class_definition" => {
+                let class_idx = symbols.len();
                 extract_class(
                     &child,
                     source,
@@ -445,10 +446,10 @@ fn extract_decorated(
                     symbols,
                     trait_impls,
                 );
-                // Fix line range for the class symbol (last pushed)
-                if let Some(sym) = symbols.last_mut() {
-                    sym.line_start = dec_start;
-                    sym.line_end = dec_end;
+                // Fix line range for the class symbol (first pushed by extract_class)
+                if symbols.len() > class_idx {
+                    symbols[class_idx].line_start = dec_start;
+                    symbols[class_idx].line_end = dec_end;
                 }
                 return;
             }

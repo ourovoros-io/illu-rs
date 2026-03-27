@@ -223,15 +223,20 @@ fn parse_pep508_spec(spec: &str) -> Option<DirectDep> {
     }
 
     let version_part = spec[name_end..].trim();
-    // Strip extras [foo] and environment markers ; ...
-    let version_req = version_part
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .trim_start_matches(|c: char| c == '[' || c.is_alphabetic() || c == ',')
-        .trim_end_matches(']')
-        .trim();
+    // Strip extras [foo,bar] and environment markers ; ...
+    let no_markers = version_part.split(';').next().unwrap_or("").trim();
+    // Remove extras section: [async] or [security,test]
+    let version_req = if let Some(bracket_start) = no_markers.find('[') {
+        let after_bracket = no_markers[bracket_start..]
+            .find(']')
+            .map_or("", |end| &no_markers[bracket_start + end + 1..]);
+        format!("{}{}", &no_markers[..bracket_start], after_bracket)
+            .trim()
+            .to_string()
+    } else {
+        no_markers.to_string()
+    };
+    let version_req = version_req.trim();
     let version_req = if version_req.is_empty() {
         "*".to_string()
     } else {

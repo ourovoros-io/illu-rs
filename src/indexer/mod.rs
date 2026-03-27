@@ -24,6 +24,7 @@ const EXCLUDED_DIRS: &[&str] = &[
     ".output",
     "__pycache__",
     "venv",
+    "env",
 ];
 
 pub(crate) fn is_excluded_dir(name: &str) -> bool {
@@ -67,8 +68,7 @@ fn mark_ts_test_symbols(symbols: &mut [parser::Symbol], path: &str) {
 
 /// Mark test symbols in Python files.
 /// In test files (`test_*.py`, `*_test.py`, `tests/`): marks `test_*`
-/// functions and `Test*` class methods. In any file: marks
-/// `@pytest.mark.*` decorated functions.
+/// functions. In any file: marks `@pytest.mark.*` decorated functions.
 fn mark_py_test_symbols(symbols: &mut [parser::Symbol], path: &str) {
     let is_test_file = py_parser::is_test_py_file(path);
     for sym in symbols.iter_mut() {
