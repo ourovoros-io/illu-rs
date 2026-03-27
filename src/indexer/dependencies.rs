@@ -112,27 +112,21 @@ pub fn resolve_dependencies(direct: &[DirectDep], locked: &[LockedDep]) -> Vec<R
 }
 
 /// Parse `package.json` to extract dependencies as `DirectDep` entries.
-pub fn parse_package_json(
-    content: &str,
-) -> Result<Vec<DirectDep>, serde_json::Error> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(content)?;
+pub fn parse_package_json(content: &str) -> Result<Vec<DirectDep>, serde_json::Error> {
+    let parsed: serde_json::Value = serde_json::from_str(content)?;
 
     let mut result = Vec::new();
 
     for section in &["dependencies", "devDependencies"] {
         if let Some(obj) = parsed.get(section).and_then(serde_json::Value::as_object) {
-                for (name, value) in obj {
-                    let version_req = value
-                        .as_str()
-                        .unwrap_or("*")
-                        .to_string();
-                    result.push(DirectDep {
-                        name: name.clone(),
-                        version_req,
-                        features: Vec::new(),
-                    });
-                }
+            for (name, value) in obj {
+                let version_req = value.as_str().unwrap_or("*").to_string();
+                result.push(DirectDep {
+                    name: name.clone(),
+                    version_req,
+                    features: Vec::new(),
+                });
+            }
         }
     }
 

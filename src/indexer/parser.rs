@@ -66,7 +66,7 @@ impl std::str::FromStr for SymbolKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Public,
     PublicCrate,
@@ -307,7 +307,7 @@ fn extract_symbols(
                             source,
                             file_path,
                             &sym.name,
-                            &sym.visibility,
+                            sym.visibility,
                             symbols,
                         );
                     }
@@ -480,7 +480,7 @@ fn extract_enum_variants(
     source: &str,
     file_path: &str,
     enum_name: &str,
-    enum_vis: &Visibility,
+    enum_vis: Visibility,
     symbols: &mut Vec<Symbol>,
 ) {
     let Some(list) = find_child_by_kind(enum_node, "enum_variant_list") else {
@@ -499,7 +499,7 @@ fn extract_enum_variants(
             symbols.push(Symbol {
                 name: variant_name,
                 kind: SymbolKind::EnumVariant,
-                visibility: enum_vis.clone(),
+                visibility: enum_vis,
                 file_path: file_path.to_string(),
                 line_start,
                 line_end,

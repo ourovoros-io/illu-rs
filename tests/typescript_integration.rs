@@ -2,7 +2,7 @@
 
 use illu_rs::db::Database;
 use illu_rs::indexer::parser::{SymbolKind, Visibility};
-use illu_rs::indexer::{IndexConfig, index_repo};
+use illu_rs::indexer::{IndexConfig, index_repo, refresh_index};
 use illu_rs::server::tools::{context, impact, overview, query};
 
 fn write_project_configs(dir: &std::path::Path) {
@@ -330,4 +330,137 @@ fn test_ts_user_interface() {
         .iter()
         .find(|s| s.kind == SymbolKind::Interface && s.name == "User");
     assert!(user.is_some(), "User interface should be indexed");
+}
+
+#[test]
+fn test_ts_refresh_index() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+
+    // Init git so refresh_index can detect changes
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    write_project_configs(dir.path());
+    write_ts_sources(&src);
+
+    // Initial commit
+    std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    // Modify a TS file after initial index
+    std::fs::write(
+        src.join("utils.ts"),
+        r"
+/** Format a date for display. */
+export function formatDate(date: Date): string {
+    return date.toISOString();
+}
+
+/** NEW: validate input. */
+export function validateInput(input: string): boolean {
+    return input.length > 0;
+}
+
+export const MAX_RETRIES = 3;
+",
+    )
+    .unwrap();
+
+    let count = refresh_index(&db, &config).unwrap();
+    assert!(count > 0, "refresh should re-index changed files");
+
+    let results = db.search_symbols("validateInput").unwrap();
+    assert!(
+        !results.is_empty(),
+        "new function should be indexed after refresh"
+    );
+    assert_eq!(results[0].kind, SymbolKind::Function);
+}
+
+#[test]
+fn test_mixed_rust_ts_project() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let src_rs = dir.path().join("src");
+    std::fs::create_dir_all(&src_rs).unwrap();
+
+    // Rust side
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "mixed-app"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        src_rs.join("main.rs"),
+        "
+pub fn rust_greet(name: &str) -> String {
+    format!(\"Hello, {name}!\")
+}
+
+fn main() {}
+",
+    )
+    .unwrap();
+
+    // TS side
+    let src_ts = dir.path().join("frontend/src");
+    std::fs::create_dir_all(&src_ts).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name": "mixed-frontend", "dependencies": {"react": "^18.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        src_ts.join("app.ts"),
+        r"
+export function tsGreet(name: string): string {
+    return `Hello, ${name}!`;
+}
+",
+    )
+    .unwrap();
+
+    let db = Database::open_in_memory().unwrap();
+    let config = IndexConfig {
+        repo_path: dir.path().to_path_buf(),
+    };
+    index_repo(&db, &config).unwrap();
+
+    // Both Rust and TS symbols should be indexed
+    let rust_sym = db.search_symbols("rust_greet").unwrap();
+    assert!(!rust_sym.is_empty(), "Rust symbols should be indexed");
+    assert_eq!(rust_sym[0].kind, SymbolKind::Function);
+
+    let ts_sym = db.search_symbols("tsGreet").unwrap();
+    assert!(!ts_sym.is_empty(), "TS symbols should be indexed");
+    assert_eq!(ts_sym[0].kind, SymbolKind::Function);
+
+    // Both should show in file count
+    let file_count = db.file_count().unwrap();
+    assert!(
+        file_count >= 2,
+        "should have at least 2 files (Rust + TS): {file_count}"
+    );
 }

@@ -14,7 +14,9 @@ fn parse_ts(source: &str) -> Result<tree_sitter::Tree, String> {
     PARSER.with_borrow_mut(|slot| {
         let parser = slot.get_or_insert_with(|| {
             let mut p = Parser::new();
-            let _ = p.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into());
+            if let Err(e) = p.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()) {
+                tracing::error!("Failed to load TypeScript grammar: {e}");
+            }
             p
         });
         parser
@@ -31,7 +33,9 @@ fn parse_tsx(source: &str) -> Result<tree_sitter::Tree, String> {
     PARSER.with_borrow_mut(|slot| {
         let parser = slot.get_or_insert_with(|| {
             let mut p = Parser::new();
-            let _ = p.set_language(&tree_sitter_typescript::LANGUAGE_TSX.into());
+            if let Err(e) = p.set_language(&tree_sitter_typescript::LANGUAGE_TSX.into()) {
+                tracing::error!("Failed to load TSX grammar: {e}");
+            }
             p
         });
         parser
@@ -594,7 +598,7 @@ fn extract_enum(
     symbols.push(Symbol {
         name: enum_name.clone(),
         kind: SymbolKind::Enum,
-        visibility: vis.clone(),
+        visibility: vis,
         file_path: file_path.to_string(),
         line_start,
         line_end,
@@ -611,7 +615,7 @@ fn extract_enum(
         let mut cursor = body.walk();
         for child in body.children(&mut cursor) {
             if child.kind() == "enum_assignment" || child.kind() == "property_identifier" {
-                extract_enum_member(&child, source, file_path, &enum_name, &vis, symbols);
+                extract_enum_member(&child, source, file_path, &enum_name, vis, symbols);
             }
         }
     }
@@ -622,7 +626,7 @@ fn extract_enum_member(
     source: &str,
     file_path: &str,
     enum_name: &str,
-    vis: &Visibility,
+    vis: Visibility,
     symbols: &mut Vec<Symbol>,
 ) {
     let name = if node.kind() == "property_identifier" {
@@ -643,7 +647,7 @@ fn extract_enum_member(
     symbols.push(Symbol {
         name,
         kind: SymbolKind::EnumVariant,
-        visibility: vis.clone(),
+        visibility: vis,
         file_path: file_path.to_string(),
         line_start,
         line_end,
@@ -919,8 +923,7 @@ pub fn extract_ts_refs<S: std::hash::BuildHasher>(
                 repo_path,
                 &tsconfig,
             );
-            let qualified_path = resolved
-                .unwrap_or(info.qualified_path);
+            let qualified_path = resolved.unwrap_or(info.qualified_path);
             (name, ImportInfo { qualified_path })
         })
         .collect();
@@ -1168,12 +1171,10 @@ fn collect_ts_body_refs<S: std::hash::BuildHasher>(
                         refs,
                     );
                 }
-                // Skip nested function/class defs
-                "function_declaration" | "class_declaration" | "arrow_function"
-                    if n.kind() != node.kind() =>
-                {
-                    // Don't descend into nested definitions
-                }
+                // Skip nested named function/class defs (they have
+                // their own scope), but DO descend into arrow
+                // functions — they're callbacks, not definitions
+                "function_declaration" | "class_declaration" => {}
                 _ => {
                     stack.push(child);
                 }
@@ -1622,5 +1623,55 @@ export var legacyConfig = { debug: true };
         let (symbols, _) = parse_ts_source(source, "src/legacy.ts").unwrap();
         let sym = symbols.iter().find(|s| s.name == "legacyConfig").unwrap();
         assert_eq!(sym.kind, SymbolKind::Static);
+    }
+
+    #[test]
+    fn test_this_method_ref() {
+        let source = r"
+class MyService {
+    private helper(): void {}
+
+    doWork(): void {
+        this.helper();
+    }
+}
+";
+        let mut known = HashSet::new();
+        known.insert("helper".to_string());
+        known.insert("doWork".to_string());
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let refs = extract_ts_refs(source, "src/service.ts", &known, tmp.path()).unwrap();
+
+        let helper_ref = refs.iter().find(|r| r.target_name == "helper");
+        assert!(helper_ref.is_some(), "this.helper() should create a ref");
+        assert_eq!(
+            helper_ref.unwrap().target_context.as_deref(),
+            Some("MyService"),
+            "this.method() should resolve impl_type to class name"
+        );
+    }
+
+    #[test]
+    fn test_callback_refs_captured() {
+        let source = r"
+import { process } from './utils';
+
+export function run(items: string[]): void {
+    items.forEach(item => process(item));
+}
+";
+        let mut known = HashSet::new();
+        known.insert("process".to_string());
+        known.insert("run".to_string());
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let refs = extract_ts_refs(source, "src/app.ts", &known, tmp.path()).unwrap();
+
+        let names: Vec<&str> = refs.iter().map(|r| r.target_name.as_str()).collect();
+        assert!(
+            names.contains(&"process"),
+            "refs inside arrow function callbacks should be captured: {names:?}"
+        );
     }
 }

@@ -27,13 +27,16 @@ fn is_excluded_dir(name: &str) -> bool {
 }
 
 fn is_source_file(ext: &std::ffi::OsStr) -> bool {
-    matches!(ext.to_str(), Some("rs" | "ts" | "tsx"))
+    matches!(ext.to_str(), Some("rs" | "ts" | "tsx" | "js" | "jsx"))
+}
+
+fn is_source_ts(ext: &std::ffi::OsStr) -> bool {
+    matches!(ext.to_str(), Some("ts" | "tsx" | "js" | "jsx"))
 }
 
 fn is_ts_file(path: &str) -> bool {
     let p = std::path::Path::new(path);
-    p.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts") || ext.eq_ignore_ascii_case("tsx"))
+    p.extension().is_some_and(is_source_ts)
 }
 
 /// Mark all symbols in a TS test file with a `"test"` attribute
@@ -502,7 +505,7 @@ fn index_ts_files(
     root: &std::path::Path,
     crate_id: crate::db::CrateId,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Walk for TS/TSX files (excluding node_modules, etc.)
+    // Walk for TS/TSX/JS/JSX files (excluding node_modules, etc.)
     let ts_files: Vec<_> = walkdir::WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| {
@@ -510,16 +513,10 @@ fn index_ts_files(
                 return true;
             }
             let name = e.file_name().to_string_lossy();
-            !is_excluded_dir(&name) && name != "src-tauri" // Skip Rust side in Tauri projects
+            !is_excluded_dir(&name) && name != "src-tauri"
         })
         .filter_map(|r| match r {
-            Ok(e)
-                if e.path()
-                    .extension()
-                    .is_some_and(|ext| ext == "ts" || ext == "tsx") =>
-            {
-                Some(e.into_path())
-            }
+            Ok(e) if e.path().extension().is_some_and(is_source_ts) => Some(e.into_path()),
             _ => None,
         })
         .collect();

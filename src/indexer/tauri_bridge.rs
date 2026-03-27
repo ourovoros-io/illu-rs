@@ -1,5 +1,13 @@
+use std::sync::LazyLock;
+
 use crate::db::Database;
 use crate::indexer::parser::{RefKind, SymbolRef};
+
+#[expect(clippy::expect_used, reason = "static regex literal is always valid")]
+static INVOKE_PATTERN: LazyLock<regex_lite::Regex> = LazyLock::new(|| {
+    regex_lite::Regex::new(r#"invoke\s*(?:<[^>]*>\s*)?\(\s*['"](\w+)['"]"#)
+        .expect("invoke regex is valid")
+});
 
 /// Detect if this is a Tauri project.
 #[must_use]
@@ -86,18 +94,12 @@ fn find_invoke_calls(
     files: &[String],
 ) -> Result<Vec<InvokeCall>, Box<dyn std::error::Error>> {
     let mut calls = Vec::new();
-    let invoke_pattern = regex_lite::Regex::new(r#"invoke\s*(?:<[^>]*>\s*)?\(\s*['"](\w+)['"]"#)
-        .map_err(|e| -> Box<dyn std::error::Error> { format!("regex error: {e}").into() })?;
 
     for file_path in files {
-        let ext = std::path::Path::new(file_path.as_str())
-            .extension()
-            .and_then(|e| e.to_str());
-        if !matches!(ext, Some("ts" | "tsx")) {
+        if !super::is_ts_file(file_path) {
             continue;
         }
 
-        // Get symbols in this file to find caller context
         let symbols = db.get_symbols_by_path_prefix(file_path)?;
 
         for sym in &symbols {
@@ -105,17 +107,10 @@ fn find_invoke_calls(
                 continue;
             };
 
-            for cap in invoke_pattern.captures_iter(body) {
+            for cap in INVOKE_PATTERN.captures_iter(body) {
                 if let Some(cmd) = cap.get(1) {
-                    // Compute actual call-site line from
-                    // match position within body text
-                    let line_offset = body[..cmd.start()]
-                        .chars()
-                        .filter(|&c| c == '\n')
-                        .count();
-                    let call_line = sym.line_start
-                        + i64::try_from(line_offset)
-                            .unwrap_or(0);
+                    let line_offset = body[..cmd.start()].chars().filter(|&c| c == '\n').count();
+                    let call_line = sym.line_start + i64::try_from(line_offset).unwrap_or(0);
                     calls.push(InvokeCall {
                         command_name: cmd.as_str().to_string(),
                         caller_name: sym.name.clone(),

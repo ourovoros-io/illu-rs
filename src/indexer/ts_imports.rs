@@ -9,9 +9,7 @@ pub struct TsConfigPaths {
 }
 
 /// Parse `tsconfig.json` and extract `compilerOptions.paths` + `baseUrl`.
-pub fn parse_tsconfig_paths(
-    repo_path: &Path,
-) -> TsConfigPaths {
+pub fn parse_tsconfig_paths(repo_path: &Path) -> TsConfigPaths {
     let tsconfig_path = repo_path.join("tsconfig.json");
     let Ok(content) = std::fs::read_to_string(&tsconfig_path) else {
         return TsConfigPaths::default();
@@ -34,16 +32,16 @@ pub fn parse_tsconfig_paths(
 
     let mut paths = HashMap::new();
     if let Some(obj) = compiler.get("paths").and_then(serde_json::Value::as_object) {
-            for (pattern, targets) in obj {
-                if let Some(arr) = targets.as_array() {
-                    let resolved: Vec<String> = arr
-                        .iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .map(String::from)
-                        .collect();
-                    paths.insert(pattern.clone(), resolved);
-                }
+        for (pattern, targets) in obj {
+            if let Some(arr) = targets.as_array() {
+                let resolved: Vec<String> = arr
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(String::from)
+                    .collect();
+                paths.insert(pattern.clone(), resolved);
             }
+        }
     }
 
     TsConfigPaths { base_url, paths }
@@ -60,34 +58,20 @@ pub fn resolve_ts_import(
     tsconfig: &TsConfigPaths,
 ) -> Option<String> {
     // Relative imports: ./foo, ../bar
-    if import_path.starts_with("./")
-        || import_path.starts_with("../")
-    {
-        let current_dir =
-            Path::new(current_file).parent()?;
-        let target = normalize_path(
-            &current_dir.join(import_path),
-        );
+    if import_path.starts_with("./") || import_path.starts_with("../") {
+        let current_dir = Path::new(current_file).parent()?;
+        let target = normalize_path(&current_dir.join(import_path));
         return probe_ts_file(repo_path, &target);
     }
 
     // Try tsconfig paths aliases
     for (pattern, targets) in &tsconfig.paths {
-        if let Some(matched) = match_ts_path_pattern(
-            pattern,
-            import_path,
-        ) {
+        if let Some(matched) = match_ts_path_pattern(pattern, import_path) {
             for target_pattern in targets {
-                let resolved = target_pattern
-                    .replace('*', &matched);
-                let base = tsconfig
-                    .base_url
-                    .as_deref()
-                    .unwrap_or(repo_path);
+                let resolved = target_pattern.replace('*', &matched);
+                let base = tsconfig.base_url.as_deref().unwrap_or(repo_path);
                 let target = base.join(&resolved);
-                if let Some(path) =
-                    probe_ts_file(repo_path, &target)
-                {
+                if let Some(path) = probe_ts_file(repo_path, &target) {
                     return Some(path);
                 }
             }
@@ -116,10 +100,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 /// Match a tsconfig path pattern like `@/*` against an import.
 /// Returns the captured wildcard portion if matched.
-fn match_ts_path_pattern(
-    pattern: &str,
-    import: &str,
-) -> Option<String> {
+fn match_ts_path_pattern(pattern: &str, import: &str) -> Option<String> {
     if let Some(prefix) = pattern.strip_suffix('*') {
         if let Some(rest) = import.strip_prefix(prefix) {
             return Some(rest.to_string());
@@ -133,10 +114,7 @@ fn match_ts_path_pattern(
 /// Probe for a TypeScript file with various extensions.
 /// Given `src/foo`, tries: `src/foo.ts`, `src/foo.tsx`,
 /// `src/foo/index.ts`, `src/foo/index.tsx`.
-fn probe_ts_file(
-    repo_path: &Path,
-    target: &Path,
-) -> Option<String> {
+fn probe_ts_file(repo_path: &Path, target: &Path) -> Option<String> {
     let extensions = ["ts", "tsx", "js", "jsx"];
 
     // If target is already absolute, make it relative to repo
@@ -155,9 +133,7 @@ fn probe_ts_file(
         .is_some_and(|e| extensions.contains(&e.to_str().unwrap_or("")))
         && repo_path.join(&target).exists()
     {
-        return Some(
-            target.to_string_lossy().to_string(),
-        );
+        return Some(target.to_string_lossy().to_string());
     }
 
     // Try appending extensions (use OsString to avoid
@@ -166,12 +142,9 @@ fn probe_ts_file(
     // `vite.config.ts`)
     let target_str = target.to_string_lossy();
     for ext in &extensions {
-        let appended =
-            PathBuf::from(format!("{target_str}.{ext}"));
+        let appended = PathBuf::from(format!("{target_str}.{ext}"));
         if repo_path.join(&appended).exists() {
-            return Some(
-                appended.to_string_lossy().to_string(),
-            );
+            return Some(appended.to_string_lossy().to_string());
         }
     }
 
@@ -179,9 +152,7 @@ fn probe_ts_file(
     for ext in &extensions {
         let index = target.join(format!("index.{ext}"));
         if repo_path.join(&index).exists() {
-            return Some(
-                index.to_string_lossy().to_string(),
-            );
+            return Some(index.to_string_lossy().to_string());
         }
     }
 
@@ -249,9 +220,7 @@ fn strip_json_comments(input: &str) -> String {
 
 /// Parse npm workspaces from `package.json`.
 /// Returns list of workspace member glob patterns.
-pub fn parse_npm_workspaces(
-    repo_path: &Path,
-) -> Vec<String> {
+pub fn parse_npm_workspaces(repo_path: &Path) -> Vec<String> {
     let pkg_path = repo_path.join("package.json");
     let Ok(content) = std::fs::read_to_string(&pkg_path) else {
         return Vec::new();
@@ -284,26 +253,23 @@ pub fn parse_npm_workspaces(
 }
 
 /// Resolve workspace glob patterns to actual directory paths.
+///
+/// Supports single-level globs (`packages/*`) and exact paths.
+/// Does NOT support `**` recursive globs — nested workspace
+/// patterns like `packages/**/apps` will only match the first
+/// directory level.
 #[must_use]
-pub fn resolve_workspace_members(
-    repo_path: &Path,
-    patterns: &[String],
-) -> Vec<PathBuf> {
+pub fn resolve_workspace_members(repo_path: &Path, patterns: &[String]) -> Vec<PathBuf> {
     let mut members = Vec::new();
     for pattern in patterns {
         if pattern.contains('*') {
             // Glob pattern: packages/*
-            let prefix = pattern
-                .split('*')
-                .next()
-                .unwrap_or("");
+            let prefix = pattern.split('*').next().unwrap_or("");
             let parent = repo_path.join(prefix);
             if let Ok(entries) = std::fs::read_dir(&parent) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_dir()
-                        && path.join("package.json").exists()
-                    {
+                    if path.is_dir() && path.join("package.json").exists() {
                         members.push(path);
                     }
                 }
@@ -311,9 +277,7 @@ pub fn resolve_workspace_members(
         } else {
             // Exact path
             let path = repo_path.join(pattern);
-            if path.is_dir()
-                && path.join("package.json").exists()
-            {
+            if path.is_dir() && path.join("package.json").exists() {
                 members.push(path);
             }
         }
@@ -334,39 +298,23 @@ mod tests {
   "baz": "qux" // trailing
 }"#;
         let result = strip_json_comments(input);
-        let parsed: serde_json::Value =
-            serde_json::from_str(&result).unwrap();
-        assert_eq!(
-            parsed.get("foo").unwrap().as_str(),
-            Some("bar")
-        );
-        assert_eq!(
-            parsed.get("baz").unwrap().as_str(),
-            Some("qux")
-        );
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.get("foo").unwrap().as_str(), Some("bar"));
+        assert_eq!(parsed.get("baz").unwrap().as_str(), Some("qux"));
     }
 
     #[test]
     fn test_match_ts_path_pattern() {
         assert_eq!(
-            match_ts_path_pattern(
-                "@/*",
-                "@/components/Foo"
-            ),
+            match_ts_path_pattern("@/*", "@/components/Foo"),
             Some("components/Foo".to_string())
         );
         assert_eq!(
             match_ts_path_pattern("@utils/*", "@utils/bar"),
             Some("bar".to_string())
         );
-        assert_eq!(
-            match_ts_path_pattern("@/*", "react"),
-            None
-        );
-        assert_eq!(
-            match_ts_path_pattern("exact", "exact"),
-            Some(String::new())
-        );
+        assert_eq!(match_ts_path_pattern("@/*", "react"), None);
+        assert_eq!(match_ts_path_pattern("exact", "exact"), Some(String::new()));
     }
 
     #[test]
@@ -374,20 +322,10 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let src = dir.path().join("src");
         std::fs::create_dir_all(&src).unwrap();
-        std::fs::write(
-            src.join("utils.ts"),
-            "export function foo() {}",
-        )
-        .unwrap();
+        std::fs::write(src.join("utils.ts"), "export function foo() {}").unwrap();
 
-        let result = probe_ts_file(
-            dir.path(),
-            &PathBuf::from("src/utils"),
-        );
-        assert_eq!(
-            result.as_deref(),
-            Some("src/utils.ts")
-        );
+        let result = probe_ts_file(dir.path(), &PathBuf::from("src/utils"));
+        assert_eq!(result.as_deref(), Some("src/utils.ts"));
     }
 
     #[test]
@@ -395,16 +333,9 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let src = dir.path().join("src");
         std::fs::create_dir_all(&src).unwrap();
-        std::fs::write(
-            src.join("vite.config.ts"),
-            "export default {}",
-        )
-        .unwrap();
+        std::fs::write(src.join("vite.config.ts"), "export default {}").unwrap();
 
-        let result = probe_ts_file(
-            dir.path(),
-            &PathBuf::from("src/vite.config"),
-        );
+        let result = probe_ts_file(dir.path(), &PathBuf::from("src/vite.config"));
         assert_eq!(
             result.as_deref(),
             Some("src/vite.config.ts"),
@@ -417,20 +348,10 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let comp = dir.path().join("src/components");
         std::fs::create_dir_all(&comp).unwrap();
-        std::fs::write(
-            comp.join("index.ts"),
-            "export {}",
-        )
-        .unwrap();
+        std::fs::write(comp.join("index.ts"), "export {}").unwrap();
 
-        let result = probe_ts_file(
-            dir.path(),
-            &PathBuf::from("src/components"),
-        );
-        assert_eq!(
-            result.as_deref(),
-            Some("src/components/index.ts")
-        );
+        let result = probe_ts_file(dir.path(), &PathBuf::from("src/components"));
+        assert_eq!(result.as_deref(), Some("src/components/index.ts"));
     }
 
     #[test]
@@ -438,23 +359,11 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let src = dir.path().join("src");
         std::fs::create_dir_all(&src).unwrap();
-        std::fs::write(
-            src.join("utils.ts"),
-            "export function foo() {}",
-        )
-        .unwrap();
+        std::fs::write(src.join("utils.ts"), "export function foo() {}").unwrap();
 
         let tsconfig = TsConfigPaths::default();
-        let result = resolve_ts_import(
-            "./utils",
-            "src/main.ts",
-            dir.path(),
-            &tsconfig,
-        );
-        assert_eq!(
-            result.as_deref(),
-            Some("src/utils.ts")
-        );
+        let result = resolve_ts_import("./utils", "src/main.ts", dir.path(), &tsconfig);
+        assert_eq!(result.as_deref(), Some("src/utils.ts"));
     }
 
     #[test]
@@ -470,33 +379,17 @@ mod tests {
 
         let tsconfig = TsConfigPaths {
             base_url: Some(dir.path().to_path_buf()),
-            paths: HashMap::from([(
-                "@/*".to_string(),
-                vec!["src/*".to_string()],
-            )]),
+            paths: HashMap::from([("@/*".to_string(), vec!["src/*".to_string()])]),
         };
-        let result = resolve_ts_import(
-            "@/components/Button",
-            "src/App.tsx",
-            dir.path(),
-            &tsconfig,
-        );
-        assert_eq!(
-            result.as_deref(),
-            Some("src/components/Button.tsx")
-        );
+        let result = resolve_ts_import("@/components/Button", "src/App.tsx", dir.path(), &tsconfig);
+        assert_eq!(result.as_deref(), Some("src/components/Button.tsx"));
     }
 
     #[test]
     fn test_bare_specifier_returns_none() {
         let dir = tempfile::TempDir::new().unwrap();
         let tsconfig = TsConfigPaths::default();
-        let result = resolve_ts_import(
-            "react",
-            "src/App.tsx",
-            dir.path(),
-            &tsconfig,
-        );
+        let result = resolve_ts_import("react", "src/App.tsx", dir.path(), &tsconfig);
         assert!(result.is_none());
     }
 
