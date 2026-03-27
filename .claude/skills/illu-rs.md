@@ -65,6 +65,7 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 - clap
 - futures
 - lsp-types
+- regex-lite
 - reqwest
 - rmcp
 - rusqlite
@@ -77,6 +78,8 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 - tracing
 - tracing-subscriber
 - tree-sitter
+- tree-sitter-python
 - tree-sitter-rust
+- tree-sitter-typescript
 - url
 - walkdir
