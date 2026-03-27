@@ -242,7 +242,7 @@ pub fn read_context_lines(
     let end = (idx + context as usize + 1).min(lines.len());
 
     let before = lines[start..idx].iter().map(|s| (*s).to_string()).collect();
-    let text = lines.get(idx).unwrap_or(&"").to_string();
+    let text = (*lines.get(idx).unwrap_or(&"")).to_string();
     let after_start = (idx + 1).min(lines.len());
     let after = lines[after_start..end]
         .iter()

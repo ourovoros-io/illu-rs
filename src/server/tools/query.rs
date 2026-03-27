@@ -107,7 +107,7 @@ fn format_symbols(
     let mut symbols: Vec<_> = if let Some(k) = kind {
         all_symbols
             .into_iter()
-            .filter(|s| super::kind_matches(&s.kind, k))
+            .filter(|s| super::kind_matches(s.kind, k))
             .collect()
     } else {
         all_symbols
@@ -231,7 +231,7 @@ fn format_doc_comments(
     let mut symbols: Vec<_> = if let Some(k) = kind {
         symbols
             .into_iter()
-            .filter(|s| super::kind_matches(&s.kind, k))
+            .filter(|s| super::kind_matches(s.kind, k))
             .collect()
     } else {
         symbols
@@ -283,7 +283,7 @@ fn format_body_search(
     let mut symbols: Vec<_> = if let Some(k) = kind {
         symbols
             .into_iter()
-            .filter(|s| super::kind_matches(&s.kind, k))
+            .filter(|s| super::kind_matches(s.kind, k))
             .collect()
     } else {
         symbols
@@ -362,7 +362,7 @@ fn format_string_search(
         symbols.retain(|s| s.file_path.starts_with(p));
     }
     if let Some(k) = kind {
-        symbols.retain(|s| super::kind_matches(&s.kind, k));
+        symbols.retain(|s| super::kind_matches(s.kind, k));
     }
     let query_lower = query.to_lowercase();
     symbols.retain(|s| {

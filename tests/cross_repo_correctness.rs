@@ -43,7 +43,7 @@ fn build_registry(entries: &[(&str, &std::path::Path)]) -> (tempfile::TempDir, R
     let reg_path = reg_dir.path().join("registry.toml");
     let mut registry = Registry::load(&reg_path).unwrap();
 
-    for (name, path) in entries {
+    for &(name, path) in entries {
         registry.register(RepoEntry {
             name: name.to_string(),
             path: path.to_path_buf(),

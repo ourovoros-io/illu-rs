@@ -1,6 +1,6 @@
 use tree_sitter::{Node, Parser};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolKind {
     Function,
     Struct,
@@ -15,6 +15,8 @@ pub enum SymbolKind {
     TypeAlias,
     Macro,
     Union,
+    Interface,
+    Class,
 }
 
 impl std::fmt::Display for SymbolKind {
@@ -33,6 +35,8 @@ impl std::fmt::Display for SymbolKind {
             Self::TypeAlias => "type_alias",
             Self::Macro => "macro",
             Self::Union => "union",
+            Self::Interface => "interface",
+            Self::Class => "class",
         };
         f.write_str(s)
     }
@@ -55,12 +59,14 @@ impl std::str::FromStr for SymbolKind {
             "type_alias" => Ok(Self::TypeAlias),
             "macro" => Ok(Self::Macro),
             "union" => Ok(Self::Union),
+            "interface" => Ok(Self::Interface),
+            "class" => Ok(Self::Class),
             other => Err(format!("unknown symbol kind: {other}")),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Public,
     PublicCrate,
@@ -144,7 +150,7 @@ pub fn parse_rust_source(
     Ok((symbols, trait_impls))
 }
 
-fn line_range(node: &Node) -> (usize, usize) {
+pub(crate) fn line_range(node: &Node) -> (usize, usize) {
     (node.start_position().row + 1, node.end_position().row + 1)
 }
 
@@ -210,7 +216,7 @@ fn extract_attributes(node: &Node, source: &str) -> Option<String> {
     Some(attrs.join(", "))
 }
 
-fn extract_body(node: &Node, source: &str) -> String {
+pub(crate) fn extract_body(node: &Node, source: &str) -> String {
     let text = &source[node.start_byte()..node.end_byte()];
     let line_count = text.lines().count();
     if line_count > 100 {
@@ -301,7 +307,7 @@ fn extract_symbols(
                             source,
                             file_path,
                             &sym.name,
-                            &sym.visibility,
+                            sym.visibility,
                             symbols,
                         );
                     }
@@ -474,7 +480,7 @@ fn extract_enum_variants(
     source: &str,
     file_path: &str,
     enum_name: &str,
-    enum_vis: &Visibility,
+    enum_vis: Visibility,
     symbols: &mut Vec<Symbol>,
 ) {
     let Some(list) = find_child_by_kind(enum_node, "enum_variant_list") else {
@@ -493,7 +499,7 @@ fn extract_enum_variants(
             symbols.push(Symbol {
                 name: variant_name,
                 kind: SymbolKind::EnumVariant,
-                visibility: enum_vis.clone(),
+                visibility: enum_vis,
                 file_path: file_path.to_string(),
                 line_start,
                 line_end,
@@ -719,17 +725,17 @@ fn get_visibility(node: &Node, source: &str) -> Visibility {
     }
 }
 
-fn find_child_by_kind<'a>(node: &'a Node, kind: &str) -> Option<Node<'a>> {
+pub(crate) fn find_child_by_kind<'a>(node: &'a Node, kind: &str) -> Option<Node<'a>> {
     let mut cursor = node.walk();
     node.children(&mut cursor)
         .find(|child| child.kind() == kind)
 }
 
-fn node_text(node: &Node, source: &str) -> String {
+pub(crate) fn node_text(node: &Node, source: &str) -> String {
     source[node.byte_range()].to_string()
 }
 
-fn get_signature(node: &Node, source: &str) -> String {
+pub(crate) fn get_signature(node: &Node, source: &str) -> String {
     let text = node_text(node, source);
     let sig_end = text.find('{').unwrap_or(text.len());
     let raw_sig = text[..sig_end].trim();
@@ -761,7 +767,7 @@ pub struct SymbolRef {
     pub ref_line: Option<i64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum RefKind {
     /// Type used in signature or body
     TypeRef,
