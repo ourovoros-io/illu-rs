@@ -8,6 +8,7 @@ rmcp = { version = "1.2.0", features = ["server", "transport-io"] }
 tree-sitter = "0.26"
 tree-sitter-rust = "0.24.1"
 tree-sitter-typescript = "0.23.2"
+tree-sitter-python = "0.25.0"
 rusqlite = { version = "0.39", features = ["bundled"] }
 reqwest = { version = "0.13.2", features = ["rustls", "json"] }
 tokio = { version = "1.50.0", features = [

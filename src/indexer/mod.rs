@@ -2,6 +2,8 @@ pub mod cargo_doc;
 pub mod dependencies;
 pub mod docs;
 pub mod parser;
+pub mod py_imports;
+pub mod py_parser;
 pub mod store;
 pub mod tauri_bridge;
 pub mod ts_imports;
@@ -20,14 +22,19 @@ const EXCLUDED_DIRS: &[&str] = &[
     "build",
     ".nuxt",
     ".output",
+    "__pycache__",
+    "venv",
 ];
 
-fn is_excluded_dir(name: &str) -> bool {
-    EXCLUDED_DIRS.contains(&name) || name.starts_with('.')
+pub(crate) fn is_excluded_dir(name: &str) -> bool {
+    EXCLUDED_DIRS.contains(&name) || name.starts_with('.') || name.ends_with(".egg-info")
 }
 
 fn is_source_file(ext: &std::ffi::OsStr) -> bool {
-    matches!(ext.to_str(), Some("rs" | "ts" | "tsx" | "js" | "jsx"))
+    matches!(
+        ext.to_str(),
+        Some("rs" | "ts" | "tsx" | "js" | "jsx" | "py")
+    )
 }
 
 fn is_source_ts(ext: &std::ffi::OsStr) -> bool {
@@ -37,6 +44,11 @@ fn is_source_ts(ext: &std::ffi::OsStr) -> bool {
 fn is_ts_file(path: &str) -> bool {
     let p = std::path::Path::new(path);
     p.extension().is_some_and(is_source_ts)
+}
+
+fn is_py_file(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    p.extension().is_some_and(|ext| ext == "py")
 }
 
 /// Mark all symbols in a TS test file with a `"test"` attribute
@@ -51,6 +63,39 @@ fn mark_ts_test_symbols(symbols: &mut [parser::Symbol], path: &str) {
             );
         }
     }
+}
+
+/// Mark test symbols in Python files.
+/// In test files (`test_*.py`, `*_test.py`, `tests/`): marks `test_*`
+/// functions and `Test*` class methods. In any file: marks
+/// `@pytest.mark.*` decorated functions.
+fn mark_py_test_symbols(symbols: &mut [parser::Symbol], path: &str) {
+    let is_test_file = py_parser::is_test_py_file(path);
+    for sym in symbols.iter_mut() {
+        let is_test = if is_test_file {
+            sym.name.starts_with("test_")
+        } else {
+            sym.attributes
+                .as_ref()
+                .is_some_and(|a| a.contains("pytest.mark"))
+        };
+        if is_test {
+            sym.attributes = Some(
+                sym.attributes
+                    .as_ref()
+                    .map_or_else(|| "test".to_string(), |a| format!("{a}, test")),
+            );
+        }
+    }
+}
+
+/// Check if a directory contains a Python project.
+#[must_use]
+pub fn has_python_project(repo_path: &std::path::Path) -> bool {
+    repo_path.join("pyproject.toml").exists()
+        || repo_path.join("setup.py").exists()
+        || repo_path.join("setup.cfg").exists()
+        || repo_path.join("requirements.txt").exists()
 }
 
 /// Extract the `"name"` field from a `package.json` content string.
@@ -73,6 +118,7 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std
     let has_cargo = config.repo_path.join("Cargo.toml").exists();
     let has_ts = config.repo_path.join("tsconfig.json").exists()
         || config.repo_path.join("package.json").exists();
+    let has_python = has_python_project(&config.repo_path);
 
     // Phase 1: Parse sources
     if has_cargo {
@@ -98,8 +144,16 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std
         index_typescript(db, config)?;
     }
 
-    if !has_cargo && !has_ts {
-        return Err("No Cargo.toml, tsconfig.json, or package.json found".into());
+    if has_python {
+        tracing::info!("Phase 1: indexing Python sources");
+        crate::status::set("indexing ▸ parsing Python");
+        index_python(db, config)?;
+    }
+
+    if !has_cargo && !has_ts && !has_python {
+        return Err(
+            "No Cargo.toml, tsconfig.json, package.json, or Python project file found".into(),
+        );
     }
 
     tracing::info!("Phase 2: extracting symbol references");
@@ -264,6 +318,11 @@ fn reindex_dirty_files(
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             mark_ts_test_symbols(&mut syms, &df.relative_path);
             (syms, ti)
+        } else if is_py_file(&df.relative_path) {
+            let (mut syms, ti) = py_parser::parse_py_source(&df.source, &df.relative_path)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            mark_py_test_symbols(&mut syms, &df.relative_path);
+            (syms, ti)
         } else {
             parser::parse_rust_source(&df.source, &df.relative_path)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
@@ -298,6 +357,9 @@ fn rebuild_refs_for_files(
     for df in dirty_files {
         let refs = if is_ts_file(&df.relative_path) {
             ts_parser::extract_ts_refs(&df.source, &df.relative_path, &known_symbols, repo_path)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+        } else if is_py_file(&df.relative_path) {
+            py_parser::extract_py_refs(&df.source, &df.relative_path, &known_symbols, repo_path)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
         } else {
             parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
@@ -547,6 +609,82 @@ fn index_ts_files(
     Ok(())
 }
 
+fn index_python(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let pyproject_path = config.repo_path.join("pyproject.toml");
+    let pkg_name = if pyproject_path.exists() {
+        let content = std::fs::read_to_string(&pyproject_path)?;
+        py_imports::extract_project_name(&content).unwrap_or_else(|| "python-project".to_string())
+    } else {
+        "python-project".to_string()
+    };
+
+    // Store Python dependencies
+    if let Ok(deps) = dependencies::parse_python_deps(&config.repo_path) {
+        let resolved: Vec<_> = deps
+            .iter()
+            .map(|d| dependencies::ResolvedDep {
+                name: d.name.clone(),
+                version: d.version_req.clone(),
+                is_direct: true,
+                repository_url: None,
+                features: Vec::new(),
+            })
+            .collect();
+        store::store_dependencies(db, &resolved)?;
+    }
+
+    let crate_id = db.insert_crate(&pkg_name, ".")?;
+    index_py_files(db, config, &config.repo_path, crate_id)?;
+    Ok(())
+}
+
+fn index_py_files(
+    db: &Database,
+    config: &IndexConfig,
+    root: &std::path::Path,
+    crate_id: crate::db::CrateId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let py_files: Vec<_> = walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|e| {
+            if !e.file_type().is_dir() || e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            !is_excluded_dir(&name)
+        })
+        .filter_map(|r| match r {
+            Ok(e) if e.path().extension().is_some_and(|ext| ext == "py") => Some(e.into_path()),
+            _ => None,
+        })
+        .collect();
+
+    let total = py_files.len();
+    tracing::info!(files = total, "Found Python files");
+
+    for (i, path) in py_files.iter().enumerate() {
+        crate::status::set(&format!("indexing ▸ Py [{}/{}]", i + 1, total));
+        let source = std::fs::read_to_string(path)?;
+        let relative = path
+            .strip_prefix(&config.repo_path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        tracing::debug!("[{}/{}] Parsing Py {relative}", i + 1, total);
+        let hash = content_hash(&source);
+        let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
+        let (mut symbols, trait_impls) = py_parser::parse_py_source(&source, &relative)
+            .map_err(|e| -> Box<dyn std::error::Error> { format!("{e}: {relative}").into() })?;
+
+        mark_py_test_symbols(&mut symbols, &relative);
+
+        store::store_symbols(db, file_id, &symbols)?;
+        store::store_trait_impls(db, file_id, &trait_impls)?;
+    }
+    tracing::info!(files = total, "Parsed Python files");
+    Ok(())
+}
+
 fn index_crate_sources(
     db: &Database,
     config: &IndexConfig,
@@ -637,6 +775,9 @@ fn extract_all_symbol_refs(
         };
         let refs = if is_ts_file(relative) {
             ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+        } else if is_py_file(relative) {
+            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
         } else {
             parser::extract_refs(&source, relative, &known_symbols, &crate_map)

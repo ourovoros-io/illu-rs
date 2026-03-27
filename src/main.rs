@@ -489,9 +489,10 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let has_cargo = repo_path.join("Cargo.toml").exists();
     let has_ts =
         repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
-    if !has_cargo && !has_ts {
+    let has_python = illu_rs::indexer::has_python_project(&repo_path);
+    if !has_cargo && !has_ts && !has_python {
         return Err(format!(
-            "No Cargo.toml, tsconfig.json, or package.json found in {}",
+            "No Cargo.toml, tsconfig.json, package.json, or Python project found in {}",
             repo_path.display()
         )
         .into());
@@ -696,7 +697,7 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
 
     ensure_global_gitignore(&home)?;
 
-    println!("\nDone. illu will auto-start in any Rust or TypeScript project.");
+    println!("\nDone. illu will auto-start in any Rust, TypeScript, or Python project.");
     Ok(())
 }
 
@@ -726,7 +727,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let has_cargo = repo_path.join("Cargo.toml").exists();
             let has_ts =
                 repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
-            let has_project = has_cargo || has_ts;
+            let has_python = illu_rs::indexer::has_python_project(repo_path);
+            let has_project = has_cargo || has_ts || has_python;
 
             let (db, config) = if has_project {
                 let db_dir = repo_path.join(".illu");
@@ -757,7 +759,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (db, config)
             } else {
                 tracing::warn!(
-                    "No Cargo.toml/tsconfig.json — starting with empty index (cross-repo tools only)"
+                    "No Cargo.toml/tsconfig.json/pyproject.toml — starting with empty index (cross-repo tools only)"
                 );
                 let db = Database::open_in_memory()?;
                 let config = IndexConfig {
