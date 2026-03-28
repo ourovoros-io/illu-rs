@@ -125,7 +125,7 @@ fn illu_agent_section(cmd_prefix: &str, tool_prefix: &str) -> String {
         "{ILLU_SECTION_START}
 ## Code Intelligence (illu)
 
-This repo is indexed by illu (36 tools). **Use illu tools as your first step** — before reading files, \
+This repo is indexed by illu (49 tools). **Use illu tools as your first step** — before reading files, \
 before grep, before guessing at code structure.
 
 ### Tool priority (IMPORTANT)
@@ -172,6 +172,10 @@ Prefer dedicated illu agents when available: `illu-explore` (codebase questions)
 - **Index health**: `{cmd_prefix} freshness` to check if the index is current
 - **Cross-repo analysis**: `{cmd_prefix} cross_query` to find symbols in other repos, `{cmd_prefix} cross_impact` to check cross-repo effects
 - **Repo overview**: `{cmd_prefix} repos` to see all registered repos
+- **Compiler-accurate analysis**: `{cmd_prefix} ra_definition`, `{cmd_prefix} ra_hover`, `{cmd_prefix} ra_context` for type-resolved intelligence
+- **Renaming symbols**: `{cmd_prefix} ra_rename` to preview, `{cmd_prefix} ra_safe_rename` to apply with error checking
+- **Macro debugging**: `{cmd_prefix} ra_expand_macro` to see generated code
+- **Quick fixes**: `{cmd_prefix} ra_code_actions` for available refactors at a position
 
 ### Commands
 
@@ -214,6 +218,20 @@ Prefer dedicated illu agents when available: `illu-explore` (codebase questions)
 | `{cmd_prefix} cross_impact <symbol>` | `{tool_prefix}cross_impact` | `symbol_name: \"<symbol>\"` |
 | `{cmd_prefix} cross_deps` | `{tool_prefix}cross_deps` | |
 | `{cmd_prefix} cross_callpath <from> <to>` | `{tool_prefix}cross_callpath` | `from: \"<from>\", to: \"<to>\"` |
+| `{cmd_prefix} ra_definition <file:line:col>` | `{tool_prefix}ra_definition` | `position: \"<file:line:col>\"` |
+| `{cmd_prefix} ra_hover <file:line:col>` | `{tool_prefix}ra_hover` | `position: \"<file:line:col>\"` |
+| `{cmd_prefix} ra_diagnostics` | `{tool_prefix}ra_diagnostics` | |
+| `{cmd_prefix} ra_diagnostics <file>` | `{tool_prefix}ra_diagnostics` | `file: \"<file>\"` |
+| `{cmd_prefix} ra_call_hierarchy <file:line:col>` | `{tool_prefix}ra_call_hierarchy` | `position: \"<file:line:col>\"` |
+| `{cmd_prefix} ra_type_hierarchy <file:line:col>` | `{tool_prefix}ra_type_hierarchy` | `position: \"<file:line:col>\"` |
+| `{cmd_prefix} ra_rename <file:line:col> <new>` | `{tool_prefix}ra_rename` | `position: \"<file:line:col>\", new_name: \"<new>\"` |
+| `{cmd_prefix} ra_safe_rename <file:line:col> <new>` | `{tool_prefix}ra_safe_rename` | `position: \"<file:line:col>\", new_name: \"<new>\"` |
+| `{cmd_prefix} ra_code_actions <file:line:col>` | `{tool_prefix}ra_code_actions` | `position: \"<file:line:col>\"` |
+| `{cmd_prefix} ra_expand_macro <file:line:col>` | `{tool_prefix}ra_expand_macro` | `position: \"<file:line:col>\"` |
+| `{cmd_prefix} ra_ssr <pattern>` | `{tool_prefix}ra_ssr` | `pattern: \"<pattern>\"` |
+| `{cmd_prefix} ra_context <file:line:col>` | `{tool_prefix}ra_context` | `position: \"<file:line:col>\"` |
+| `{cmd_prefix} ra_syntax_tree <file>` | `{tool_prefix}ra_syntax_tree` | `file: \"<file>\"` |
+| `{cmd_prefix} ra_related_tests <file:line:col>` | `{tool_prefix}ra_related_tests` | `position: \"<file:line:col>\"` |
 
 ### Workflow rules
 
