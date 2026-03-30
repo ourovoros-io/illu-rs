@@ -600,6 +600,34 @@ fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error:
     write_mcp_config_to(config_path, &["serve"])
 }
 
+/// Ensure all illu MCP tools are auto-allowed in Claude settings.
+fn ensure_tools_allowed(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config: serde_json::Value = std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let pattern = "mcp__illu__*";
+
+    let allow = config["permissions"]["allow"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    let already = allow
+        .iter()
+        .any(|v| v.as_str().is_some_and(|s| s == pattern));
+
+    if !already {
+        let mut allow = allow;
+        allow.push(serde_json::json!(pattern));
+        config["permissions"]["allow"] = serde_json::Value::Array(allow);
+        std::fs::write(config_path, serde_json::to_string_pretty(&config)?)?;
+    }
+
+    Ok(())
+}
+
 const STATUSLINE_SH: &str = include_str!("../assets/statusline.sh");
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
@@ -666,6 +694,7 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
 
     let claude_settings = home.join(".claude/settings.json");
     write_global_mcp_config(&claude_settings)?;
+    ensure_tools_allowed(&claude_settings)?;
     println!("  wrote {}", claude_settings.display());
 
     let gemini_settings = home.join(".gemini/settings.json");
