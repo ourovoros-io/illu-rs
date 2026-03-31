@@ -719,6 +719,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!("Tool call: freshness");
         let _guard = crate::status::StatusGuard::new("freshness");
+        self.refresh()?;
         let db = self.lock_db()?;
         let repo_path = &self.config.repo_path;
         let result = tools::freshness::handle_freshness(&db, repo_path).map_err(to_mcp_err)?;

@@ -730,6 +730,72 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Poll `git rev-parse HEAD` and refresh the index when HEAD changes.
+/// Runs as a background task — detects `git pull`, `git checkout`, etc.
+async fn head_watcher(db: std::sync::Arc<std::sync::Mutex<Database>>, config: IndexConfig) {
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+
+    let repo_path = config.repo_path.clone();
+    let mut last_head = git_head(&repo_path);
+
+    loop {
+        tokio::time::sleep(POLL_INTERVAL).await;
+
+        let current = git_head(&repo_path);
+        if current == last_head {
+            continue;
+        }
+
+        tracing::info!(
+            old = last_head.as_deref().unwrap_or("unknown"),
+            new = current.as_deref().unwrap_or("unknown"),
+            "HEAD changed — refreshing index"
+        );
+
+        let db = db.clone();
+        let config = config.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let Ok(db) = db.lock() else {
+                tracing::warn!("Background refresh: could not acquire DB lock");
+                return;
+            };
+            illu_rs::status::set("refreshing ▸ background");
+            match illu_rs::indexer::refresh_index(&db, &config) {
+                Ok(count) if count > 0 => {
+                    tracing::info!(count, "Background refresh: re-indexed files");
+                }
+                Ok(_) => {
+                    tracing::info!(
+                        "Background refresh: HEAD updated, \
+                         no source changes"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Background refresh failed: {e}");
+                }
+            }
+            illu_rs::status::set(illu_rs::status::READY);
+        })
+        .await;
+
+        if let Err(e) = result {
+            tracing::warn!("Background refresh task panicked: {e}");
+        }
+
+        last_head = git_head(&repo_path);
+    }
+}
+
+fn git_head(repo_path: &Path) -> Option<String> {
+    std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
 #[tokio::main]
 #[expect(clippy::too_many_lines, reason = "CLI dispatch with many subcommands")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -841,6 +907,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let db_arc = server.db();
+            let watcher_db = server.db();
             let transport = stdio();
             tracing::info!("MCP transport ready, starting handshake");
             if has_cargo {
@@ -848,6 +915,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let service = server.serve(transport).await?;
             tracing::info!("MCP server initialized, waiting for requests");
+
+            // Watch for HEAD changes (git pull) and refresh index
+            if has_project {
+                let watcher_config = config.clone();
+                tokio::spawn(async move {
+                    head_watcher(watcher_db, watcher_config).await;
+                });
+            }
 
             // Fetch docs in background — server is already accepting requests
             if !pending_docs.is_empty() {
