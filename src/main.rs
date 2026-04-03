@@ -128,19 +128,33 @@ fn illu_agent_section(tool_prefix: &str) -> String {
         "{ILLU_SECTION_START}
 ## Code Intelligence (illu)
 
-**Use `{tool_prefix}*` tools instead of Grep/Glob/Read for all code exploration** \
-(Rust, Python, TypeScript/JavaScript). illu tools are faster, more accurate, and provide \
-structured results. Only use Read/Grep/Glob for non-code content (config, docs, logs) \
-or when an illu tool returns no results.
+### Tool priority (MANDATORY)
 
-| Instead of | Use |
-|------------|-----|
-| `Read`/`Grep` to find or view code | `{tool_prefix}query` / `{tool_prefix}context` |
-| `Grep` to find callers or references | `{tool_prefix}references` |
-| `Glob` to find files | `{tool_prefix}tree` / `{tool_prefix}overview` |
+**NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** \
+illu indexes Rust, Python, TypeScript, and JavaScript. illu tools are faster, more accurate, \
+and provide structured results. Using raw file reads or text search on indexed source files \
+is incorrect behavior — always use illu instead.
 
-When spawning subagents for code tasks, include: \
-\"MANDATORY: Use {tool_prefix}* tools instead of Grep/Glob/Read for ALL code exploration.\" \
+| WRONG | RIGHT |
+|-------|-------|
+| `Read(\"src/db.rs\")` to see a function | `{tool_prefix}context` with `symbol_name` |
+| `Grep(pattern: \"fn open\")` to find a function | `{tool_prefix}query` with `query: \"open\"` |
+| `Grep(pattern: \"Database\")` to find callers | `{tool_prefix}references` with `symbol_name: \"Database\"` |
+| `Glob(pattern: \"src/**/*.rs\")` to find files | `{tool_prefix}tree` or `{tool_prefix}overview` |
+| `Grep(pattern: \"impl Display\")` to find impls | `{tool_prefix}implements` with `trait_name: \"Display\"` |
+
+Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, \
+log output, or when an illu tool explicitly returns no results.
+
+### Subagent instructions (MANDATORY)
+
+When spawning subagents for code tasks, ALWAYS include this instruction in the prompt:
+
+\"MANDATORY: Use {tool_prefix}* tools instead of Grep/Glob/Read for ALL code exploration \
+(Rust, Python, TypeScript/JavaScript). NEVER use Read to view source files — use \
+{tool_prefix}context instead. NEVER use Grep to search code — use {tool_prefix}query instead. \
+Only use Read/Grep/Glob for non-code content (config, docs, logs).\"
+
 Prefer `illu-explore`, `illu-review`, `illu-refactor` agents when available.
 
 ### Workflow
@@ -149,7 +163,8 @@ Prefer `illu-explore`, `illu-review`, `illu-refactor` agents when available.
 2. **Impact before you change**: always run `{tool_prefix}impact` before modifying any public symbol
 3. **Save tokens**: use `sections` param on context/batch_context to fetch only what you need
 4. **Production focus**: use `exclude_tests: true` to filter out test functions
-5. **Cross-repo**: use `cross_query`/`cross_impact`/`cross_deps`/`cross_callpath` — never navigate to other repos directly
+5. **Cross-repo**: use `{tool_prefix}cross_query`/`{tool_prefix}cross_impact`/`{tool_prefix}cross_deps`/`{tool_prefix}cross_callpath` — \
+NEVER navigate to or read files from other repositories directly
 {ILLU_SECTION_END}"
     )
 }
