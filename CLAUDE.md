@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-illu-rs is an MCP (Model Context Protocol) server that indexes Rust codebases and exposes code intelligence tools. It parses source files with tree-sitter, stores symbols/refs/deps in SQLite, and optionally connects to rust-analyzer for compiler-accurate operations. Serves 49 MCP tools over stdio: 36 core tools (`query`, `context`, `batch_context`, `impact`, `diff_impact`, `callpath`, `unused`, `freshness`, `docs`, `overview`, `tree`, `crate_graph`, `implements`, `neighborhood`, `type_usage`, `file_graph`, `symbols_at`, `stats`, `hotspots`, `rename_plan`, `similar`, `boundary`, `health`, `blame`, `history`, `references`, `doc_coverage`, `test_impact`, `orphaned`, `graph_export`, `crate_impact`, `repos`, `cross_query`, `cross_impact`, `cross_deps`, `cross_callpath`) + 13 rust-analyzer tools (`ra_definition`, `ra_hover`, `ra_diagnostics`, `ra_call_hierarchy`, `ra_type_hierarchy`, `ra_rename`, `ra_safe_rename`, `ra_code_actions`, `ra_expand_macro`, `ra_ssr`, `ra_context`, `ra_syntax_tree`, `ra_related_tests`).
+illu-rs is an MCP (Model Context Protocol) server that indexes Rust, Python, and TypeScript/JavaScript codebases and exposes code intelligence tools. It parses source files with tree-sitter, stores symbols/refs/deps in SQLite, and optionally connects to rust-analyzer for compiler-accurate Rust operations. Serves 49 MCP tools over stdio: 36 core tools (`query`, `context`, `batch_context`, `impact`, `diff_impact`, `callpath`, `unused`, `freshness`, `docs`, `overview`, `tree`, `crate_graph`, `implements`, `neighborhood`, `type_usage`, `file_graph`, `symbols_at`, `stats`, `hotspots`, `rename_plan`, `similar`, `boundary`, `health`, `blame`, `history`, `references`, `doc_coverage`, `test_impact`, `orphaned`, `graph_export`, `crate_impact`, `repos`, `cross_query`, `cross_impact`, `cross_deps`, `cross_callpath`) + 13 rust-analyzer tools (`ra_definition`, `ra_hover`, `ra_diagnostics`, `ra_call_hierarchy`, `ra_type_hierarchy`, `ra_rename`, `ra_safe_rename`, `ra_code_actions`, `ra_expand_macro`, `ra_ssr`, `ra_context`, `ra_syntax_tree`, `ra_related_tests`).
 
 ## Commands
 
@@ -43,10 +43,13 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - FTS5 virtual tables (`symbols_fts`, `docs_fts`) for full-text search
 
 ### `indexer` — Indexing pipeline (`src/indexer/`)
-- `mod.rs` — Orchestrator. `index_repo` detects workspace vs single-crate, dispatches to `index_workspace` or `index_single_crate`. Both index `src/` plus `tests/`, `benches/`, and `examples/` directories when present. Shared phases: symbol ref extraction, skill file generation, metadata update.
-- `workspace.rs` — `parse_workspace_toml`, `resolve_member_deps` (handles `workspace = true` inheritance), `extract_path_deps` (inter-crate deps).
-- `parser.rs` — Tree-sitter parsing. `parse_rust_source` extracts symbols (with `impl_type` for methods and enum variants); `extract_refs` uses import maps and crate maps for qualified path resolution. Detects `self.method()` calls for impl-type-aware ref resolution. Enum variants are indexed as `EnumVariant` symbols with `impl_type` set to the parent enum name.
-- `dependencies.rs` — Parses `Cargo.toml`/`Cargo.lock`, resolves direct vs transitive deps.
+- `mod.rs` — Orchestrator. `index_repo` detects project type (Cargo.toml → Rust, tsconfig.json/package.json → TypeScript/JavaScript, pyproject.toml/setup.py/setup.cfg/requirements.txt → Python) and dispatches to the appropriate indexer. Multiple languages can coexist in one repo. Shared phases: symbol ref extraction, skill file generation, metadata update.
+- `workspace.rs` — Rust workspace support: `parse_workspace_toml`, `resolve_member_deps` (handles `workspace = true` inheritance), `extract_path_deps` (inter-crate deps).
+- `parser.rs` — Rust tree-sitter parsing. `parse_rust_source` extracts symbols (with `impl_type` for methods and enum variants); `extract_refs` uses import maps and crate maps for qualified path resolution. Detects `self.method()` calls for impl-type-aware ref resolution. Enum variants are indexed as `EnumVariant` symbols with `impl_type` set to the parent enum name.
+- `ts_parser.rs` — TypeScript/JavaScript tree-sitter parsing. `parse_ts_source` extracts symbols from `.ts`, `.tsx`, `.js`, `.jsx` files. `ts_imports.rs` handles import resolution.
+- `py_parser.rs` — Python tree-sitter parsing. `parse_py_source` extracts symbols from `.py` files. `py_imports.rs` handles import resolution.
+- `tauri_bridge.rs` — Cross-language bridge for Tauri projects. Creates refs between TypeScript `invoke('command')` calls and Rust `#[tauri::command]` handlers.
+- `dependencies.rs` — Parses `Cargo.toml`/`Cargo.lock` (Rust), `package.json` (TypeScript/JS), `pyproject.toml`/`setup.cfg`/`requirements.txt` (Python) for dependency resolution.
 - `store.rs` — Writes parsed symbols/deps to DB.
 - `docs.rs` — Fetches docs (cargo doc JSON → docs.rs → GitHub README). Two-tier storage: crate summary + per-module detail.
 - `cargo_doc.rs` — Parses nightly rustdoc JSON into structured per-module docs.
@@ -166,7 +169,9 @@ Optional at runtime — if rust-analyzer is not installed or `--no-ra` is passed
 - **Test list tiering** — `render_test_list` in `mod.rs` controls output size for Related Tests sections across `impact`, `diff_impact`, and `test_impact`. Three tiers: ≤20 tests listed individually, 21–50 grouped by file with names, >50 file-grouped summary with counts only. Thresholds: `TEST_LIST_GROUP_THRESHOLD=20`, `TEST_LIST_SUMMARY_THRESHOLD=50`.
 - **Registry** — Auto-populated at `~/.illu/registry.toml` on every `illu serve` startup. Tracks repo name, path, git remote, and last indexed timestamp. Worktrees dedup by `git_common_dir`.
 - **Cross-repo tools** — Open other repos' `.illu/index.db` read-only on demand via `Database::open_readonly`. Name-based matching across repos (no shared index). `cross_query`, `cross_impact`, `cross_deps`, `cross_callpath` all use the registry to find other repos.
-- **Global install** — `illu install` writes MCP config + instruction sections to `~/.claude/` and `~/.gemini/` globally, installs statusline to `~/.illu/statusline.sh`, and configures `statusLine` in Claude settings (skips if already configured). Uses CWD auto-detection (no `--repo` flag). `illu init` remains for per-repo overrides.
+- **Global install** — `illu install` writes MCP config + instruction sections to `~/.claude/` and `~/.gemini/` globally, installs statusline to `~/.illu/statusline.sh`, and configures `statusLine` in Claude settings (skips if already configured). Auto-allows `mcp__illu__*` in global Claude settings. Uses CWD auto-detection (no `--repo` flag). `illu init` remains for per-repo overrides.
+- **Agent files** — Generated by `init`, `serve`, and `install` into `.claude/agents/` and `.gemini/agents/`. `tools` field uses YAML array format (one `- tool_name` per line). Agent body text includes MANDATORY instructions with WRONG/RIGHT examples to enforce illu tool usage over Read/Grep/Glob.
+- **Auto-allow tools** — Both `init` and `serve` call `ensure_tools_allowed` to add `mcp__illu__*` wildcard to `.claude/settings.local.json`. Eliminates manual approval prompts for illu MCP tools.
 - **Auto-detection** — `illu serve` without `--repo` detects repo root via `git rev-parse --show-toplevel`. Works with git worktrees — each worktree gets its own index.
 - **repos tool** — Dashboard showing all registered repos with status (active/indexed/missing/no index), symbol counts.
 - **cross_query tool** — Searches symbols across all registered repos except the primary. Same params as `query`, results grouped by repo.
@@ -205,28 +210,26 @@ Rust 2024 edition with strict clippy (see `Cargo.toml [lints.clippy]`):
 
 This repo is indexed by illu (36 tools). **Use illu tools as your first step** — before reading files, before grep, before guessing at code structure.
 
-### Tool priority (IMPORTANT)
+### Tool priority (MANDATORY)
 
-When illu tools are available, use them INSTEAD of built-in alternatives for Rust code intelligence. Do NOT use Grep, Glob, or Read for code exploration when illu can answer the question.
+**NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** illu indexes Rust, Python, TypeScript, and JavaScript. illu tools are faster, more accurate, and provide structured results. Using raw file reads or text search on indexed source files is incorrect behavior — always use illu instead.
 
-| Instead of | Use |
-|------------|-----|
-| Grep to find a symbol or function | `mcp__illu__query` |
-| Grep to find callers or references | `mcp__illu__references` or `mcp__illu__neighborhood` |
-| Grep to understand a function | `mcp__illu__context` (includes source, callers, callees) |
-| Glob to find files or modules | `mcp__illu__tree` or `mcp__illu__overview` |
-| Read to understand code structure | `mcp__illu__context` or `mcp__illu__batch_context` |
-| Grep to find tests for a function | `mcp__illu__test_impact` |
-| Grep to find trait implementations | `mcp__illu__implements` |
-| Grep to find type usage | `mcp__illu__type_usage` |
+| WRONG | RIGHT |
+|-------|-------|
+| `Read("src/db.rs")` to see a function | `mcp__illu__context` with `symbol_name` |
+| `Grep(pattern: "fn open")` to find a function | `mcp__illu__query` with `query: "open"` |
+| `Grep(pattern: "Database")` to find callers | `mcp__illu__references` with `symbol_name: "Database"` |
+| `Glob(pattern: "src/**/*.rs")` to find files | `mcp__illu__tree` or `mcp__illu__overview` |
+| `Grep(pattern: "#\[test\]")` to find tests | `mcp__illu__test_impact` with `symbol_name` |
+| `Grep(pattern: "impl Display")` to find impls | `mcp__illu__implements` with `trait_name: "Display"` |
 
-Only fall back to Grep/Glob/Read when searching for non-code content (config files, text, logs) or when illu tools return no results.
+Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, log output, or when an illu tool explicitly returns no results. This applies to Rust (.rs), Python (.py), TypeScript (.ts/.tsx), and JavaScript (.js/.jsx) files.
 
-### Subagent instructions (IMPORTANT)
+### Subagent instructions (MANDATORY)
 
-When spawning Agent subagents for Rust code tasks, ALWAYS include this instruction in the prompt:
+When spawning Agent subagents for code tasks (Rust, Python, TypeScript/JavaScript), ALWAYS include this instruction in the prompt:
 
-"Use mcp__illu__* tools instead of Grep/Glob/Read for Rust code exploration. Use mcp__illu__query to find symbols, mcp__illu__context for definitions and callers, mcp__illu__neighborhood for call graphs. Only fall back to Grep/Glob/Read for non-code content."
+"MANDATORY: Use mcp__illu__* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript/JavaScript). NEVER use Read to view source files — use mcp__illu__context instead. NEVER use Grep to search code — use mcp__illu__query instead. Only use Read/Grep/Glob for non-code content (config, docs, logs)."
 
 Prefer dedicated illu agents when available: `illu-explore` (codebase questions), `illu-review` (change analysis), `illu-refactor` (refactoring support).
 
