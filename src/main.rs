@@ -134,7 +134,7 @@ before grep, before guessing at code structure.
 ### Tool priority (MANDATORY)
 
 **NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** \
-illu indexes Rust, Python, and TypeScript. illu tools are faster, more accurate, and \
+illu indexes Rust, Python, TypeScript, and JavaScript. illu tools are faster, more accurate, and \
 provide structured results. Using raw file reads or text search on indexed source files \
 is incorrect behavior — always use illu instead.
 
@@ -153,9 +153,9 @@ This applies to Rust (.rs), Python (.py), TypeScript (.ts/.tsx), and JavaScript 
 
 ### Subagent instructions (MANDATORY)
 
-When spawning Agent subagents for code tasks (Rust, Python, TypeScript), ALWAYS include this instruction in the prompt:
+When spawning Agent subagents for code tasks (Rust, Python, TypeScript/JavaScript), ALWAYS include this instruction in the prompt:
 
-\"MANDATORY: Use {tool_prefix}* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript). \
+\"MANDATORY: Use {tool_prefix}* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript/JavaScript). \
 NEVER use Read to view source files — use {tool_prefix}context instead. \
 NEVER use Grep to search code — use {tool_prefix}query instead. \
 Only use Read/Grep/Glob for non-code content (config, docs, logs).\"
@@ -248,7 +248,7 @@ If a repo is not indexed, ask the user to run illu on it first.
 const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
     (
         "illu-explore",
-        "Explore codebases using illu code intelligence (Rust, Python, TypeScript)",
+        "Explore codebases using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
         &[
             "Read",
             "Glob",
@@ -270,7 +270,7 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
         ],
         "You are an illu-powered codebase exploration agent.\n\n\
          ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
-         You MUST use illu MCP tools for ALL code exploration (Rust, Python, TypeScript). \
+         You MUST use illu MCP tools for ALL code exploration (Rust, Python, TypeScript/JavaScript). \
          Do NOT use Read to view source files — use `context` instead. \
          Do NOT use Grep to search code — use `query` instead. \
          Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\
@@ -307,7 +307,7 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
     ),
     (
         "illu-review",
-        "Review code changes using illu code intelligence (Rust, Python, TypeScript)",
+        "Review code changes using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
         &[
             "Read",
             "Glob",
@@ -325,7 +325,7 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
         ],
         "You are an illu-powered code review agent.\n\n\
          ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
-         You MUST use illu MCP tools for ALL code analysis (Rust, Python, TypeScript). \
+         You MUST use illu MCP tools for ALL code analysis (Rust, Python, TypeScript/JavaScript). \
          Do NOT use Read to view source files — use `context` instead. \
          Do NOT use Grep to search code — use `query` instead. \
          Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\
@@ -355,7 +355,7 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
     ),
     (
         "illu-refactor",
-        "Plan refactoring using illu code intelligence (Rust, Python, TypeScript)",
+        "Plan refactoring using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
         &[
             "Read",
             "Glob",
@@ -373,7 +373,7 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
         ],
         "You are an illu-powered refactoring agent.\n\n\
          ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
-         You MUST use illu MCP tools for ALL code analysis (Rust, Python, TypeScript). \
+         You MUST use illu MCP tools for ALL code analysis (Rust, Python, TypeScript/JavaScript). \
          Do NOT use Read to view source files — use `context` instead. \
          Do NOT use Grep to search code — use `query` instead. \
          Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\

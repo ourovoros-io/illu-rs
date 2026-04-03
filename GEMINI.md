@@ -7,7 +7,7 @@ This repo is indexed by illu (36 tools). **Use illu tools as your first step** �
 
 ### Tool priority (MANDATORY)
 
-**NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** illu indexes Rust, Python, and TypeScript. illu tools are faster, more accurate, and provide structured results. Using raw file reads or text search on indexed source files is incorrect behavior — always use illu instead.
+**NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** illu indexes Rust, Python, TypeScript, and JavaScript. illu tools are faster, more accurate, and provide structured results. Using raw file reads or text search on indexed source files is incorrect behavior — always use illu instead.
 
 | WRONG | RIGHT |
 |-------|-------|
@@ -18,13 +18,13 @@ This repo is indexed by illu (36 tools). **Use illu tools as your first step** �
 | `Grep(pattern: "#\[test\]")` to find tests | `mcp_illu_test_impact` with `symbol_name` |
 | `Grep(pattern: "impl Display")` to find impls | `mcp_illu_implements` with `trait_name: "Display"` |
 
-Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, log output, or when an illu tool explicitly returns no results. This applies to Rust (.rs), Python (.py), and TypeScript (.ts/.tsx) files.
+Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, log output, or when an illu tool explicitly returns no results. This applies to Rust (.rs), Python (.py), TypeScript (.ts/.tsx), and JavaScript (.js/.jsx) files.
 
 ### Subagent instructions (MANDATORY)
 
-When spawning Agent subagents for Rust code tasks, ALWAYS include this instruction in the prompt:
+When spawning Agent subagents for code tasks (Rust, Python, TypeScript/JavaScript), ALWAYS include this instruction in the prompt:
 
-"MANDATORY: Use mcp_illu_* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript). NEVER use Read to view source files — use mcp_illu_context instead. NEVER use Grep to search code — use mcp_illu_query instead. Only use Read/Grep/Glob for non-code content (config, docs, logs)."
+"MANDATORY: Use mcp_illu_* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript/JavaScript). NEVER use Read to view source files — use mcp_illu_context instead. NEVER use Grep to search code — use mcp_illu_query instead. Only use Read/Grep/Glob for non-code content (config, docs, logs)."
 
 Prefer dedicated illu agents when available: `illu-explore` (codebase questions), `illu-review` (change analysis), `illu-refactor` (refactoring support).
 
