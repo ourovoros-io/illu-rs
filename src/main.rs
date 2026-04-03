@@ -123,123 +123,33 @@ fn write_gemini_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error
 const ILLU_SECTION_START: &str = "<!-- illu:start -->";
 const ILLU_SECTION_END: &str = "<!-- illu:end -->";
 
-fn illu_agent_section(cmd_prefix: &str, tool_prefix: &str) -> String {
+fn illu_agent_section(tool_prefix: &str) -> String {
     format!(
         "{ILLU_SECTION_START}
 ## Code Intelligence (illu)
 
-This repo is indexed by illu (36 tools). **Use illu tools as your first step** — before reading files, \
-before grep, before guessing at code structure.
+**Use `{tool_prefix}*` tools instead of Grep/Glob/Read for all code exploration** \
+(Rust, Python, TypeScript/JavaScript). illu tools are faster, more accurate, and provide \
+structured results. Only use Read/Grep/Glob for non-code content (config, docs, logs) \
+or when an illu tool returns no results.
 
-### Tool priority (MANDATORY)
+| Instead of | Use |
+|------------|-----|
+| `Read`/`Grep` to find or view code | `{tool_prefix}query` / `{tool_prefix}context` |
+| `Grep` to find callers or references | `{tool_prefix}references` |
+| `Glob` to find files | `{tool_prefix}tree` / `{tool_prefix}overview` |
 
-**NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** \
-illu indexes Rust, Python, TypeScript, and JavaScript. illu tools are faster, more accurate, and \
-provide structured results. Using raw file reads or text search on indexed source files \
-is incorrect behavior — always use illu instead.
+When spawning subagents for code tasks, include: \
+\"MANDATORY: Use {tool_prefix}* tools instead of Grep/Glob/Read for ALL code exploration.\" \
+Prefer `illu-explore`, `illu-review`, `illu-refactor` agents when available.
 
-| WRONG | RIGHT |
-|-------|-------|
-| `Read(\"src/db.rs\")` to see a function | `{tool_prefix}context` with `symbol_name` |
-| `Grep(pattern: \"fn open\")` to find a function | `{tool_prefix}query` with `query: \"open\"` |
-| `Grep(pattern: \"Database\")` to find callers | `{tool_prefix}references` with `symbol_name: \"Database\"` |
-| `Glob(pattern: \"src/**/*.rs\")` to find files | `{tool_prefix}tree` or `{tool_prefix}overview` |
-| `Grep(pattern: \"#\\[test\\]\")` to find tests | `{tool_prefix}test_impact` with `symbol_name` |
-| `Grep(pattern: \"impl Display\")` to find impls | `{tool_prefix}implements` with `trait_name: \"Display\"` |
+### Workflow
 
-Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, \
-log output, or when an illu tool explicitly returns no results. \
-This applies to Rust (.rs), Python (.py), TypeScript (.ts/.tsx), and JavaScript (.js/.jsx) files.
-
-### Subagent instructions (MANDATORY)
-
-When spawning Agent subagents for code tasks (Rust, Python, TypeScript/JavaScript), ALWAYS include this instruction in the prompt:
-
-\"MANDATORY: Use {tool_prefix}* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript/JavaScript). \
-NEVER use Read to view source files — use {tool_prefix}context instead. \
-NEVER use Grep to search code — use {tool_prefix}query instead. \
-Only use Read/Grep/Glob for non-code content (config, docs, logs).\"
-
-Prefer dedicated illu agents when available: `illu-explore` (codebase questions), \
-`illu-review` (change analysis), `illu-refactor` (refactoring support).
-
-### When to use illu
-
-- **Starting any task**: `{cmd_prefix} query` the relevant symbols to understand what exists
-- **Before modifying a function/struct/trait**: `{cmd_prefix} impact` to see what depends on it
-- **Debugging or tracing issues**: `{cmd_prefix} context` to get the full definition and references
-- **Understanding call flow**: `{cmd_prefix} neighborhood` or `{cmd_prefix} callpath` to explore the call graph
-- **Before refactoring a module**: `{cmd_prefix} boundary` to see what's public API vs internal
-- **Using an external crate**: `{cmd_prefix} docs` to check how it's used in this project
-- **Before reading files**: query first — illu tells you exactly where things are
-- **Finding which tests to run**: `{cmd_prefix} test_impact` after changing a symbol
-- **Dead code detection**: `{cmd_prefix} unused` or `{cmd_prefix} orphaned` to find unreferenced symbols
-- **Index health**: `{cmd_prefix} freshness` to check if the index is current
-- **Cross-repo analysis**: `{cmd_prefix} cross_query` to find symbols in other repos, `{cmd_prefix} cross_impact` to check cross-repo effects
-- **Repo overview**: `{cmd_prefix} repos` to see all registered repos
-
-### Commands
-
-| User types | MCP tool | Params |
-|------------|----------|--------|
-| `{cmd_prefix} query <term>` | `{tool_prefix}query` | `query: \"<term>\"` |
-| `{cmd_prefix} query <term> --scope <s>` | `{tool_prefix}query` | `query: \"<term>\", scope: \"<s>\"` |
-| `{cmd_prefix} query * --kind struct` | `{tool_prefix}query` | `query: \"*\", kind: \"struct\"` |
-| `{cmd_prefix} query * --sig \"-> Result\"` | `{tool_prefix}query` | `query: \"*\", signature: \"-> Result\"` |
-| `{cmd_prefix} context <symbol>` | `{tool_prefix}context` | `symbol_name: \"<symbol>\"` |
-| `{cmd_prefix} context Type::method` | `{tool_prefix}context` | `symbol_name: \"Type::method\"` |
-| `{cmd_prefix} context <sym> --sections source,callers` | `{tool_prefix}context` | `symbol_name: \"<sym>\", sections: [\"source\", \"callers\"]` |
-| `{cmd_prefix} context <sym> --exclude-tests` | `{tool_prefix}context` | `symbol_name: \"<sym>\", exclude_tests: true` |
-| `{cmd_prefix} batch_context <sym1> <sym2>` | `{tool_prefix}batch_context` | `symbols: [\"<sym1>\", \"<sym2>\"]` |
-| `{cmd_prefix} impact <symbol>` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\"` |
-| `{cmd_prefix} impact <symbol> --depth 1` | `{tool_prefix}impact` | `symbol_name: \"<symbol>\", depth: 1` |
-| `{cmd_prefix} diff_impact` | `{tool_prefix}diff_impact` | *(unstaged changes)* |
-| `{cmd_prefix} diff_impact main` | `{tool_prefix}diff_impact` | `git_ref: \"main\"` |
-| `{cmd_prefix} test_impact <symbol>` | `{tool_prefix}test_impact` | `symbol_name: \"<symbol>\"` |
-| `{cmd_prefix} callpath <from> <to>` | `{tool_prefix}callpath` | `from: \"<from>\", to: \"<to>\"` |
-| `{cmd_prefix} neighborhood <symbol>` | `{tool_prefix}neighborhood` | `symbol_name: \"<symbol>\"` |
-| `{cmd_prefix} neighborhood <sym> --format tree` | `{tool_prefix}neighborhood` | `symbol_name: \"<sym>\", format: \"tree\"` |
-| `{cmd_prefix} references <symbol>` | `{tool_prefix}references` | `symbol_name: \"<symbol>\"` |
-| `{cmd_prefix} boundary src/server/` | `{tool_prefix}boundary` | `path: \"src/server/\"` |
-| `{cmd_prefix} unused` | `{tool_prefix}unused` | |
-| `{cmd_prefix} unused --path src/server/` | `{tool_prefix}unused` | `path: \"src/server/\"` |
-| `{cmd_prefix} orphaned` | `{tool_prefix}orphaned` | |
-| `{cmd_prefix} overview src/` | `{tool_prefix}overview` | `path: \"src/\"` |
-| `{cmd_prefix} stats` | `{tool_prefix}stats` | |
-| `{cmd_prefix} hotspots` | `{tool_prefix}hotspots` | |
-| `{cmd_prefix} implements --trait Display` | `{tool_prefix}implements` | `trait_name: \"Display\"` |
-| `{cmd_prefix} docs <dep>` | `{tool_prefix}docs` | `dependency: \"<dep>\"` |
-| `{cmd_prefix} docs <dep> --topic <t>` | `{tool_prefix}docs` | `dependency: \"<dep>\", topic: \"<t>\"` |
-| `{cmd_prefix} freshness` | `{tool_prefix}freshness` | |
-| `{cmd_prefix} crate_graph` | `{tool_prefix}crate_graph` | |
-| `{cmd_prefix} blame <symbol>` | `{tool_prefix}blame` | `symbol_name: \"<symbol>\"` |
-| `{cmd_prefix} history <symbol>` | `{tool_prefix}history` | `symbol_name: \"<symbol>\"` |
-| `{cmd_prefix} repos` | `{tool_prefix}repos` | |
-| `{cmd_prefix} cross_query <term>` | `{tool_prefix}cross_query` | `query: \"<term>\"` |
-| `{cmd_prefix} cross_impact <symbol>` | `{tool_prefix}cross_impact` | `symbol_name: \"<symbol>\"` |
-| `{cmd_prefix} cross_deps` | `{tool_prefix}cross_deps` | |
-| `{cmd_prefix} cross_callpath <from> <to>` | `{tool_prefix}cross_callpath` | `from: \"<from>\", to: \"<to>\"` |
-
-### Workflow rules
-
-1. **Locate before you read**: `{cmd_prefix} query` or `{cmd_prefix} context` to find the right file:line, then Read only what you need
-2. **Impact before you change**: always run `{cmd_prefix} impact` before modifying any public symbol
-3. **Chain tools**: `{cmd_prefix} query` to find candidates → `{cmd_prefix} context` for the one you need → `{cmd_prefix} impact` before changing it
-4. **Save tokens**: use `sections: [\"source\", \"callers\"]` on context/batch_context to fetch only what you need
-5. **Production focus**: use `exclude_tests: true` on context/neighborhood/callpath to filter out test functions
-
-### Cross-repo workflow
-
-**NEVER navigate to or read files from other repositories directly.** Use cross-repo tools instead — they query other repos' indexes without leaving this repo.
-
-1. `{cmd_prefix} repos` — confirm the other repo is indexed and available
-2. `{cmd_prefix} cross_query <term>` — search symbols across all indexed repos
-3. `{cmd_prefix} cross_impact <symbol>` — find which code in other repos references a symbol
-4. `{cmd_prefix} cross_deps` — show inter-repo dependency relationships
-5. `{cmd_prefix} cross_callpath <from> <to>` — find call chains spanning repo boundaries
-
-Cross-repo tools open other repos' indexes read-only. They work as long as the other repo has been indexed by illu (check with `{cmd_prefix} repos`). \
-If a repo is not indexed, ask the user to run illu on it first.
+1. **Locate before you read**: `{tool_prefix}query` or `{tool_prefix}context` first, then Read only what you need
+2. **Impact before you change**: always run `{tool_prefix}impact` before modifying any public symbol
+3. **Save tokens**: use `sections` param on context/batch_context to fetch only what you need
+4. **Production focus**: use `exclude_tests: true` to filter out test functions
+5. **Cross-repo**: use `cross_query`/`cross_impact`/`cross_deps`/`cross_callpath` — never navigate to other repos directly
 {ILLU_SECTION_END}"
     )
 }
@@ -470,12 +380,12 @@ fn write_md_section(
 }
 
 fn write_claude_md_section(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let section = illu_agent_section("illu", "mcp__illu__");
+    let section = illu_agent_section("mcp__illu__");
     write_md_section(repo_path, "CLAUDE.md", "# CLAUDE.md", &section)
 }
 
 fn write_gemini_md_section(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let section = illu_agent_section("@illu", "mcp_illu_");
+    let section = illu_agent_section("mcp_illu_");
     write_md_section(repo_path, "GEMINI.md", "# GEMINI.md", &section)
 }
 
@@ -750,7 +660,7 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
         &home,
         ".claude/CLAUDE.md",
         "# CLAUDE.md",
-        &illu_agent_section("illu", "mcp__illu__"),
+        &illu_agent_section("mcp__illu__"),
     )?;
     println!("  updated {}", home.join(".claude/CLAUDE.md").display());
 
@@ -758,7 +668,7 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
         &home,
         ".gemini/GEMINI.md",
         "# GEMINI.md",
-        &illu_agent_section("@illu", "mcp_illu_"),
+        &illu_agent_section("mcp_illu_"),
     )?;
     println!("  updated {}", home.join(".gemini/GEMINI.md").display());
 
