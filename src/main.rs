@@ -11,7 +11,7 @@ use rmcp::transport::stdio;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "illu", about = "Rust code intelligence")]
+#[command(name = "illu", about = "Code intelligence for Rust, Python, and TypeScript")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -64,7 +64,7 @@ enum Command {
         #[arg(default_value = "src/")]
         path: String,
     },
-    /// Set up illu in a Rust repo (configures Claude Code + Gemini CLI, builds index)
+    /// Set up illu in a repo (configures Claude Code + Gemini CLI, builds index)
     Init,
     /// Install illu globally (configures Claude Code + Gemini CLI for all repos)
     Install,
@@ -128,32 +128,34 @@ fn illu_agent_section(cmd_prefix: &str, tool_prefix: &str) -> String {
 This repo is indexed by illu (36 tools). **Use illu tools as your first step** — before reading files, \
 before grep, before guessing at code structure.
 
-### Tool priority (IMPORTANT)
+### Tool priority (MANDATORY)
 
-When illu tools are available, use them INSTEAD of built-in alternatives for Rust code intelligence. \
-Do NOT use Grep, Glob, or Read for code exploration when illu can answer the question.
+**NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** \
+illu indexes Rust, Python, and TypeScript. illu tools are faster, more accurate, and \
+provide structured results. Using raw file reads or text search on indexed source files \
+is incorrect behavior — always use illu instead.
 
-| Instead of | Use |
-|------------|-----|
-| Grep to find a symbol or function | `{tool_prefix}query` |
-| Grep to find callers or references | `{tool_prefix}references` or `{tool_prefix}neighborhood` |
-| Grep to understand a function | `{tool_prefix}context` (includes source, callers, callees) |
-| Glob to find files or modules | `{tool_prefix}tree` or `{tool_prefix}overview` |
-| Read to understand code structure | `{tool_prefix}context` or `{tool_prefix}batch_context` |
-| Grep to find tests for a function | `{tool_prefix}test_impact` |
-| Grep to find trait implementations | `{tool_prefix}implements` |
-| Grep to find type usage | `{tool_prefix}type_usage` |
+| WRONG | RIGHT |
+|-------|-------|
+| `Read(\"src/db.rs\")` to see a function | `{tool_prefix}context` with `symbol_name` |
+| `Grep(pattern: \"fn open\")` to find a function | `{tool_prefix}query` with `query: \"open\"` |
+| `Grep(pattern: \"Database\")` to find callers | `{tool_prefix}references` with `symbol_name: \"Database\"` |
+| `Glob(pattern: \"src/**/*.rs\")` to find files | `{tool_prefix}tree` or `{tool_prefix}overview` |
+| `Grep(pattern: \"#\\[test\\]\")` to find tests | `{tool_prefix}test_impact` with `symbol_name` |
+| `Grep(pattern: \"impl Display\")` to find impls | `{tool_prefix}implements` with `trait_name: \"Display\"` |
 
-Only fall back to Grep/Glob/Read when searching for non-code content (config files, text, logs) \
-or when illu tools return no results.
+Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, \
+log output, or when an illu tool explicitly returns no results. \
+This applies to Rust (.rs), Python (.py), TypeScript (.ts/.tsx), and JavaScript (.js/.jsx) files.
 
-### Subagent instructions (IMPORTANT)
+### Subagent instructions (MANDATORY)
 
-When spawning Agent subagents for Rust code tasks, ALWAYS include this instruction in the prompt:
+When spawning Agent subagents for code tasks (Rust, Python, TypeScript), ALWAYS include this instruction in the prompt:
 
-\"Use {tool_prefix}* tools instead of Grep/Glob/Read for Rust code exploration. \
-Use {tool_prefix}query to find symbols, {tool_prefix}context for definitions and callers, \
-{tool_prefix}neighborhood for call graphs. Only fall back to Grep/Glob/Read for non-code content.\"
+\"MANDATORY: Use {tool_prefix}* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript). \
+NEVER use Read to view source files — use {tool_prefix}context instead. \
+NEVER use Grep to search code — use {tool_prefix}query instead. \
+Only use Read/Grep/Glob for non-code content (config, docs, logs).\"
 
 Prefer dedicated illu agents when available: `illu-explore` (codebase questions), \
 `illu-review` (change analysis), `illu-refactor` (refactoring support).
@@ -243,7 +245,7 @@ If a repo is not indexed, ask the user to run illu on it first.
 const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
     (
         "illu-explore",
-        "Explore Rust codebases using illu code intelligence",
+        "Explore codebases using illu code intelligence (Rust, Python, TypeScript)",
         &[
             "Read",
             "Glob",
@@ -263,13 +265,25 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
             "stats",
             "freshness",
         ],
-        "You are an illu-powered codebase exploration agent. \
-         Use illu MCP tools instead of Grep/Glob/Read for all Rust code exploration. \
-         Only fall back to Grep/Glob/Read for non-Rust content (configs, docs, logs). \
+        "You are an illu-powered codebase exploration agent.\n\n\
+         ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
+         You MUST use illu MCP tools for ALL code exploration (Rust, Python, TypeScript). \
+         Do NOT use Read to view source files — use `context` instead. \
+         Do NOT use Grep to search code — use `query` instead. \
+         Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\
+         Read/Grep/Glob are ONLY permitted for non-code content \
+         (config files, markdown, logs, TOML, JSON) or when an illu tool \
+         explicitly returns no results.\n\n\
+         WRONG: Read(\"src/db.rs\") to see a function\n\
+         RIGHT: context(symbol_name: \"Database::open\")\n\n\
+         WRONG: Grep(pattern: \"fn refresh\") to find a function\n\
+         RIGHT: query(query: \"refresh\")\n\n\
+         WRONG: Glob(pattern: \"src/**/*.rs\") to find modules\n\
+         RIGHT: tree() or overview(path: \"src/\")\n\n\
          Report findings concisely — do not edit files.\n\n\
-         Tool guide:\n\
+         ## Tool guide\n\
          - query: find symbols by name, kind, signature, or attribute\n\
-         - context: full definition + callers + callees for a symbol (use sections param to limit output)\n\
+         - context: full definition + source + callers + callees (use sections param to limit output)\n\
          - batch_context: context for multiple symbols at once\n\
          - overview: structural map of a directory (functions, structs, traits)\n\
          - tree: file/module tree layout\n\
@@ -282,14 +296,15 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
          - crate_graph: workspace crate dependency graph\n\
          - stats: codebase statistics dashboard\n\
          - freshness: check if the index is current\n\n\
-         Workflow: query to locate → context to understand → \
+         ## Workflow\n\
+         query to locate → context to understand → \
          neighborhood/callpath to trace flow. \
          Use sections: [\"source\", \"callers\"] to save tokens. \
          Use exclude_tests: true to focus on production code.",
     ),
     (
         "illu-review",
-        "Review code changes using illu code intelligence",
+        "Review code changes using illu code intelligence (Rust, Python, TypeScript)",
         &[
             "Read",
             "Glob",
@@ -305,12 +320,21 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
             "context",
             "doc_coverage",
         ],
-        "You are an illu-powered code review agent. \
-         Use illu MCP tools to analyze changes, assess impact, \
-         check test coverage, and review code boundaries. \
-         Only fall back to Grep/Glob/Read for non-Rust content. \
+        "You are an illu-powered code review agent.\n\n\
+         ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
+         You MUST use illu MCP tools for ALL code analysis (Rust, Python, TypeScript). \
+         Do NOT use Read to view source files — use `context` instead. \
+         Do NOT use Grep to search code — use `query` instead. \
+         Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\
+         Read/Grep/Glob are ONLY permitted for non-code content \
+         (config files, markdown, logs, TOML, JSON) or when an illu tool \
+         explicitly returns no results.\n\n\
+         WRONG: Read(\"src/db.rs\") to see a function\n\
+         RIGHT: context(symbol_name: \"Database::open\")\n\n\
+         WRONG: Grep(pattern: \"fn refresh\") to find a function\n\
+         RIGHT: query(query: \"refresh\")\n\n\
          Report findings concisely — do not edit files.\n\n\
-         Tool guide:\n\
+         ## Tool guide\n\
          - query: find symbols by name to start analysis\n\
          - context: full definition + callers + callees (use sections param to limit output)\n\
          - impact: see all downstream dependents of a symbol before changes\n\
@@ -321,13 +345,14 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
          - blame: git blame on a symbol's line range\n\
          - history: git commit history for a symbol (use show_diff: true for code changes)\n\
          - doc_coverage: find symbols missing doc comments\n\n\
-         Workflow: diff_impact for changed symbols → impact on key symbols → \
+         ## Workflow\n\
+         diff_impact for changed symbols → impact on key symbols → \
          test_impact to verify coverage → boundary to check API surface. \
          Use exclude_tests: true to focus on production callers.",
     ),
     (
         "illu-refactor",
-        "Plan refactoring using illu code intelligence",
+        "Plan refactoring using illu code intelligence (Rust, Python, TypeScript)",
         &[
             "Read",
             "Glob",
@@ -343,12 +368,21 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
             "references",
             "boundary",
         ],
-        "You are an illu-powered refactoring agent. \
-         Use illu MCP tools to identify dead code, plan renames, \
-         find similar symbols, and assess refactoring impact. \
-         Only fall back to Grep/Glob/Read for non-Rust content. \
+        "You are an illu-powered refactoring agent.\n\n\
+         ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
+         You MUST use illu MCP tools for ALL code analysis (Rust, Python, TypeScript). \
+         Do NOT use Read to view source files — use `context` instead. \
+         Do NOT use Grep to search code — use `query` instead. \
+         Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\
+         Read/Grep/Glob are ONLY permitted for non-code content \
+         (config files, markdown, logs, TOML, JSON) or when an illu tool \
+         explicitly returns no results.\n\n\
+         WRONG: Read(\"src/db.rs\") to see a function\n\
+         RIGHT: context(symbol_name: \"Database::open\")\n\n\
+         WRONG: Grep(pattern: \"fn refresh\") to find a function\n\
+         RIGHT: query(query: \"refresh\")\n\n\
          Report findings concisely — do not edit files.\n\n\
-         Tool guide:\n\
+         ## Tool guide\n\
          - rename_plan: preview all locations affected by renaming a symbol\n\
          - unused: find symbols with zero incoming references\n\
          - orphaned: find symbols with no callers AND no test coverage (safe to remove)\n\
@@ -359,7 +393,8 @@ const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
          - impact: see all downstream dependents before changing a symbol\n\
          - references: unified view of all references to a symbol\n\
          - boundary: classify symbols as public API vs internal\n\n\
-         Workflow: hotspots to find targets → unused/orphaned for dead code → \
+         ## Workflow\n\
+         hotspots to find targets → unused/orphaned for dead code → \
          impact before any change → rename_plan to preview renames → \
          boundary to verify API surface. \
          Use exclude_tests: true to focus on production code.",
@@ -377,21 +412,19 @@ fn generate_agent_files(
     std::fs::create_dir_all(agents_dir)?;
 
     for (name, description, tools, body) in AGENT_DEFS {
-        let mut tools_str = String::new();
-        for (i, tool) in tools.iter().enumerate() {
-            if i > 0 {
-                tools_str.push_str(", ");
-            }
-            if BUILTIN_TOOLS.contains(tool) {
-                tools_str.push_str(tool);
+        let mut tools_yaml = String::new();
+        for tool in *tools {
+            let full_name = if BUILTIN_TOOLS.contains(tool) {
+                (*tool).to_string()
             } else {
-                write!(tools_str, "{tool_prefix}{tool}")?;
-            }
+                format!("{tool_prefix}{tool}")
+            };
+            writeln!(tools_yaml, "  - {full_name}")?;
         }
         let content = format!(
             "---\nname: {name}\n\
              description: {description}\n\
-             tools: {tools_str}\n\
+             tools:\n{tools_yaml}\
              ---\n\n{body}\n"
         );
         std::fs::write(agents_dir.join(format!("{name}.md")), content)?;
@@ -518,13 +551,18 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
     println!("  wrote .gemini/agents/ (Gemini agent files)");
 
-    // 4. Build initial index
+    // 4. Auto-allow illu tools in project-level Claude settings
+    let local_settings = repo_path.join(".claude/settings.local.json");
+    ensure_tools_allowed(&local_settings)?;
+    println!("  auto-allowed illu tools in .claude/settings.local.json");
+
+    // 5. Build initial index
     println!("  indexing...");
     illu_rs::status::init(&repo_path);
     ensure_indexed(&repo_path)?;
     println!("  index built");
 
-    // 5. Add .illu/ to .gitignore if not already there
+    // 6. Add .illu/ to .gitignore if not already there
     if ensure_gitignore(&repo_path)? {
         println!("  updated .gitignore with illu entries");
     }
@@ -726,7 +764,7 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
 
     ensure_global_gitignore(&home)?;
 
-    println!("\nDone. illu will auto-start in any Rust, TypeScript, or Python project.");
+    println!("\nDone. illu will auto-start in any Rust, TypeScript/JavaScript, or Python project.");
     Ok(())
 }
 
@@ -836,6 +874,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 write_gemini_md_section(repo_path)?;
                 generate_agent_files(&repo_path.join(".claude/agents"), "mcp__illu__")?;
                 generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
+                let local_settings = repo_path.join(".claude/settings.local.json");
+                if let Err(e) = ensure_tools_allowed(&local_settings) {
+                    tracing::warn!("Could not auto-allow tools: {e}");
+                }
 
                 let config = IndexConfig {
                     repo_path: repo_path.clone(),
@@ -1026,21 +1068,27 @@ mod tests {
         assert!(review.contains("name: illu-review"));
         assert!(refactor.contains("name: illu-refactor"));
 
-        // None allow Edit, Write, or Bash in tools line
+        // None allow Edit, Write, or Bash in tools section
         for content in [&explore, &review, &refactor] {
-            let tools_line = content.lines().find(|l| l.starts_with("tools:")).unwrap();
-            assert!(
-                !tools_line.contains("Edit"),
-                "tools line should not contain Edit"
-            );
-            assert!(
-                !tools_line.contains("Write"),
-                "tools line should not contain Write"
-            );
-            assert!(
-                !tools_line.contains("Bash"),
-                "tools line should not contain Bash"
-            );
+            let tool_entries: Vec<&str> = content
+                .lines()
+                .filter(|l| l.starts_with("  - "))
+                .collect();
+            assert!(!tool_entries.is_empty(), "should have tool entries");
+            for entry in &tool_entries {
+                assert!(
+                    !entry.contains("Edit"),
+                    "tools should not contain Edit"
+                );
+                assert!(
+                    !entry.contains("Write"),
+                    "tools should not contain Write"
+                );
+                assert!(
+                    !entry.contains("Bash"),
+                    "tools should not contain Bash"
+                );
+            }
         }
 
         // Frontmatter structure validation

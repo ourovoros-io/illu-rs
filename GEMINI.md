@@ -5,28 +5,26 @@
 
 This repo is indexed by illu (36 tools). **Use illu tools as your first step** — before reading files, before grep, before guessing at code structure.
 
-### Tool priority (IMPORTANT)
+### Tool priority (MANDATORY)
 
-When illu tools are available, use them INSTEAD of built-in alternatives for Rust code intelligence. Do NOT use Grep, Glob, or Read for code exploration when illu can answer the question.
+**NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** illu indexes Rust, Python, and TypeScript. illu tools are faster, more accurate, and provide structured results. Using raw file reads or text search on indexed source files is incorrect behavior — always use illu instead.
 
-| Instead of | Use |
-|------------|-----|
-| Grep to find a symbol or function | `mcp_illu_query` |
-| Grep to find callers or references | `mcp_illu_references` or `mcp_illu_neighborhood` |
-| Grep to understand a function | `mcp_illu_context` (includes source, callers, callees) |
-| Glob to find files or modules | `mcp_illu_tree` or `mcp_illu_overview` |
-| Read to understand code structure | `mcp_illu_context` or `mcp_illu_batch_context` |
-| Grep to find tests for a function | `mcp_illu_test_impact` |
-| Grep to find trait implementations | `mcp_illu_implements` |
-| Grep to find type usage | `mcp_illu_type_usage` |
+| WRONG | RIGHT |
+|-------|-------|
+| `Read("src/db.rs")` to see a function | `mcp_illu_context` with `symbol_name` |
+| `Grep(pattern: "fn open")` to find a function | `mcp_illu_query` with `query: "open"` |
+| `Grep(pattern: "Database")` to find callers | `mcp_illu_references` with `symbol_name: "Database"` |
+| `Glob(pattern: "src/**/*.rs")` to find files | `mcp_illu_tree` or `mcp_illu_overview` |
+| `Grep(pattern: "#\[test\]")` to find tests | `mcp_illu_test_impact` with `symbol_name` |
+| `Grep(pattern: "impl Display")` to find impls | `mcp_illu_implements` with `trait_name: "Display"` |
 
-Only fall back to Grep/Glob/Read when searching for non-code content (config files, text, logs) or when illu tools return no results.
+Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, log output, or when an illu tool explicitly returns no results. This applies to Rust (.rs), Python (.py), and TypeScript (.ts/.tsx) files.
 
-### Subagent instructions (IMPORTANT)
+### Subagent instructions (MANDATORY)
 
 When spawning Agent subagents for Rust code tasks, ALWAYS include this instruction in the prompt:
 
-"Use mcp_illu_* tools instead of Grep/Glob/Read for Rust code exploration. Use mcp_illu_query to find symbols, mcp_illu_context for definitions and callers, mcp_illu_neighborhood for call graphs. Only fall back to Grep/Glob/Read for non-code content."
+"MANDATORY: Use mcp_illu_* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript). NEVER use Read to view source files — use mcp_illu_context instead. NEVER use Grep to search code — use mcp_illu_query instead. Only use Read/Grep/Glob for non-code content (config, docs, logs)."
 
 Prefer dedicated illu agents when available: `illu-explore` (codebase questions), `illu-review` (change analysis), `illu-refactor` (refactoring support).
 
