@@ -962,6 +962,63 @@ const TOOL_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ),
         ],
     ),
+    (
+        "rust-analyzer (compiler-accurate, positions use file:line:col)",
+        &[
+            (
+                "ra_definition",
+                "Go to definition — resolves through macros, trait impls, generics.",
+            ),
+            (
+                "ra_hover",
+                "Type information and documentation at a position.",
+            ),
+            (
+                "ra_diagnostics",
+                "Compilation errors and warnings, optionally filtered by file.",
+            ),
+            (
+                "ra_call_hierarchy",
+                "Callers and/or callees at a position (direction: in/out/both).",
+            ),
+            (
+                "ra_type_hierarchy",
+                "Supertypes (traits) and subtypes for a type.",
+            ),
+            (
+                "ra_rename",
+                "Preview rename impact: affected files and reference counts.",
+            ),
+            (
+                "ra_safe_rename",
+                "Apply a rename with compilation error checking.",
+            ),
+            (
+                "ra_code_actions",
+                "Available quick fixes and refactors at a position.",
+            ),
+            (
+                "ra_expand_macro",
+                "Expand macro at a position, showing generated code.",
+            ),
+            (
+                "ra_ssr",
+                "Structural search and replace (e.g. `foo($a) ==>> bar($a)`).",
+            ),
+            (
+                "ra_context",
+                "Full compiler-accurate context: definition, hover, callers, callees, impls, tests.",
+            ),
+            (
+                "ra_syntax_tree",
+                "Show syntax tree for a file (debugging/parse structure).",
+            ),
+            (
+                "ra_related_tests",
+                "Find tests related to a symbol — more accurate than text matching.",
+            ),
+        ],
+    ),
 ];
 
 fn write_tool_listing(out: &mut String) {
@@ -1235,7 +1292,7 @@ pub fn hello() -> &'static str { "hello" }
         let skill = generate_claude_skill(&["serde", "tokio"]);
         assert!(skill.contains("serde"));
         assert!(skill.contains("tokio"));
-        assert!(skill.contains("36 available"));
+        assert!(skill.contains("49 available"));
         assert!(skill.contains("query"));
         assert!(skill.contains("context"));
         assert!(skill.contains("impact"));
@@ -1247,6 +1304,13 @@ pub fn hello() -> &'static str { "hello" }
         assert!(skill.contains("blame"));
         assert!(skill.contains("overview"));
         assert!(skill.contains("docs"));
+        assert!(skill.contains("ra_definition"));
+        assert!(skill.contains("ra_hover"));
+        assert!(skill.contains("ra_rename"));
+        assert!(skill.contains("ra_safe_rename"));
+        assert!(skill.contains("ra_context"));
+        assert!(skill.contains("ra_expand_macro"));
+        assert!(skill.contains("ra_ssr"));
     }
 
     #[test]
