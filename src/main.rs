@@ -11,7 +11,10 @@ use rmcp::transport::stdio;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "illu", about = "Code intelligence for Rust, Python, and TypeScript")]
+#[command(
+    name = "illu",
+    about = "Code intelligence for Rust, Python, and TypeScript/JavaScript"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -640,6 +643,10 @@ fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error:
 
 /// Ensure all illu MCP tools are auto-allowed in Claude settings.
 fn ensure_tools_allowed(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
     let mut config: serde_json::Value = std::fs::read_to_string(config_path)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -1070,24 +1077,13 @@ mod tests {
 
         // None allow Edit, Write, or Bash in tools section
         for content in [&explore, &review, &refactor] {
-            let tool_entries: Vec<&str> = content
-                .lines()
-                .filter(|l| l.starts_with("  - "))
-                .collect();
+            let tool_entries: Vec<&str> =
+                content.lines().filter(|l| l.starts_with("  - ")).collect();
             assert!(!tool_entries.is_empty(), "should have tool entries");
             for entry in &tool_entries {
-                assert!(
-                    !entry.contains("Edit"),
-                    "tools should not contain Edit"
-                );
-                assert!(
-                    !entry.contains("Write"),
-                    "tools should not contain Write"
-                );
-                assert!(
-                    !entry.contains("Bash"),
-                    "tools should not contain Bash"
-                );
+                assert!(!entry.contains("Edit"), "tools should not contain Edit");
+                assert!(!entry.contains("Write"), "tools should not contain Write");
+                assert!(!entry.contains("Bash"), "tools should not contain Bash");
             }
         }
 
@@ -1103,6 +1099,14 @@ mod tests {
         assert!(explore.contains("mcp__illu__query"));
         assert!(review.contains("mcp__illu__impact"));
         assert!(refactor.contains("mcp__illu__rename_plan"));
+
+        // tools: key must be a YAML array (no inline value on same line)
+        for content in [&explore, &review, &refactor] {
+            assert!(
+                content.contains("\ntools:\n"),
+                "tools must be a YAML array (no inline value)"
+            );
+        }
 
         // Test Gemini variant
         let gemini_dir = dir.path().join("gemini_agents");
@@ -1150,5 +1154,48 @@ mod tests {
         let content4 = std::fs::read_to_string(&gitignore3).unwrap();
         assert!(content4.starts_with("/target\n"));
         assert!(content4.contains(".illu/"));
+    }
+
+    #[test]
+    fn test_ensure_tools_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Creates parent dir and file if they don't exist
+        let settings = dir.path().join("subdir/.claude/settings.local.json");
+        ensure_tools_allowed(&settings).unwrap();
+        let content = std::fs::read_to_string(&settings).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let allow = val["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().any(|v| v.as_str() == Some("mcp__illu__*")));
+
+        // Idempotent: second call doesn't duplicate the entry
+        ensure_tools_allowed(&settings).unwrap();
+        let content2 = std::fs::read_to_string(&settings).unwrap();
+        let val2: serde_json::Value = serde_json::from_str(&content2).unwrap();
+        let allow2 = val2["permissions"]["allow"].as_array().unwrap();
+        assert_eq!(
+            allow2
+                .iter()
+                .filter(|v| v.as_str() == Some("mcp__illu__*"))
+                .count(),
+            1,
+            "mcp__illu__* must not be duplicated"
+        );
+
+        // Preserves existing entries
+        let settings2 = dir.path().join("settings2.json");
+        std::fs::write(
+            &settings2,
+            r#"{"permissions":{"allow":["Bash"],"deny":["rm"]}}"#,
+        )
+        .unwrap();
+        ensure_tools_allowed(&settings2).unwrap();
+        let content3 = std::fs::read_to_string(&settings2).unwrap();
+        let val3: serde_json::Value = serde_json::from_str(&content3).unwrap();
+        let allow3 = val3["permissions"]["allow"].as_array().unwrap();
+        assert!(allow3.iter().any(|v| v.as_str() == Some("Bash")));
+        assert!(allow3.iter().any(|v| v.as_str() == Some("mcp__illu__*")));
+        let deny3 = val3["permissions"]["deny"].as_array().unwrap();
+        assert!(deny3.iter().any(|v| v.as_str() == Some("rm")));
     }
 }

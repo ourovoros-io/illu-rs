@@ -43,13 +43,13 @@ Single file, owns `rusqlite::Connection`. All SQL lives here. Key tables:
 - FTS5 virtual tables (`symbols_fts`, `docs_fts`) for full-text search
 
 ### `indexer` — Indexing pipeline (`src/indexer/`)
-- `mod.rs` — Orchestrator. `index_repo` detects project type (Cargo.toml → Rust, tsconfig.json/package.json → TypeScript/JavaScript, pyproject.toml/setup.py/requirements.txt → Python) and dispatches to the appropriate indexer. Multiple languages can coexist in one repo. Shared phases: symbol ref extraction, skill file generation, metadata update.
+- `mod.rs` — Orchestrator. `index_repo` detects project type (Cargo.toml → Rust, tsconfig.json/package.json → TypeScript/JavaScript, pyproject.toml/setup.py/setup.cfg/requirements.txt → Python) and dispatches to the appropriate indexer. Multiple languages can coexist in one repo. Shared phases: symbol ref extraction, skill file generation, metadata update.
 - `workspace.rs` — Rust workspace support: `parse_workspace_toml`, `resolve_member_deps` (handles `workspace = true` inheritance), `extract_path_deps` (inter-crate deps).
 - `parser.rs` — Rust tree-sitter parsing. `parse_rust_source` extracts symbols (with `impl_type` for methods and enum variants); `extract_refs` uses import maps and crate maps for qualified path resolution. Detects `self.method()` calls for impl-type-aware ref resolution. Enum variants are indexed as `EnumVariant` symbols with `impl_type` set to the parent enum name.
 - `ts_parser.rs` — TypeScript/JavaScript tree-sitter parsing. `parse_ts_source` extracts symbols from `.ts`, `.tsx`, `.js`, `.jsx` files. `ts_imports.rs` handles import resolution.
 - `py_parser.rs` — Python tree-sitter parsing. `parse_py_source` extracts symbols from `.py` files. `py_imports.rs` handles import resolution.
 - `tauri_bridge.rs` — Cross-language bridge for Tauri projects. Creates refs between TypeScript `invoke('command')` calls and Rust `#[tauri::command]` handlers.
-- `dependencies.rs` — Parses `Cargo.toml`/`Cargo.lock` (Rust), `package.json` (TypeScript/JS), `pyproject.toml`/`requirements.txt` (Python) for dependency resolution.
+- `dependencies.rs` — Parses `Cargo.toml`/`Cargo.lock` (Rust), `package.json` (TypeScript/JS), `pyproject.toml`/`setup.cfg`/`requirements.txt` (Python) for dependency resolution.
 - `store.rs` — Writes parsed symbols/deps to DB.
 - `docs.rs` — Fetches docs (cargo doc JSON → docs.rs → GitHub README). Two-tier storage: crate summary + per-module detail.
 - `cargo_doc.rs` — Parses nightly rustdoc JSON into structured per-module docs.
