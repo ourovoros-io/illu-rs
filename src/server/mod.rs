@@ -13,6 +13,89 @@ use std::sync::{Mutex, MutexGuard};
 
 const REFRESH_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Deserialize a `Vec<String>` leniently: accepts a real JSON array, a
+/// JSON-encoded string containing an array (e.g. `"[\"a\", \"b\"]"`), or a
+/// bare string (treated as a single-element array).
+///
+/// Some MCP callers stringify array parameters when generating tool calls.
+/// Handling both forms server-side avoids surfacing those mistakes as errors.
+fn lenient_vec_string<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    parse_vec_string(value).map_err(serde::de::Error::custom)
+}
+
+/// Option variant of [`lenient_vec_string`]. Missing/null yields `None`.
+fn lenient_opt_vec_string<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    parse_vec_string(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
+}
+
+/// Maximum unwrap depth when a caller nests stringified arrays inside each
+/// other (`"\"[\\\"x\\\"]\""`). Bounds the loop below so a pathological
+/// input cannot spin indefinitely. Four is generous — real callers produce
+/// at most one level of stringification.
+const MAX_STRING_UNWRAP_DEPTH: usize = 4;
+
+/// Coerce a JSON value into `Vec<String>`, accepting the shapes MCP callers
+/// produce in practice:
+///
+/// - A real array of strings → used as-is.
+/// - A JSON-encoded string containing an array (e.g. `"[\"a\", \"b\"]"`) →
+///   re-parsed. If re-parsing fails (malformed JSON, or a value that merely
+///   starts with `[` like the symbol name `"[u8]::len"`), the raw string is
+///   kept as a single element rather than erroring.
+/// - Any other bare string → single-element vec. Ambiguous inputs such as
+///   `"foo,bar"` become a one-element lookup and surface as a downstream
+///   "symbol not found" rather than a deserialization error.
+fn parse_vec_string(mut value: serde_json::Value) -> Result<Vec<String>, String> {
+    for _ in 0..MAX_STRING_UNWRAP_DEPTH {
+        match value {
+            serde_json::Value::Array(arr) => {
+                return arr
+                    .into_iter()
+                    .map(|v| match v {
+                        serde_json::Value::String(s) => Ok(s),
+                        other => Err(format!("expected string in array, got {other}")),
+                    })
+                    .collect();
+            }
+            serde_json::Value::String(s) => {
+                let trimmed = s.trim();
+                if trimmed.starts_with('[') {
+                    match serde_json::from_str::<serde_json::Value>(trimmed) {
+                        Ok(parsed) => {
+                            value = parsed;
+                            continue;
+                        }
+                        // Not actually a stringified array — treat as a literal.
+                        Err(_) => return Ok(vec![s]),
+                    }
+                }
+                return Ok(vec![s]);
+            }
+            other => {
+                return Err(format!(
+                    "expected array or JSON-encoded array string, got {other}"
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "stringified array nesting exceeds max depth of {MAX_STRING_UNWRAP_DEPTH}"
+    ))
+}
+
 #[derive(Clone)]
 pub struct IlluServer {
     db: std::sync::Arc<Mutex<Database>>,
@@ -147,6 +230,7 @@ struct QueryParams {
 
 #[derive(Deserialize, JsonSchema)]
 struct ContextParams {
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Return full untruncated source body (default: false)
     full_body: Option<bool>,
@@ -154,6 +238,8 @@ struct ContextParams {
     file: Option<String>,
     /// Select specific sections to include: `source`, `callers`, `callees`,
     /// `tested_by`, `traits`, `related`, `docs`. Omit for all sections.
+    /// Example: `["source", "docs"]`.
+    #[serde(default, deserialize_with = "lenient_opt_vec_string")]
     sections: Option<Vec<String>>,
     /// Filter callers and callees to this path prefix (e.g. "src/" to exclude test callers)
     callers_path: Option<String>,
@@ -163,6 +249,7 @@ struct ContextParams {
 
 #[derive(Deserialize, JsonSchema)]
 struct ImpactParams {
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Max recursion depth (default: 5). Use 1 for direct callers only.
     depth: Option<i64>,
@@ -221,12 +308,15 @@ struct CallpathParams {
 
 #[derive(Deserialize, JsonSchema)]
 struct BatchContextParams {
-    /// List of symbol names to get context for
+    /// List of symbol names to get context for. Example: `["foo", "Bar::baz"]`.
+    #[serde(alias = "symbol_names", deserialize_with = "lenient_vec_string")]
     symbols: Vec<String>,
     /// Return full untruncated source bodies (default: false)
     full_body: Option<bool>,
     /// Select specific sections: `source`, `callers`, `callees`,
     /// `tested_by`, `traits`, `related`, `docs`. Omit for all.
+    /// Example: `["source", "docs"]`.
+    #[serde(default, deserialize_with = "lenient_opt_vec_string")]
     sections: Option<Vec<String>>,
 }
 
@@ -263,6 +353,7 @@ struct TypeUsageParams {
 #[derive(Deserialize, JsonSchema)]
 struct NeighborhoodParams {
     /// Symbol to explore around
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Max hops in each direction (default: 2)
     depth: Option<i64>,
@@ -309,12 +400,14 @@ struct HotspotsParams {
 #[derive(Deserialize, JsonSchema)]
 struct RenamePlanParams {
     /// Symbol name to plan a rename for (supports `Type::method` syntax)
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct SimilarParams {
     /// Symbol to find similar symbols for
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Filter to files under this path prefix
     path: Option<String>,
@@ -323,12 +416,14 @@ struct SimilarParams {
 #[derive(Deserialize, JsonSchema)]
 struct BlameParams {
     /// Symbol name to blame (supports `Type::method` syntax)
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct HistoryParams {
     /// Symbol name (supports `Type::method` syntax)
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Max commits to show (default: 10)
     max_commits: Option<i64>,
@@ -339,6 +434,7 @@ struct HistoryParams {
 #[derive(Deserialize, JsonSchema)]
 struct ReferencesParams {
     /// Symbol name to find all references for (supports `Type::method` syntax)
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Filter results to files under this path prefix
     path: Option<String>,
@@ -359,6 +455,7 @@ struct DocCoverageParams {
 #[derive(Deserialize, JsonSchema)]
 struct TestImpactParams {
     /// Symbol name to find test coverage for (supports `Type::method` syntax)
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Max call graph depth to search for tests (default: 5).
     /// Use 1 for direct test callers only, 2-3 for focused results.
@@ -388,12 +485,14 @@ struct CrateGraphParams {}
 #[derive(Deserialize, JsonSchema)]
 struct CrateImpactParams {
     /// Symbol name to analyze crate-level impact for (supports `Type::method` syntax)
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
 struct GraphExportParams {
     /// Symbol name for call graph export (provide this or `path`, not both)
+    #[serde(default, alias = "symbol", alias = "name")]
     symbol_name: Option<String>,
     /// Path prefix for file dependency graph export (provide this or `symbol_name`, not both)
     path: Option<String>,
@@ -428,6 +527,7 @@ struct CrossQueryParams {
 #[derive(Deserialize, JsonSchema)]
 struct CrossImpactParams {
     /// Symbol name (supports `Type::method` syntax)
+    #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
 }
 
@@ -1900,5 +2000,153 @@ impl ServerHandler for IlluServer {
              'ra_syntax_tree' for debugging parse structure, \
              'ra_related_tests' for compiler-accurate test discovery.",
         )
+    }
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests")]
+mod lenient_deser_tests {
+    use super::{BatchContextParams, ContextParams};
+
+    #[test]
+    fn batch_context_accepts_real_arrays() {
+        let params: BatchContextParams = serde_json::from_value(serde_json::json!({
+            "symbols": ["foo", "Bar::baz"],
+            "sections": ["source", "docs"],
+        }))
+        .unwrap();
+        assert_eq!(params.symbols, vec!["foo", "Bar::baz"]);
+        assert_eq!(
+            params.sections.unwrap(),
+            vec!["source".to_string(), "docs".to_string()]
+        );
+    }
+
+    #[test]
+    fn batch_context_accepts_stringified_arrays() {
+        // Caller double-encoded both fields as JSON strings.
+        let params: BatchContextParams = serde_json::from_value(serde_json::json!({
+            "symbols": "[\"foo\", \"Bar::baz\"]",
+            "sections": "[\"source\", \"docs\"]",
+        }))
+        .unwrap();
+        assert_eq!(params.symbols, vec!["foo", "Bar::baz"]);
+        assert_eq!(
+            params.sections.unwrap(),
+            vec!["source".to_string(), "docs".to_string()]
+        );
+    }
+
+    #[test]
+    fn batch_context_accepts_symbol_names_alias() {
+        let params: BatchContextParams = serde_json::from_value(serde_json::json!({
+            "symbol_names": ["foo", "bar"],
+        }))
+        .unwrap();
+        assert_eq!(params.symbols, vec!["foo", "bar"]);
+        assert!(params.sections.is_none());
+    }
+
+    #[test]
+    fn batch_context_accepts_bare_string_as_single_element() {
+        let params: BatchContextParams = serde_json::from_value(serde_json::json!({
+            "symbols": "foo",
+            "sections": "source",
+        }))
+        .unwrap();
+        assert_eq!(params.symbols, vec!["foo"]);
+        assert_eq!(params.sections.unwrap(), vec!["source".to_string()]);
+    }
+
+    #[test]
+    fn context_sections_accepts_stringified_array() {
+        let params: ContextParams = serde_json::from_value(serde_json::json!({
+            "symbol_name": "foo",
+            "sections": "[\"source\"]",
+        }))
+        .unwrap();
+        assert_eq!(params.sections.unwrap(), vec!["source".to_string()]);
+    }
+
+    #[test]
+    fn context_sections_null_is_none() {
+        let params: ContextParams = serde_json::from_value(serde_json::json!({
+            "symbol_name": "foo",
+            "sections": serde_json::Value::Null,
+        }))
+        .unwrap();
+        assert!(params.sections.is_none());
+    }
+
+    #[test]
+    fn batch_context_rejects_non_string_array_elements() {
+        let result = serde_json::from_value::<BatchContextParams>(serde_json::json!({
+            "symbols": [1, 2],
+        }));
+        let Err(err) = result else {
+            unreachable!("expected error for non-string array elements")
+        };
+        assert!(
+            err.to_string().contains("expected string in array"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn bare_string_starting_with_bracket_is_single_element() {
+        // A legitimate symbol name like `[u8]::len` starts with `[` but is
+        // not a stringified array. It should fall back to a single element
+        // rather than erroring.
+        let params: BatchContextParams = serde_json::from_value(serde_json::json!({
+            "symbols": "[u8]::len",
+        }))
+        .unwrap();
+        assert_eq!(params.symbols, vec!["[u8]::len"]);
+    }
+
+    #[test]
+    fn empty_stringified_array() {
+        let params: BatchContextParams = serde_json::from_value(serde_json::json!({
+            "symbols": "[]",
+        }))
+        .unwrap();
+        assert!(params.symbols.is_empty());
+    }
+
+    #[test]
+    fn stringified_array_with_surrounding_whitespace() {
+        let params: BatchContextParams = serde_json::from_value(serde_json::json!({
+            "symbols": "  [\"foo\", \"bar\"]  ",
+        }))
+        .unwrap();
+        assert_eq!(params.symbols, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn unicode_symbol_name() {
+        let params: BatchContextParams = serde_json::from_value(serde_json::json!({
+            "symbols": ["λ::μ", "Δέλτα"],
+        }))
+        .unwrap();
+        assert_eq!(params.symbols, vec!["λ::μ", "Δέλτα"]);
+    }
+
+    #[test]
+    fn context_params_accepts_symbol_alias() {
+        // Callers that guess `symbol` instead of `symbol_name` still work.
+        let params: ContextParams = serde_json::from_value(serde_json::json!({
+            "symbol": "foo",
+        }))
+        .unwrap();
+        assert_eq!(params.symbol_name, "foo");
+    }
+
+    #[test]
+    fn context_params_accepts_name_alias() {
+        let params: ContextParams = serde_json::from_value(serde_json::json!({
+            "name": "foo",
+        }))
+        .unwrap();
+        assert_eq!(params.symbol_name, "foo");
     }
 }
