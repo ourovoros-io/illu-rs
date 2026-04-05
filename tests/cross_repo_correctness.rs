@@ -3,8 +3,9 @@
 use illu_rs::db::Database;
 use illu_rs::indexer::{IndexConfig, index_repo};
 use illu_rs::registry::{Registry, RepoEntry};
-use illu_rs::server::tools::{cross_deps, cross_impact, cross_query, repos};
-use std::path::PathBuf;
+use illu_rs::server::tools::{cross_callpath, cross_deps, cross_impact, cross_query, repos};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -133,9 +134,16 @@ fn registry_dedup_by_git_common_dir() {
         "dedup should keep only one entry: {:?}",
         registry.repos
     );
+    // Latest registration wins across name, path, remote, and timestamp.
+    // This keeps the registry pointed at the checkout whose DB was just
+    // refreshed, so cross-repo tools don't open a stale sibling DB.
+    let entry = &registry.repos[0];
+    assert_eq!(entry.last_indexed, "2026-02-01T00:00:00Z");
+    assert_eq!(entry.name, "worktree-checkout");
+    assert_eq!(entry.path, PathBuf::from("/tmp/shared/worktree"));
     assert_eq!(
-        registry.repos[0].last_indexed, "2026-02-01T00:00:00Z",
-        "latest timestamp should win"
+        entry.git_remote,
+        Some("git@github.com:user/repo.git".to_string())
     );
 }
 
@@ -180,7 +188,7 @@ fn registry_other_repos_excludes_primary() {
     let (_reg_dir, registry) =
         build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
-    let others = registry.other_repos(dir_a.path());
+    let others = registry.other_repos(dir_a.path(), None);
     assert_eq!(others.len(), 1, "should exclude primary: {others:?}");
     assert_eq!(others[0].name, "repo-b");
 
@@ -794,5 +802,271 @@ fn repos_tool_marks_primary_as_active() {
     assert!(
         primary_line.contains("active"),
         "primary should be 'active': {primary_line}"
+    );
+}
+
+// ===========================================================================
+// Group 4: Worktree self-hit regression tests
+//
+// These exercise the bug where cross-repo tools returned stale "self" hits
+// from a sibling checkout of the current repo. Root cause: `other_repos`
+// filtered by `path` equality, so a registry entry pointing at a sibling
+// worktree of the current repo was treated as a different repo. The sibling
+// DB could be pinned at a different commit, leaking deleted/renamed symbols.
+//
+// Fix: `other_repos` keys exclusion on `git_common_dir` (the shared .git
+// directory), which is stable across all worktrees of a repo. These tests
+// simulate the scenario by registering a second entry whose `git_common_dir`
+// matches the primary's, but whose `path` points at a physically separate
+// stale DB. The handler must not surface anything from the stale DB.
+// ===========================================================================
+
+/// Initialize a minimal git repo in `dir` and return its `git_common_dir`
+/// (already canonicalized). Uses raw git so we exercise the same code path
+/// the production handlers use.
+fn git_init_and_common_dir(dir: &Path) -> PathBuf {
+    let status = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(dir)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git init failed in {}", dir.display());
+
+    // Configure identity so later commits (if any) don't fail.
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(dir)
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["config", "user.name", "test"])
+        .current_dir(dir)
+        .status()
+        .unwrap();
+
+    illu_rs::git::git_common_dir(dir).unwrap()
+}
+
+/// Create a "stale sibling" checkout on disk: a separate tempdir with its
+/// own indexed `.illu/index.db` containing `stale_source`. The entry shares
+/// `shared_common_dir` with the primary, so from the primary's point of
+/// view this looks like another worktree of the same repo. `other_repos`
+/// must exclude it.
+fn create_stale_sibling(
+    name: &str,
+    stale_source: &str,
+    shared_common_dir: PathBuf,
+) -> (tempfile::TempDir, RepoEntry) {
+    let (dir, _db) = create_indexed_repo(name, stale_source, "");
+    let entry = RepoEntry {
+        name: name.to_string(),
+        path: dir.path().to_path_buf(),
+        git_remote: None,
+        git_common_dir: shared_common_dir,
+        last_indexed: "2026-01-01T00:00:00Z".to_string(),
+    };
+    (dir, entry)
+}
+
+#[test]
+fn cross_query_excludes_worktree_self_hit() {
+    // Primary: a real git repo containing `live_symbol`.
+    let (primary_dir, _primary_db) = create_indexed_repo("primary", "pub fn live_symbol() {}", "");
+    let primary_common_dir = git_init_and_common_dir(primary_dir.path());
+
+    // Stale sibling: a separate on-disk checkout tagged with the SAME
+    // git_common_dir, containing a symbol that does not exist in primary.
+    // Pre-fix, `other_repos` returned this entry (different path), and
+    // cross_query happily opened its DB and surfaced `deleted_symbol`.
+    let (_stale_dir, stale_entry) = create_stale_sibling(
+        "primary-stale-sibling",
+        "pub fn deleted_symbol() {}",
+        primary_common_dir,
+    );
+
+    // A genuinely unrelated repo so we can assert cross_query still works.
+    let (unrelated_dir, _u_db) =
+        create_indexed_repo("unrelated", "pub fn unrelated_symbol() {}", "");
+
+    let reg_dir = tempfile::TempDir::new().unwrap();
+    let reg_path = reg_dir.path().join("registry.toml");
+    let mut registry = Registry::load(&reg_path).unwrap();
+    registry.register(stale_entry);
+    registry.register(RepoEntry {
+        name: "unrelated".to_string(),
+        path: unrelated_dir.path().to_path_buf(),
+        git_remote: None,
+        git_common_dir: unrelated_dir.path().join(".git"),
+        last_indexed: "2026-01-01T00:00:00Z".to_string(),
+    });
+
+    let opts = cross_query::CrossQueryOpts {
+        query: "deleted_symbol",
+        scope: None,
+        kind: None,
+        attribute: None,
+        signature: None,
+        path: None,
+        limit: None,
+    };
+    let result = cross_query::handle_cross_query(&registry, primary_dir.path(), &opts).unwrap();
+    assert!(
+        !result.contains("deleted_symbol"),
+        "stale sibling self-hit leaked into cross_query: {result}"
+    );
+    assert!(
+        !result.contains("primary-stale-sibling"),
+        "stale sibling header leaked into cross_query: {result}"
+    );
+
+    // Control: an unrelated repo with a matching symbol still surfaces.
+    let opts_unrelated = cross_query::CrossQueryOpts {
+        query: "unrelated_symbol",
+        scope: None,
+        kind: None,
+        attribute: None,
+        signature: None,
+        path: None,
+        limit: None,
+    };
+    let result =
+        cross_query::handle_cross_query(&registry, primary_dir.path(), &opts_unrelated).unwrap();
+    assert!(
+        result.contains("unrelated_symbol"),
+        "unrelated repo should still be searched: {result}"
+    );
+}
+
+#[test]
+fn cross_impact_excludes_worktree_self_hit() {
+    // Primary defines the type `TargetType`. A stale sibling checkout
+    // (same common_dir) uses that type in a function signature, which
+    // the indexer records as a high-confidence symbol_ref. cross_impact
+    // must not surface the sibling's reference as a cross-repo hit
+    // because it's the same logical repo.
+    let (primary_dir, _primary_db) = create_indexed_repo("primary", "pub struct TargetType;", "");
+    let primary_common_dir = git_init_and_common_dir(primary_dir.path());
+
+    let (_stale_dir, stale_entry) = create_stale_sibling(
+        "primary-stale-sibling",
+        "pub struct TargetType;\npub fn user(_t: &TargetType) {}",
+        primary_common_dir,
+    );
+
+    // Control: a genuinely unrelated repo that also uses `TargetType`
+    // in a signature. cross_impact should surface this one.
+    let (unrelated_dir, _u_db) = create_indexed_repo(
+        "unrelated",
+        "pub struct TargetType;\npub fn other(_t: &TargetType) {}",
+        "",
+    );
+
+    let reg_dir = tempfile::TempDir::new().unwrap();
+    let reg_path = reg_dir.path().join("registry.toml");
+    let mut registry = Registry::load(&reg_path).unwrap();
+    registry.register(stale_entry);
+    registry.register(RepoEntry {
+        name: "unrelated".to_string(),
+        path: unrelated_dir.path().to_path_buf(),
+        git_remote: None,
+        git_common_dir: unrelated_dir.path().join(".git"),
+        last_indexed: "2026-01-01T00:00:00Z".to_string(),
+    });
+
+    let result =
+        cross_impact::handle_cross_impact(&registry, primary_dir.path(), "TargetType").unwrap();
+    assert!(
+        !result.contains("primary-stale-sibling"),
+        "stale sibling leaked into cross_impact: {result}"
+    );
+    // Sanity: the unrelated repo is still searched and surfaces.
+    assert!(
+        result.contains("unrelated"),
+        "unrelated repo should still be searched: {result}"
+    );
+}
+
+#[test]
+fn cross_callpath_excludes_worktree_self_hit() {
+    // Primary has `entry` calling `bridge`. Stale sibling has `bridge`
+    // and a target `downstream`. cross_callpath must not report a call
+    // chain via the sibling (it's the same repo, not a cross-repo bridge).
+    let (primary_dir, primary_db) = create_indexed_repo(
+        "primary",
+        "pub fn entry() { bridge(); }\npub fn bridge() {}",
+        "",
+    );
+    let primary_common_dir = git_init_and_common_dir(primary_dir.path());
+
+    // Re-index after git init so the DB reflects the current state.
+    let config = IndexConfig {
+        repo_path: primary_dir.path().to_path_buf(),
+    };
+    index_repo(&primary_db, &config).unwrap();
+
+    let (_stale_dir, stale_entry) = create_stale_sibling(
+        "primary-stale-sibling",
+        "pub fn bridge() {}\npub fn downstream() {}",
+        primary_common_dir,
+    );
+
+    let reg_dir = tempfile::TempDir::new().unwrap();
+    let reg_path = reg_dir.path().join("registry.toml");
+    let mut registry = Registry::load(&reg_path).unwrap();
+    registry.register(stale_entry);
+
+    let result = cross_callpath::handle_cross_callpath(
+        &primary_db,
+        &registry,
+        primary_dir.path(),
+        "entry",
+        "downstream",
+        None,
+    )
+    .unwrap();
+    assert!(
+        !result.contains("primary-stale-sibling"),
+        "stale sibling leaked into cross_callpath: {result}"
+    );
+}
+
+#[test]
+fn repos_marks_worktree_entry_as_active_via_common_dir() {
+    // Registry stores a sibling checkout's path for this repo (imagine
+    // the sibling registered first and the current invocation is from a
+    // different worktree — the entry's stored path is the sibling, not
+    // us). The active marker must still land on this entry because the
+    // git_common_dir matches the current invocation.
+    let (primary_dir, _primary_db) = create_indexed_repo("repo", "pub fn anything() {}", "");
+    let primary_common_dir = git_init_and_common_dir(primary_dir.path());
+
+    // Sibling checkout: a physically separate directory that actually
+    // exists on disk (so `handle_repos` path-existence checks pass) and
+    // has its own .illu/index.db.
+    let (sibling_dir, _sibling_db) =
+        create_indexed_repo("repo-sibling", "pub fn something() {}", "");
+
+    let reg_dir = tempfile::TempDir::new().unwrap();
+    let reg_path = reg_dir.path().join("registry.toml");
+    let mut registry = Registry::load(&reg_path).unwrap();
+    registry.register(RepoEntry {
+        name: "repo-sibling".to_string(),
+        path: sibling_dir.path().to_path_buf(),
+        git_remote: None,
+        git_common_dir: primary_common_dir,
+        last_indexed: "2026-01-01T00:00:00Z".to_string(),
+    });
+
+    let result = repos::handle_repos(&registry, primary_dir.path()).unwrap();
+    let Some(sibling_line) = result.lines().find(|l| l.contains("repo-sibling")) else {
+        unreachable!("no sibling row in: {result}");
+    };
+    assert!(
+        sibling_line.contains("active"),
+        "shared-common_dir entry should be active: {sibling_line}"
+    );
+    assert!(
+        sibling_line.contains(" *"),
+        "shared-common_dir entry should carry active marker: {sibling_line}"
     );
 }

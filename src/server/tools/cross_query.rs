@@ -1,4 +1,5 @@
 use crate::db::Database;
+use crate::git::git_common_dir;
 use crate::registry::Registry;
 use crate::server::tools::query::handle_query;
 use std::fmt::Write;
@@ -19,7 +20,8 @@ pub fn handle_cross_query(
     primary_path: &Path,
     opts: &CrossQueryOpts<'_>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let other_repos = registry.other_repos(primary_path);
+    let primary_common_dir = git_common_dir(primary_path).ok();
+    let other_repos = registry.other_repos(primary_path, primary_common_dir.as_deref());
     if other_repos.is_empty() {
         return Ok("No other repos registered. \
              Start illu in other repos to enable cross-repo queries."

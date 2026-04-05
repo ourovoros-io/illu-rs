@@ -43,17 +43,22 @@ impl Registry {
         }
     }
 
-    /// Add or update a repo entry. Deduplicates by
-    /// `git_common_dir`. When updating an existing entry, keeps the
-    /// original path (main repo) but updates timestamp and remote.
+    /// Add or update a repo entry. Deduplicates by `git_common_dir`
+    /// so multiple worktrees of the same repo share a single entry.
+    /// When updating an existing entry, the current invocation's
+    /// `path`, `name`, `git_remote`, and timestamp take over — the
+    /// registry always reflects the most recently active checkout,
+    /// which is where the live `.illu/index.db` lives.
     pub fn register(&mut self, entry: RepoEntry) {
         if let Some(existing) = self
             .repos
             .iter_mut()
             .find(|r| r.git_common_dir == entry.git_common_dir)
         {
-            existing.last_indexed = entry.last_indexed;
+            existing.name = entry.name;
+            existing.path = entry.path;
             existing.git_remote = entry.git_remote;
+            existing.last_indexed = entry.last_indexed;
         } else {
             self.repos.push(entry);
         }
@@ -80,12 +85,28 @@ impl Registry {
         Ok(())
     }
 
-    /// Return all repos except the one matching `primary_path`.
+    /// Return all repos except the one identifying as primary.
+    ///
+    /// Exclusion is keyed on `git_common_dir` when available so that
+    /// worktrees of the current repo are recognized as "self" even
+    /// when the registry holds a sibling checkout's path. Filtering
+    /// on `path` alone would leak the current repo's other checkouts
+    /// into cross-repo results, and their DBs may be pinned at a
+    /// different commit (stale self-hits). Falls back to `path`
+    /// equality when `primary_common_dir` is `None` (e.g. invocation
+    /// outside a git repo or `git rev-parse` unavailable).
     #[must_use]
-    pub fn other_repos(&self, primary_path: &Path) -> Vec<&RepoEntry> {
+    pub fn other_repos(
+        &self,
+        primary_path: &Path,
+        primary_common_dir: Option<&Path>,
+    ) -> Vec<&RepoEntry> {
         self.repos
             .iter()
-            .filter(|r| r.path != primary_path)
+            .filter(|r| match primary_common_dir {
+                Some(cd) => r.git_common_dir.as_path() != cd,
+                None => r.path != primary_path,
+            })
             .collect()
     }
 
@@ -185,19 +206,18 @@ mod tests {
 
         let mut reg = Registry::load(&reg_path).unwrap();
 
-        let main_entry = make_entry(
-            "repo",
-            main_path.clone(),
-            common.clone(),
-            "2026-01-01T00:00:00Z",
-        );
+        let main_entry = make_entry("repo", main_path, common.clone(), "2026-01-01T00:00:00Z");
         reg.register(main_entry);
 
-        let wt_entry = make_entry("repo-wt", wt_path, common, "2026-02-01T00:00:00Z");
+        let wt_entry = make_entry("repo-wt", wt_path.clone(), common, "2026-02-01T00:00:00Z");
         reg.register(wt_entry);
 
+        // Latest invocation wins: path, name, and timestamp all
+        // reflect the worktree that just registered. This keeps the
+        // registry aligned with where the live DB actually is.
         assert_eq!(reg.repos.len(), 1);
-        assert_eq!(reg.repos[0].path, main_path);
+        assert_eq!(reg.repos[0].path, wt_path);
+        assert_eq!(reg.repos[0].name, "repo-wt");
         assert_eq!(reg.repos[0].last_indexed, "2026-02-01T00:00:00Z");
     }
 
@@ -231,7 +251,36 @@ mod tests {
     }
 
     #[test]
-    fn other_repos_excludes_primary() {
+    fn other_repos_excludes_primary_by_common_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg_path = dir.path().join("registry.toml");
+        let path_a = dir.path().join("repo-a");
+        let path_b = dir.path().join("repo-b");
+        let common_a = dir.path().join(".git-a");
+        let common_b = dir.path().join(".git-b");
+
+        let mut reg = Registry::load(&reg_path).unwrap();
+
+        reg.register(make_entry(
+            "repo-a",
+            path_a.clone(),
+            common_a.clone(),
+            "2026-01-01T00:00:00Z",
+        ));
+        reg.register(make_entry(
+            "repo-b",
+            path_b,
+            common_b,
+            "2026-01-01T00:00:00Z",
+        ));
+
+        let others = reg.other_repos(&path_a, Some(&common_a));
+        assert_eq!(others.len(), 1);
+        assert_eq!(others[0].name, "repo-b");
+    }
+
+    #[test]
+    fn other_repos_falls_back_to_path_without_common_dir() {
         let dir = tempfile::tempdir().unwrap();
         let reg_path = dir.path().join("registry.toml");
         let path_a = dir.path().join("repo-a");
@@ -239,23 +288,83 @@ mod tests {
 
         let mut reg = Registry::load(&reg_path).unwrap();
 
-        let entry_a = make_entry(
+        reg.register(make_entry(
             "repo-a",
             path_a.clone(),
             dir.path().join(".git-a"),
             "2026-01-01T00:00:00Z",
-        );
-        let entry_b = make_entry(
+        ));
+        reg.register(make_entry(
             "repo-b",
             path_b,
             dir.path().join(".git-b"),
             "2026-01-01T00:00:00Z",
-        );
-        reg.register(entry_a);
-        reg.register(entry_b);
+        ));
 
-        let others = reg.other_repos(&path_a);
+        let others = reg.other_repos(&path_a, None);
         assert_eq!(others.len(), 1);
         assert_eq!(others[0].name, "repo-b");
+    }
+
+    /// Regression test for `cross_query` returning stale self-hits.
+    ///
+    /// Scenario: the same logical repo is registered once (dedup
+    /// collapses main + worktree into a single entry by `common_dir`).
+    /// `other_repos` must exclude it regardless of which checkout's
+    /// path is currently stored and regardless of which checkout's
+    /// path the caller is invoking from. Keying on `git_common_dir`
+    /// makes both directions work.
+    #[test]
+    fn other_repos_excludes_self_across_worktrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg_path = dir.path().join("registry.toml");
+        let common = dir.path().join(".git");
+        let main_path = dir.path().join("main");
+        let wt_path = dir.path().join("worktree");
+        let sibling_common = dir.path().join(".git-sibling");
+
+        let mut reg = Registry::load(&reg_path).unwrap();
+
+        // Main checkout registers first, then a worktree of the same
+        // repo registers. Dedup keeps one entry (path flips to the
+        // worktree as the most recent). A completely unrelated repo
+        // also sits in the registry.
+        reg.register(make_entry(
+            "repo",
+            main_path,
+            common.clone(),
+            "2026-01-01T00:00:00Z",
+        ));
+        reg.register(make_entry(
+            "repo-wt",
+            wt_path,
+            common.clone(),
+            "2026-02-01T00:00:00Z",
+        ));
+        reg.register(make_entry(
+            "sibling",
+            dir.path().join("sibling"),
+            sibling_common,
+            "2026-01-01T00:00:00Z",
+        ));
+
+        assert_eq!(reg.repos.len(), 2);
+
+        // Called from either checkout — both resolve to the same
+        // common_dir via `git rev-parse --git-common-dir` — the self
+        // repo is excluded and only the unrelated sibling remains.
+        // The stored entry's `path` may be either checkout depending
+        // on which registered most recently; common_dir is the
+        // identity that matters.
+        let main_invocation = dir.path().join("main");
+        let wt_invocation = dir.path().join("worktree");
+
+        let from_main = reg.other_repos(&main_invocation, Some(&common));
+        assert_eq!(from_main.len(), 1);
+        assert_eq!(from_main[0].name, "sibling");
+
+        let from_wt = reg.other_repos(&wt_invocation, Some(&common));
+        assert_eq!(from_wt.len(), 1);
+        assert_eq!(from_wt[0].name, "sibling");
     }
 }

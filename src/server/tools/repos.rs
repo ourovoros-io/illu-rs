@@ -1,4 +1,5 @@
 use crate::db::Database;
+use crate::git::git_common_dir;
 use crate::registry::Registry;
 use std::fmt::Write;
 use std::path::Path;
@@ -11,12 +12,20 @@ pub fn handle_repos(
         return Ok("No repos registered. Start illu in a repo to auto-register it.".into());
     }
 
+    // Identify the primary by `git_common_dir` so the active marker
+    // stays correct across worktrees of the same repo. Fall back to
+    // path comparison if git lookup fails (e.g. non-git invocation).
+    let primary_common_dir = git_common_dir(primary_path).ok();
+
     let mut out = String::from("## Registered Repos\n\n");
     out.push_str("| Repo | Path | Status | Symbols |\n");
     out.push_str("|------|------|--------|---------|\n");
 
     for repo in &registry.repos {
-        let is_primary = repo.path == primary_path;
+        let is_primary = primary_common_dir.as_ref().map_or_else(
+            || repo.path == primary_path,
+            |cd| &repo.git_common_dir == cd,
+        );
         let db_path = repo.path.join(".illu/index.db");
 
         let (status, symbols) = if !repo.path.exists() {
