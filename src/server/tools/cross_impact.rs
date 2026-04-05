@@ -8,7 +8,7 @@ pub fn handle_cross_impact(
     primary_path: &Path,
     symbol_name: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let other_repos = registry.other_repos(primary_path);
+    let other_repos = registry.other_repos_for(primary_path);
     if other_repos.is_empty() {
         return Ok("No other repos registered.".into());
     }

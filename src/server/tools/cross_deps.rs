@@ -1,9 +1,17 @@
-use crate::registry::Registry;
+use crate::registry::{Registry, RepoEntry};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::path::PathBuf;
 
 pub fn handle_cross_deps(registry: &Registry) -> Result<String, Box<dyn std::error::Error>> {
-    if registry.repos.len() < 2 {
+    // Defensively collapse worktree duplicates by `git_common_dir`.
+    // `Registry::register` already dedupes on insert, but legacy
+    // `registry.toml` files written before that fix may carry multiple
+    // entries for the same logical repo. Without this, cross-dep
+    // rendering would double-count the current repo's deps across
+    // every worktree that ever registered.
+    let repos = dedupe_by_common_dir(&registry.repos);
+    if repos.len() < 2 {
         return Ok("Need at least 2 registered repos for cross-dep analysis.".into());
     }
 
@@ -11,13 +19,13 @@ pub fn handle_cross_deps(registry: &Registry) -> Result<String, Box<dyn std::err
     let mut repo_deps: HashMap<String, HashSet<String>> = HashMap::new();
     let mut path_deps: Vec<(String, String, String)> = Vec::new();
 
-    for repo in &registry.repos {
+    for repo in &repos {
         let (deps, paths) = collect_repo_deps(repo);
         repo_deps.insert(repo.name.clone(), deps);
         path_deps.extend(paths);
     }
 
-    render_path_deps(&mut out, registry, &path_deps);
+    render_path_deps(&mut out, &repos, &path_deps);
     render_shared_deps(&mut out, &repo_deps);
 
     // If nothing was rendered after the header, add a message
@@ -26,6 +34,20 @@ pub fn handle_cross_deps(registry: &Registry) -> Result<String, Box<dyn std::err
     }
 
     Ok(out)
+}
+
+/// Keep one entry per `git_common_dir`, preserving registry order so
+/// the first entry for each logical repo wins. Entries without a
+/// shared `git_common_dir` (the normal case post-fix) stay distinct.
+fn dedupe_by_common_dir(repos: &[RepoEntry]) -> Vec<&RepoEntry> {
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut out = Vec::with_capacity(repos.len());
+    for repo in repos {
+        if seen.insert(repo.git_common_dir.clone()) {
+            out.push(repo);
+        }
+    }
+    out
 }
 
 fn collect_repo_deps(
@@ -84,9 +106,12 @@ fn collect_repo_deps(
     (deps, path_deps)
 }
 
-fn render_path_deps(out: &mut String, registry: &Registry, path_deps: &[(String, String, String)]) {
-    let registered_paths: HashSet<String> = registry
-        .repos
+fn render_path_deps(
+    out: &mut String,
+    repos: &[&RepoEntry],
+    path_deps: &[(String, String, String)],
+) {
+    let registered_paths: HashSet<String> = repos
         .iter()
         .filter_map(|r| r.path.canonicalize().ok())
         .map(|p| p.to_string_lossy().into_owned())
@@ -103,8 +128,7 @@ fn render_path_deps(out: &mut String, registry: &Registry, path_deps: &[(String,
 
     out.push_str("### Path Dependencies (direct source links)\n\n");
     for (from, name, to) in &cross {
-        let to_name = registry
-            .repos
+        let to_name = repos
             .iter()
             .find(|r| {
                 r.path
