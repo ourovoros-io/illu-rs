@@ -110,6 +110,30 @@ impl Registry {
             .collect()
     }
 
+    /// Convenience wrapper around [`Self::other_repos`] that resolves
+    /// `primary_common_dir` via `git rev-parse --git-common-dir` and
+    /// logs a `debug` trace on failure (e.g. non-git directory) before
+    /// falling back to path-based exclusion.
+    ///
+    /// Prefer this in production call sites. The lower-level
+    /// `other_repos` is retained for unit tests that need explicit
+    /// control over the `common_dir` argument.
+    #[must_use]
+    pub fn other_repos_for(&self, primary_path: &Path) -> Vec<&RepoEntry> {
+        let primary_common_dir = match crate::git::git_common_dir(primary_path) {
+            Ok(cd) => Some(cd),
+            Err(e) => {
+                tracing::debug!(
+                    primary_path = %primary_path.display(),
+                    error = %e,
+                    "git_common_dir failed; falling back to path-based self-exclusion"
+                );
+                None
+            }
+        };
+        self.other_repos(primary_path, primary_common_dir.as_deref())
+    }
+
     /// Create an empty registry with no file path (fallback).
     #[must_use]
     pub fn empty() -> Self {

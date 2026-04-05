@@ -15,7 +15,17 @@ pub fn handle_repos(
     // Identify the primary by `git_common_dir` so the active marker
     // stays correct across worktrees of the same repo. Fall back to
     // path comparison if git lookup fails (e.g. non-git invocation).
-    let primary_common_dir = git_common_dir(primary_path).ok();
+    let primary_common_dir = match git_common_dir(primary_path) {
+        Ok(cd) => Some(cd),
+        Err(e) => {
+            tracing::debug!(
+                primary_path = %primary_path.display(),
+                error = %e,
+                "git_common_dir failed; falling back to path-based primary detection"
+            );
+            None
+        }
+    };
 
     let mut out = String::from("## Registered Repos\n\n");
     out.push_str("| Repo | Path | Status | Symbols |\n");

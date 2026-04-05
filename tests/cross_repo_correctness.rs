@@ -1070,3 +1070,80 @@ fn repos_marks_worktree_entry_as_active_via_common_dir() {
         "shared-common_dir entry should carry active marker: {sibling_line}"
     );
 }
+
+/// Defensive: even if a legacy `registry.toml` contains duplicate
+/// entries for the same logical repo (pre-fix state, or two worktrees
+/// racing to register), `cross_deps` must collapse them by
+/// `git_common_dir` so the same repo's deps aren't counted twice.
+#[test]
+fn cross_deps_dedupes_worktree_duplicates() {
+    let (main_dir, _m_db) = create_indexed_repo(
+        "repo-main",
+        "pub fn anything() {}",
+        "\n[dependencies]\nserde = \"1.0\"\ntokio = \"1.0\"\n",
+    );
+    let (wt_dir, _wt_db) = create_indexed_repo(
+        "repo-worktree",
+        "pub fn anything() {}",
+        "\n[dependencies]\nserde = \"1.0\"\ntokio = \"1.0\"\n",
+    );
+    let (other_dir, _o_db) = create_indexed_repo(
+        "unrelated",
+        "pub fn another() {}",
+        "\n[dependencies]\nserde = \"1.0\"\n",
+    );
+
+    // Force two registry entries for the same logical repo by
+    // bypassing `register` (which would dedupe on insert). This
+    // simulates a legacy `registry.toml` written before the dedup fix.
+    let shared_common = main_dir.path().join(".git");
+    let reg_dir = tempfile::TempDir::new().unwrap();
+    let reg_path = reg_dir.path().join("registry.toml");
+    let mut registry = Registry::load(&reg_path).unwrap();
+    registry.repos.push(RepoEntry {
+        name: "repo-main".to_string(),
+        path: main_dir.path().to_path_buf(),
+        git_remote: None,
+        git_common_dir: shared_common.clone(),
+        last_indexed: "2026-01-01T00:00:00Z".to_string(),
+    });
+    registry.repos.push(RepoEntry {
+        name: "repo-worktree".to_string(),
+        path: wt_dir.path().to_path_buf(),
+        git_remote: None,
+        git_common_dir: shared_common,
+        last_indexed: "2026-02-01T00:00:00Z".to_string(),
+    });
+    registry.repos.push(RepoEntry {
+        name: "unrelated".to_string(),
+        path: other_dir.path().to_path_buf(),
+        git_remote: None,
+        git_common_dir: other_dir.path().join(".git"),
+        last_indexed: "2026-01-01T00:00:00Z".to_string(),
+    });
+
+    let result = cross_deps::handle_cross_deps(&registry).unwrap();
+
+    // `serde` is declared by all three registered entries (main +
+    // worktree + unrelated). After dedup by `git_common_dir`, the two
+    // worktree entries collapse into one, so the "Used By" row for
+    // `serde` must list exactly two repos — the first-registered
+    // worktree entry and the unrelated repo. Pre-fix, both worktree
+    // names would appear, inflating the count to three.
+    let serde_line = result
+        .lines()
+        .find(|l| l.trim_start().starts_with("| serde"))
+        .unwrap_or_else(|| unreachable!("no serde row in cross_deps output: {result}"));
+    assert!(
+        serde_line.contains("repo-main"),
+        "first-registered entry should win: {serde_line}"
+    );
+    assert!(
+        !serde_line.contains("repo-worktree"),
+        "worktree duplicate should be collapsed: {serde_line}"
+    );
+    assert!(
+        serde_line.contains("unrelated"),
+        "unrelated repo should still appear: {serde_line}"
+    );
+}

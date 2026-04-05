@@ -1,5 +1,4 @@
 use crate::db::Database;
-use crate::git::git_common_dir;
 use crate::registry::Registry;
 use std::fmt::Write;
 use std::path::Path;
@@ -12,8 +11,7 @@ pub fn handle_cross_callpath(
     to: &str,
     target_repo: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let primary_common_dir = git_common_dir(primary_path).ok();
-    let other_repos = registry.other_repos(primary_path, primary_common_dir.as_deref());
+    let other_repos = registry.other_repos_for(primary_path);
     if other_repos.is_empty() {
         return Ok("No other repos registered.".into());
     }
