@@ -104,20 +104,16 @@ fn write_mcp_config_to(
     Ok(())
 }
 
-fn write_mcp_server_config(
-    repo_path: &Path,
-    config_path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let repo = repo_path.canonicalize()?.to_string_lossy().into_owned();
-    write_mcp_config_to(config_path, &["--repo", &repo, "serve"])
+fn write_mcp_server_config(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    write_mcp_config_to(config_path, &["serve"])
 }
 
 fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    write_mcp_server_config(repo_path, &repo_path.join(".mcp.json"))
+    write_mcp_server_config(&repo_path.join(".mcp.json"))
 }
 
 fn write_gemini_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    write_mcp_server_config(repo_path, &repo_path.join(".gemini/settings.json"))
+    write_mcp_server_config(&repo_path.join(".gemini/settings.json"))
 }
 
 const ILLU_SECTION_START: &str = "<!-- illu:start -->";
@@ -775,14 +771,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let cli = Cli::parse();
-    let repo_path = if cli.repo == Path::new(".") {
-        let cwd = std::env::current_dir()?;
+    let detect_from_cwd = || -> PathBuf {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         match illu_rs::git::detect_repo_root(&cwd) {
             Ok(git_root) => illu_rs::git::detect_cargo_root(&cwd, &git_root),
             Err(_) => cwd,
         }
-    } else {
+    };
+    let repo_path = if cli.repo == Path::new(".") {
+        detect_from_cwd()
+    } else if cli.repo.exists() {
         cli.repo.clone()
+    } else {
+        tracing::warn!(
+            path = %cli.repo.display(),
+            "Specified --repo path does not exist, detecting from CWD"
+        );
+        detect_from_cwd()
     };
     let repo_path = &repo_path;
 
