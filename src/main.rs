@@ -104,9 +104,7 @@ fn write_mcp_config_to(
     Ok(())
 }
 
-fn write_mcp_server_config(
-    config_path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn write_mcp_server_config(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     write_mcp_config_to(config_path, &["serve"])
 }
 
