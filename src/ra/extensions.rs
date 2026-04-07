@@ -73,7 +73,7 @@ impl lsp_types::request::Request for Ssr {
 impl RaClient {
     pub async fn ssr(&self, query: &str) -> Result<lsp_types::WorkspaceEdit> {
         let server = self.server().clone();
-        
+
         // Find a valid file in the workspace to serve as the context position
         let fallback_uri = lsp_types::Url::from_file_path(self.root_path().join("Cargo.toml"))
             .map_err(|()| RaError::RequestFailed("Invalid workspace root path".to_string()))?;

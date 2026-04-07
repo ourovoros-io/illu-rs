@@ -59,9 +59,7 @@ impl RaClient {
         match preflight {
             Ok(child) => {
                 let output = child.output().await.map_err(|e| {
-                    RaError::InitializationFailed(format!(
-                        "rust-analyzer --version failed: {e}"
-                    ))
+                    RaError::InitializationFailed(format!("rust-analyzer --version failed: {e}"))
                 })?;
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);

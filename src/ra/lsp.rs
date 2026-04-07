@@ -414,7 +414,10 @@ impl RaClient {
         let response = with_retry(|| {
             let s = server.clone();
             let p = params.clone();
-            async move { s.request::<lsp_types::request::TypeHierarchyPrepare>(p).await }
+            async move {
+                s.request::<lsp_types::request::TypeHierarchyPrepare>(p)
+                    .await
+            }
         })
         .await?;
 
@@ -433,7 +436,10 @@ impl RaClient {
         let response = with_retry(|| {
             let s = server.clone();
             let p = params.clone();
-            async move { s.request::<lsp_types::request::TypeHierarchySupertypes>(p).await }
+            async move {
+                s.request::<lsp_types::request::TypeHierarchySupertypes>(p)
+                    .await
+            }
         })
         .await?;
 
@@ -454,7 +460,10 @@ impl RaClient {
         let response = with_retry(|| {
             let s = server.clone();
             let p = params.clone();
-            async move { s.request::<lsp_types::request::TypeHierarchySubtypes>(p).await }
+            async move {
+                s.request::<lsp_types::request::TypeHierarchySubtypes>(p)
+                    .await
+            }
         })
         .await?;
 
