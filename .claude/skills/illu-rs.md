@@ -2,7 +2,7 @@
 
 This project is indexed by illu-rs. Use the following MCP tools to explore the codebase and its dependencies.
 
-## Tools (36 available)
+## Tools (49 available)
 
 ### Search & Navigate
 
@@ -57,6 +57,22 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 - **cross_impact** — Find references to a symbol in other repos.
 - **cross_deps** — Inter-repo dependency relationships via Cargo.toml.
 - **cross_callpath** — Find call chains spanning repo boundaries.
+
+### rust-analyzer (compiler-accurate, positions use file:line:col)
+
+- **ra_definition** — Go to definition — resolves through macros, trait impls, generics.
+- **ra_hover** — Type information and documentation at a position.
+- **ra_diagnostics** — Compilation errors and warnings, optionally filtered by file.
+- **ra_call_hierarchy** — Callers and/or callees at a position (direction: in/out/both).
+- **ra_type_hierarchy** — Supertypes (traits) and subtypes for a type.
+- **ra_rename** — Preview rename impact: affected files and reference counts.
+- **ra_safe_rename** — Apply a rename with compilation error checking.
+- **ra_code_actions** — Available quick fixes and refactors at a position.
+- **ra_expand_macro** — Expand macro at a position, showing generated code.
+- **ra_ssr** — Structural search and replace (e.g. `foo($a) ==>> bar($a)`).
+- **ra_context** — Full compiler-accurate context: definition, hover, callers, callees, impls, tests.
+- **ra_syntax_tree** — Show syntax tree for a file (debugging/parse structure).
+- **ra_related_tests** — Find tests related to a symbol — more accurate than text matching.
 
 ## Direct Dependencies
 

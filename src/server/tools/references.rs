@@ -119,7 +119,7 @@ fn render_type_usage(
         let _ = writeln!(
             output,
             "- **{qname}** — `{}`",
-            super::truncate_snippet(sig, 120)
+            super::truncate_snippet(sig, 400)
         );
     }
     if entries.is_empty() {

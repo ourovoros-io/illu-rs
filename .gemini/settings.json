@@ -2,11 +2,9 @@
   "mcpServers": {
     "illu": {
       "args": [
-        "--repo",
-        "/Users/georgiosdelkos/Documents/GitHub/illu-rs",
         "serve"
       ],
-      "command": "/Users/georgiosdelkos/Documents/GitHub/illu-rs/target/release/illu-rs",
+      "command": "/Users/georgiosdelkos/.cargo/bin/illu-rs",
       "env": {
         "RUST_LOG": "warn"
       }
