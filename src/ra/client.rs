@@ -46,6 +46,39 @@ impl RaClient {
 
         info!("starting rust-analyzer for {}", root_path.display());
 
+        // Pre-flight: verify rust-analyzer is actually functional.
+        // Rustup installs a proxy binary that exists in PATH even when the
+        // rust-analyzer component is missing, so `spawn()` alone succeeds but
+        // the process exits immediately, causing opaque LSP handshake failures.
+        let preflight = async_process::Command::new("rust-analyzer")
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        match preflight {
+            Ok(child) => {
+                let output = child.output().await.map_err(|e| {
+                    RaError::InitializationFailed(format!(
+                        "rust-analyzer --version failed: {e}"
+                    ))
+                })?;
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(RaError::InitializationFailed(format!(
+                        "rust-analyzer is not functional (exit {}): {}",
+                        output.status,
+                        stderr.trim()
+                    )));
+                }
+            }
+            Err(e) => {
+                return Err(RaError::InitializationFailed(format!(
+                    "failed to run rust-analyzer: {e}. Is it installed and in PATH?"
+                )));
+            }
+        }
+
         let server_state = ServerState::new();
         let documents = DocumentTracker::new();
         let router = build_router(server_state.clone());

@@ -46,4 +46,35 @@ Rust 2024 edition with strict clippy (see `Cargo.toml [lints.clippy]`):
 - Tests opt out via `#[expect(clippy::unwrap_used, reason = "tests")]` on the test module
 
 <!-- illu:start -->
+## Code Intelligence (illu)
+
+### Tool priority (MANDATORY)
+
+**NEVER use Grep, Glob, or Read for code exploration when illu tools are available.** illu indexes Rust, Python, TypeScript, and JavaScript. illu tools are faster, more accurate, and provide structured results. Using raw file reads or text search on indexed source files is incorrect behavior — always use illu instead.
+
+| WRONG | RIGHT |
+|-------|-------|
+| `Read("src/db.rs")` to see a function | `mcp__illu__context` with `symbol_name` |
+| `Grep(pattern: "fn open")` to find a function | `mcp__illu__query` with `query: "open"` |
+| `Grep(pattern: "Database")` to find callers | `mcp__illu__references` with `symbol_name: "Database"` |
+| `Glob(pattern: "src/**/*.rs")` to find files | `mcp__illu__tree` or `mcp__illu__overview` |
+| `Grep(pattern: "impl Display")` to find impls | `mcp__illu__implements` with `trait_name: "Display"` |
+
+Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, log output, or when an illu tool explicitly returns no results.
+
+### Subagent instructions (MANDATORY)
+
+When spawning subagents for code tasks, ALWAYS include this instruction in the prompt:
+
+"MANDATORY: Use mcp__illu__* tools instead of Grep/Glob/Read for ALL code exploration (Rust, Python, TypeScript/JavaScript). NEVER use Read to view source files — use mcp__illu__context instead. NEVER use Grep to search code — use mcp__illu__query instead. Only use Read/Grep/Glob for non-code content (config, docs, logs)."
+
+Prefer `illu-explore`, `illu-review`, `illu-refactor` agents when available.
+
+### Workflow
+
+1. **Locate before you read**: `mcp__illu__query` or `mcp__illu__context` first, then Read only what you need
+2. **Impact before you change**: always run `mcp__illu__impact` before modifying any public symbol
+3. **Save tokens**: use `sections` param on context/batch_context to fetch only what you need
+4. **Production focus**: use `exclude_tests: true` to filter out test functions
+5. **Cross-repo**: use `mcp__illu__cross_query`/`mcp__illu__cross_impact`/`mcp__illu__cross_deps`/`mcp__illu__cross_callpath` — NEVER navigate to or read files from other repositories directly
 <!-- illu:end -->

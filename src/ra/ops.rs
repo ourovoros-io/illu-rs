@@ -145,8 +145,30 @@ impl RaClient {
             lsp_types::PrepareRenameResponse::RangeWithPlaceholder { placeholder, .. } => {
                 placeholder.clone()
             }
-            lsp_types::PrepareRenameResponse::DefaultBehavior { .. }
-            | lsp_types::PrepareRenameResponse::Range(_) => "unknown".to_string(),
+            lsp_types::PrepareRenameResponse::Range(range) => {
+                if let Ok(content) = std::fs::read_to_string(&spec.file) {
+                    let lines: Vec<&str> = content.lines().collect();
+                    if let Some(line) = lines.get(range.start.line as usize) {
+                        let start = range.start.character as usize;
+                        let end = range.end.character as usize;
+                        if start <= end {
+                            let text: String = line.chars().skip(start).take(end - start).collect();
+                            if text.is_empty() {
+                                "unknown".to_string()
+                            } else {
+                                text
+                            }
+                        } else {
+                            "unknown".to_string()
+                        }
+                    } else {
+                        "unknown".to_string()
+                    }
+                } else {
+                    "unknown".to_string()
+                }
+            }
+            lsp_types::PrepareRenameResponse::DefaultBehavior { .. } => "unknown".to_string(),
         };
 
         let refs = self.references(spec, true).await.unwrap_or_default();
