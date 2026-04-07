@@ -88,21 +88,28 @@ fn write_signature_usage(
                 && super::type_usage::contains_whole_word(&s.signature, base_name)
         })
         .collect();
+
+    let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for sym in &filtered {
+        by_file
+            .entry(sym.file_path.clone())
+            .or_default()
+            .push(super::qualified_name(sym));
+    }
+
     if !filtered.is_empty() {
         let _ = writeln!(
             output,
             "### Type Usage in Signatures ({} functions)\n",
             filtered.len()
         );
-        for sym in &filtered {
-            let qname = super::qualified_name(sym);
-            let _ = writeln!(
-                output,
-                "- **{qname}** ({}:{}) \u{2014} `{}`",
-                sym.file_path, sym.line_start, sym.signature
-            );
+        for (file, names) in &by_file {
+            let _ = writeln!(output, "#### {file}\n");
+            for name in names {
+                let _ = writeln!(output, "- {name}");
+            }
+            let _ = writeln!(output);
         }
-        let _ = writeln!(output);
     }
     Ok(filtered.len())
 }

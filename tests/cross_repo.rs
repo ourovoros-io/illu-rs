@@ -249,7 +249,7 @@ fn cross_impact_finds_references() {
     let (_reg_dir, registry) = make_registry(dir_a.path(), dir_b.path());
 
     let result =
-        cross_impact::handle_cross_impact(&registry, dir_a.path(), "shared_helper").unwrap();
+        cross_impact::handle_cross_impact(&registry, dir_a.path(), "shared_helper", None).unwrap();
 
     assert!(
         result.contains("Cross-Repo Impact"),

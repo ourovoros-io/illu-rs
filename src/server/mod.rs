@@ -529,6 +529,9 @@ struct CrossImpactParams {
     /// Symbol name (supports `Type::method` syntax)
     #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
+
+    /// Optional namespace/module filter to reduce cross-crate noise (e.g., "`illu_rs::`")
+    filter: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1340,6 +1343,7 @@ impl IlluServer {
             &self.registry,
             &self.config.repo_path,
             &params.symbol_name,
+            params.filter.as_deref(),
         )
         .map_err(to_mcp_err)?;
         Ok(text_result(result))

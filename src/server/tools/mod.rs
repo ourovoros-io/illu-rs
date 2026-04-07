@@ -47,7 +47,7 @@ pub(crate) fn resolve_symbol(
     name: &str,
 ) -> Result<Vec<StoredSymbol>, Box<dyn std::error::Error>> {
     // 1. Try Type::method qualified lookup
-    if let Some((impl_type, method)) = name.split_once("::") {
+    if let Some((impl_type, method)) = name.rsplit_once("::") {
         let results = db.search_symbols_by_impl(impl_type, method)?;
         if !results.is_empty() {
             return Ok(results);
@@ -85,16 +85,30 @@ fn levenshtein(a: &str, b: &str) -> usize {
 /// Returns top 3 matches within a reasonable distance threshold.
 fn levenshtein_suggestions(db: &Database, query: &str) -> Vec<(String, Option<String>)> {
     let all_names = db.get_all_distinct_symbol_names().unwrap_or_default();
-    let max_dist = (query.len() * 2 / 5).max(2);
+
+    let (target_impl, target_method) = if let Some((it, meth)) = query.rsplit_once("::") {
+        (Some(it), meth)
+    } else {
+        (None, query)
+    };
+
+    let max_dist = (target_method.len() * 2 / 5).max(2);
     let mut scored: Vec<(usize, String, Option<String>)> = all_names
         .into_iter()
         .map(|(name, impl_type)| {
-            let qname = if let Some(ref it) = impl_type {
-                format!("{it}::{name}")
-            } else {
-                name.clone()
-            };
-            let dist = levenshtein(query, &qname);
+            let mut dist = levenshtein(target_method, &name);
+
+            if let Some(target) = target_impl {
+                if let Some(it) = &impl_type {
+                    // Score the impl type distance. If it matches exactly, 0 penalty.
+                    // If it's a typo, add the typo distance.
+                    dist += levenshtein(target, it);
+                } else {
+                    // Requested Type::method but symbol has no type
+                    dist += 10;
+                }
+            }
+
             (dist, name, impl_type)
         })
         .filter(|(dist, _, _)| *dist <= max_dist)
@@ -110,14 +124,7 @@ fn levenshtein_suggestions(db: &Database, query: &str) -> Vec<(String, Option<St
 /// "Symbol not found" message with fuzzy "did you mean?" suggestions.
 pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
     // Reuse resolve_symbol which already tries Type::method, exact, and FTS
-    let mut suggestions = resolve_symbol(db, name).unwrap_or_default();
-
-    // For Type::method names where resolve found nothing, try the method part
-    if suggestions.is_empty()
-        && let Some((_, method)) = name.split_once("::")
-    {
-        suggestions = resolve_symbol(db, method).unwrap_or_default();
-    }
+    let suggestions = resolve_symbol(db, name).unwrap_or_default();
 
     // Deduplicate by qualified name, take top 3
     let mut seen = std::collections::HashSet::new();
@@ -422,39 +429,6 @@ mod tests {
         let result = symbol_not_found(&db, "resolve_sym");
         assert!(result.contains("Did you mean"), "got: {result}");
         assert!(result.contains("resolve_symbol"), "got: {result}");
-    }
-
-    #[test]
-    fn test_symbol_not_found_type_method_fallback() {
-        use crate::indexer::parser::{Symbol, SymbolKind, Visibility};
-        use crate::indexer::store::store_symbols;
-
-        let db = Database::open_in_memory().unwrap();
-        let fid = db.insert_file("src/db.rs", "hash1").unwrap();
-        store_symbols(
-            &db,
-            fid,
-            &[Symbol {
-                name: "resolve".into(),
-                kind: SymbolKind::Function,
-                visibility: Visibility::Public,
-                file_path: "src/db.rs".into(),
-                line_start: 5,
-                line_end: 15,
-                signature: "fn resolve()".into(),
-                doc_comment: None,
-                body: None,
-                details: None,
-                attributes: None,
-                impl_type: Some("SymbolIdMap".into()),
-            }],
-        )
-        .unwrap();
-
-        // Full qualified name doesn't match, but method part "resolve" does
-        let result = symbol_not_found(&db, "Database::resolve");
-        assert!(result.contains("Did you mean"), "got: {result}");
-        assert!(result.contains("resolve"), "got: {result}");
     }
 
     #[test]
