@@ -77,10 +77,7 @@ fn write_mcp_config_to(
     config_path: &Path,
     args: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let binary = std::env::current_exe()?
-        .canonicalize()?
-        .to_string_lossy()
-        .into_owned();
+    let binary = "illu-rs";
 
     let illu_entry = serde_json::json!({
         "command": binary,
