@@ -353,7 +353,7 @@ fn shared_helper(x: i32) -> i32 { x * 2 }
         build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let result =
-        cross_impact::handle_cross_impact(&registry, dir_a.path(), "shared_helper").unwrap();
+        cross_impact::handle_cross_impact(&registry, dir_a.path(), "shared_helper", None).unwrap();
 
     assert!(
         result.contains("Cross-Repo Impact"),
@@ -393,7 +393,7 @@ fn user() -> i32 { Bar::process() }
         build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
     let result =
-        cross_impact::handle_cross_impact(&registry, dir_a.path(), "Foo::process").unwrap();
+        cross_impact::handle_cross_impact(&registry, dir_a.path(), "Foo::process", None).unwrap();
 
     // Repo B only has Bar::process, not Foo::process.
     // With impl_type filtering, repo B's refs should not match.
@@ -412,7 +412,8 @@ fn cross_impact_with_no_refs_returns_clear_message() {
     let (_reg_dir, registry) =
         build_registry(&[("repo-a", dir_a.path()), ("repo-b", dir_b.path())]);
 
-    let result = cross_impact::handle_cross_impact(&registry, dir_a.path(), "unique_to_a").unwrap();
+    let result =
+        cross_impact::handle_cross_impact(&registry, dir_a.path(), "unique_to_a", None).unwrap();
 
     assert!(
         result.contains("No references") || result.contains("No cross-repo"),
@@ -654,6 +655,7 @@ fn cross_impact_on_nonexistent_symbol_returns_message() {
         &registry,
         dir_a.path(),
         "completely_nonexistent_symbol_xyz",
+        None,
     )
     .unwrap();
 
@@ -691,7 +693,7 @@ fn cross_tools_handle_stale_registry_path() {
     );
 
     let impact_result =
-        cross_impact::handle_cross_impact(&registry, dir_a.path(), "alive").unwrap();
+        cross_impact::handle_cross_impact(&registry, dir_a.path(), "alive", None).unwrap();
     assert!(
         !impact_result.is_empty(),
         "cross_impact should not crash on stale path: {impact_result}"
@@ -974,7 +976,8 @@ fn cross_impact_excludes_worktree_self_hit() {
     });
 
     let result =
-        cross_impact::handle_cross_impact(&registry, primary_dir.path(), "TargetType").unwrap();
+        cross_impact::handle_cross_impact(&registry, primary_dir.path(), "TargetType", None)
+            .unwrap();
     assert!(
         !result.contains("primary-stale-sibling"),
         "stale sibling leaked into cross_impact: {result}"
