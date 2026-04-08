@@ -831,7 +831,10 @@ fn handle_repo_command(command: RepoCommand) -> Result<(), Box<dyn std::error::E
                 let path_str = repo.path.to_string_lossy();
                 let chars_count = path_str.chars().count();
                 let display_path = if chars_count > 50 {
-                    let suffix: String = path_str.chars().skip(chars_count.saturating_sub(47)).collect();
+                    let suffix: String = path_str
+                        .chars()
+                        .skip(chars_count.saturating_sub(47))
+                        .collect();
                     format!("...{suffix}")
                 } else {
                     path_str.into_owned()
