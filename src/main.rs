@@ -71,6 +71,22 @@ enum Command {
     Init,
     /// Install illu globally (configures Claude Code + Gemini CLI for all repos)
     Install,
+    /// Manage cross-repo registry
+    Repo {
+        #[command(subcommand)]
+        command: RepoCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum RepoCommand {
+    /// List all currently indexed repositories
+    List,
+    /// Remove a repository from the registry and its index database
+    Remove {
+        /// Name or path of the repository to remove
+        identifier: String,
+    },
 }
 
 fn write_mcp_config_to(
@@ -759,6 +775,122 @@ fn git_head(repo_path: &Path) -> Option<String> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
+#[expect(clippy::print_stdout, reason = "CLI output")]
+fn handle_repo_command(command: RepoCommand) -> Result<(), Box<dyn std::error::Error>> {
+    let registry_path = illu_rs::registry::Registry::default_path()
+        .map_err(|e| format!("Could not get default registry path: {e}"))?;
+    let mut registry = illu_rs::registry::Registry::load(&registry_path)
+        .map_err(|e| format!("Could not load registry: {e}"))?;
+
+    match command {
+        RepoCommand::List => {
+            registry.prune();
+            if let Err(e) = registry.save() {
+                println!("Warning: Could not save registry: {e}");
+            }
+
+            if registry.repos.is_empty() {
+                println!("No repositories currently registered.");
+                return Ok(());
+            }
+
+            println!("{:<20} | {:<50} | Last Indexed", "Name", "Path");
+            println!("{:-<20}-+-{:-<50}-+-{:-<20}", "", "", "");
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            for repo in &registry.repos {
+                let ts: u64 = repo.last_indexed.parse().unwrap_or(0);
+                let diff = now.saturating_sub(ts);
+                let time_str = if ts == 0 {
+                    "Unknown".to_string()
+                } else if diff < 60 {
+                    "Just now".to_string()
+                } else if diff < 3600 {
+                    let m = diff / 60;
+                    format!("{m} minute{} ago", if m == 1 { "" } else { "s" })
+                } else if diff < 86400 {
+                    let h = diff / 3600;
+                    format!("{h} hour{} ago", if h == 1 { "" } else { "s" })
+                } else {
+                    let d = diff / 86400;
+                    format!("{d} day{} ago", if d == 1 { "" } else { "s" })
+                };
+
+                let name_chars = repo.name.chars().count();
+                let display_name = if name_chars > 20 {
+                    let prefix: String = repo.name.chars().take(17).collect();
+                    format!("{prefix}...")
+                } else {
+                    repo.name.clone()
+                };
+
+                let path_str = repo.path.to_string_lossy();
+                let chars_count = path_str.chars().count();
+                let display_path = if chars_count > 50 {
+                    let suffix: String = path_str
+                        .chars()
+                        .skip(chars_count.saturating_sub(47))
+                        .collect();
+                    format!("...{suffix}")
+                } else {
+                    path_str.into_owned()
+                };
+
+                println!("{display_name:<20} | {display_path:<50} | {time_str}");
+            }
+        }
+        RepoCommand::Remove { identifier } => {
+            let initial_len = registry.repos.len();
+            let mut removed_paths = Vec::new();
+            let target_path = Path::new(&identifier);
+
+            registry.repos.retain(|r| {
+                let matches = r.name == identifier || r.path == target_path;
+                if matches {
+                    removed_paths.push(r.path.clone());
+                }
+                !matches
+            });
+
+            if registry.repos.len() == initial_len {
+                println!("No repository found matching '{identifier}'.");
+                return Ok(());
+            }
+
+            if let Err(e) = registry.save() {
+                println!("Warning: Could not save registry: {e}");
+            }
+
+            for path in removed_paths {
+                let db_dir = path.join(".illu");
+                if db_dir.exists() {
+                    if let Err(e) = std::fs::remove_dir_all(&db_dir) {
+                        println!(
+                            "Removed '{identifier}' from registry, but failed to delete index at {}: {e}",
+                            db_dir.display()
+                        );
+                    } else {
+                        println!(
+                            "Removed '{identifier}' from registry and deleted index at {}.",
+                            db_dir.display()
+                        );
+                    }
+                } else {
+                    println!(
+                        "Removed '{identifier}' from registry. (No index found at {})",
+                        db_dir.display()
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 #[expect(clippy::too_many_lines, reason = "CLI dispatch with many subcommands")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -969,6 +1101,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Install) => {
             install_global()?;
+        }
+        Some(Command::Repo { command }) => {
+            handle_repo_command(command)?;
         }
     }
 

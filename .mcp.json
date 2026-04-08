@@ -4,7 +4,7 @@
       "args": [
         "serve"
       ],
-      "command": "/Users/georgiosdelkos/.cargo/bin/illu-rs",
+      "command": "illu-rs",
       "env": {
         "RUST_LOG": "warn"
       }
