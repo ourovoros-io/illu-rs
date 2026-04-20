@@ -74,10 +74,32 @@ enum Command {
         #[arg(short, long, default_value_t = 7879)]
         port: u16,
     },
-    /// Set up illu in a repo (configures Claude Code + Gemini CLI, builds index)
-    Init,
-    /// Install illu globally (configures Claude Code + Gemini CLI for all repos)
-    Install,
+    /// Set up illu in a repo (detects/prompts per-repo agents, builds index)
+    Init {
+        /// Configure a specific agent (repeatable). Example: --agent claude-code
+        #[arg(long)]
+        agent: Vec<String>,
+        /// Configure every supported per-repo agent without prompting.
+        #[arg(long)]
+        all: bool,
+        /// Skip the prompt and accept detected agents.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Print what would be written without touching the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Install illu globally (detects/prompts global agents)
+    Install {
+        #[arg(long)]
+        agent: Vec<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Manage cross-repo registry
     Repo {
         #[command(subcommand)]
@@ -175,10 +197,12 @@ fn print_result(result: &str) {
 }
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
-fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn init_repo(
+    repo_path: &Path,
+    flags: &illu_rs::agents::SetupFlags,
+) -> Result<(), Box<dyn std::error::Error>> {
     let repo_path = repo_path.canonicalize()?;
 
-    // Verify it's a supported project
     let has_cargo = repo_path.join("Cargo.toml").exists();
     let has_ts =
         repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
@@ -193,57 +217,35 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Setting up illu in {}", repo_path.display());
 
-    // 1. Write MCP configs for both Claude Code and Gemini CLI
-    write_mcp_config(&repo_path)?;
-    println!("  wrote .mcp.json (Claude Code)");
-    write_gemini_config(&repo_path)?;
-    println!("  wrote .gemini/settings.json (Gemini CLI)");
+    let reports = illu_rs::agents::configure_repo(&repo_path, flags)?;
+    for report in &reports {
+        if report.skipped {
+            continue;
+        }
+        println!("  configured {}", report.agent_id);
+        for path in &report.written_paths {
+            println!("    -> {}", path.display());
+        }
+    }
+    if reports.is_empty() || reports.iter().all(|r| r.skipped) {
+        println!("  no agents configured (nothing detected, nothing passed via --agent)");
+    }
 
-    // 2. Update instruction files for both
-    illu_rs::agents::instruction_md::write_md_section(
-        &repo_path,
-        "CLAUDE.md",
-        "# CLAUDE.md",
-        &illu_rs::agents::instruction_md::illu_agent_section("mcp__illu__"),
-    )?;
-    println!("  updated CLAUDE.md");
-    illu_rs::agents::instruction_md::write_md_section(
-        &repo_path,
-        "GEMINI.md",
-        "# GEMINI.md",
-        &illu_rs::agents::instruction_md::illu_agent_section("mcp_illu_"),
-    )?;
-    println!("  updated GEMINI.md");
+    if flags.dry_run {
+        println!("\n(dry run — no files written)");
+        return Ok(());
+    }
 
-    // 3. Generate agent definition files
-    illu_rs::agents::agent_files::generate_agent_files(
-        &repo_path.join(".claude/agents"),
-        "mcp__illu__",
-    )?;
-    println!("  wrote .claude/agents/ (Claude agent files)");
-    illu_rs::agents::agent_files::generate_agent_files(
-        &repo_path.join(".gemini/agents"),
-        "mcp_illu_",
-    )?;
-    println!("  wrote .gemini/agents/ (Gemini agent files)");
-
-    // 4. Auto-allow illu tools in project-level Claude settings
-    let local_settings = repo_path.join(".claude/settings.local.json");
-    illu_rs::agents::allow_list::ensure_tools_allowed(&local_settings)?;
-    println!("  auto-allowed illu tools in .claude/settings.local.json");
-
-    // 5. Build initial index
     println!("  indexing...");
     illu_rs::status::init(&repo_path);
     ensure_indexed(&repo_path)?;
     println!("  index built");
 
-    // 6. Add .illu/ to .gitignore if not already there
     if ensure_gitignore(&repo_path)? {
         println!("  updated .gitignore with illu entries");
     }
 
-    println!("\nDone. Start Claude Code or Gemini CLI in this repo — illu will run automatically.");
+    println!("\nDone.");
     Ok(())
 }
 
@@ -310,6 +312,7 @@ fn register_repo(repo_path: &Path) {
     let _ = registry.save();
 }
 
+#[expect(dead_code, reason = "removed in task 16 cleanup")]
 fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     write_mcp_config_to(config_path, &["serve"])
 }
@@ -372,50 +375,35 @@ fn ensure_global_gitignore(home: &Path) -> Result<(), Box<dyn std::error::Error>
 }
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
-fn install_global() -> Result<(), Box<dyn std::error::Error>> {
+fn install_global(flags: &illu_rs::agents::SetupFlags) -> Result<(), Box<dyn std::error::Error>> {
     let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set")?;
     let home = PathBuf::from(home);
 
     println!("Installing illu globally...");
 
-    let claude_settings = home.join(".claude/settings.json");
-    write_global_mcp_config(&claude_settings)?;
-    illu_rs::agents::allow_list::ensure_tools_allowed(&claude_settings)?;
-    println!("  wrote {}", claude_settings.display());
+    let reports = illu_rs::agents::configure_global(&home, flags)?;
+    for report in &reports {
+        if report.skipped {
+            continue;
+        }
+        println!("  configured {}", report.agent_id);
+        for path in &report.written_paths {
+            println!("    -> {}", path.display());
+        }
+    }
+    if reports.is_empty() || reports.iter().all(|r| r.skipped) {
+        println!("  no agents configured (nothing detected, nothing passed via --agent)");
+    }
 
-    let gemini_settings = home.join(".gemini/settings.json");
-    write_global_mcp_config(&gemini_settings)?;
-    println!("  wrote {}", gemini_settings.display());
-
-    illu_rs::agents::instruction_md::write_md_section(
-        &home,
-        ".claude/CLAUDE.md",
-        "# CLAUDE.md",
-        &illu_rs::agents::instruction_md::illu_agent_section("mcp__illu__"),
-    )?;
-    println!("  updated {}", home.join(".claude/CLAUDE.md").display());
-
-    illu_rs::agents::instruction_md::write_md_section(
-        &home,
-        ".gemini/GEMINI.md",
-        "# GEMINI.md",
-        &illu_rs::agents::instruction_md::illu_agent_section("mcp_illu_"),
-    )?;
-    println!("  updated {}", home.join(".gemini/GEMINI.md").display());
-
-    illu_rs::agents::agent_files::generate_agent_files(
-        &home.join(".claude/agents"),
-        "mcp__illu__",
-    )?;
-    println!("  wrote {}", home.join(".claude/agents/").display());
-    illu_rs::agents::agent_files::generate_agent_files(&home.join(".gemini/agents"), "mcp_illu_")?;
-    println!("  wrote {}", home.join(".gemini/agents/").display());
+    if flags.dry_run {
+        println!("\n(dry run — no files written)");
+        return Ok(());
+    }
 
     install_statusline(&home)?;
-
     ensure_global_gitignore(&home)?;
 
-    println!("\nDone. illu will auto-start in any Rust, TypeScript/JavaScript, or Python project.");
+    println!("\nDone.");
     Ok(())
 }
 
@@ -864,11 +852,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             illu_rs::server::dashboard::start_dashboard(registry, port).await?;
         }
-        Some(Command::Init) => {
-            init_repo(repo_path)?;
+        Some(Command::Init {
+            agent,
+            all,
+            yes,
+            dry_run,
+        }) => {
+            let flags = illu_rs::agents::SetupFlags {
+                explicit_agents: agent,
+                all,
+                yes,
+                dry_run,
+            };
+            init_repo(repo_path, &flags)?;
         }
-        Some(Command::Install) => {
-            install_global()?;
+        Some(Command::Install {
+            agent,
+            all,
+            yes,
+            dry_run,
+        }) => {
+            let flags = illu_rs::agents::SetupFlags {
+                explicit_agents: agent,
+                all,
+                yes,
+                dry_run,
+            };
+            install_global(&flags)?;
         }
         Some(Command::Repo { command }) => {
             handle_repo_command(command)?;
