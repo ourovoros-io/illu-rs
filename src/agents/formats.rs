@@ -26,10 +26,13 @@ fn write_mcp_servers_json(
     path: &Path,
     cmd: &IlluCommand,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut config: serde_json::Value = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
+    let mut config: serde_json::Value = match std::fs::read_to_string(path) {
+        Ok(s) => serde_json::from_str(&s)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            serde_json::json!({"mcpServers": {}})
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     let entry = serde_json::json!({
         "command": cmd.command,
@@ -42,10 +45,13 @@ fn write_mcp_servers_json(
 }
 
 fn write_vscode_json(path: &Path, cmd: &IlluCommand) -> Result<(), Box<dyn std::error::Error>> {
-    let mut config: serde_json::Value = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({"servers": {}}));
+    let mut config: serde_json::Value = match std::fs::read_to_string(path) {
+        Ok(s) => serde_json::from_str(&s)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            serde_json::json!({"servers": {}})
+        }
+        Err(e) => return Err(e.into()),
+    };
 
     let entry = serde_json::json!({
         "type": "stdio",
@@ -61,7 +67,11 @@ fn write_vscode_json(path: &Path, cmd: &IlluCommand) -> Result<(), Box<dyn std::
 fn write_codex_toml(path: &Path, cmd: &IlluCommand) -> Result<(), Box<dyn std::error::Error>> {
     use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
 
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
     let mut doc = existing.parse::<DocumentMut>()?;
 
     let mcp_servers = doc
@@ -173,5 +183,26 @@ mod tests {
         write(&path, McpFormat::ClaudeCodeJson, &cmd()).unwrap();
         let second = std::fs::read_to_string(&path).unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn errors_on_malformed_existing_json() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(".mcp.json");
+        std::fs::write(&path, "{this is not json").unwrap();
+        let err = write(&path, McpFormat::ClaudeCodeJson, &cmd()).unwrap_err();
+        // Assert the user's existing file is NOT clobbered.
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "{this is not json");
+        // Error should be a serde_json parse error referencing a line/column.
+        let msg = format!("{err}").to_lowercase();
+        assert!(
+            msg.contains("expected")
+                || msg.contains("parse")
+                || msg.contains("json")
+                || msg.contains("key must be a string")
+                || msg.contains("line "),
+            "unexpected error: {err}"
+        );
     }
 }
