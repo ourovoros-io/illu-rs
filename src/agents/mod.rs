@@ -1,5 +1,6 @@
 //! Per-agent config registry and orchestration.
 
+pub mod agent_files;
 pub mod allow_list;
 pub mod instruction_md;
 

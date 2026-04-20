@@ -136,198 +136,6 @@ fn write_gemini_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error
     write_mcp_server_config(&repo_path.join(".gemini/settings.json"))
 }
 
-/// Agent definitions: (name, description, tool short names, body text).
-const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
-    (
-        "illu-explore",
-        "Explore codebases using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
-        &[
-            "Read",
-            "Glob",
-            "Grep",
-            "query",
-            "context",
-            "batch_context",
-            "overview",
-            "tree",
-            "neighborhood",
-            "callpath",
-            "implements",
-            "docs",
-            "symbols_at",
-            "file_graph",
-            "crate_graph",
-            "stats",
-            "freshness",
-        ],
-        "You are an illu-powered codebase exploration agent.\n\n\
-         ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
-         You MUST use illu MCP tools for ALL code exploration (Rust, Python, TypeScript/JavaScript). \
-         Do NOT use Read to view source files — use `context` instead. \
-         Do NOT use Grep to search code — use `query` instead. \
-         Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\
-         Read/Grep/Glob are ONLY permitted for non-code content \
-         (config files, markdown, logs, TOML, JSON) or when an illu tool \
-         explicitly returns no results.\n\n\
-         WRONG: Read(\"src/db.rs\") to see a function\n\
-         RIGHT: context(symbol_name: \"Database::open\")\n\n\
-         WRONG: Grep(pattern: \"fn refresh\") to find a function\n\
-         RIGHT: query(query: \"refresh\")\n\n\
-         WRONG: Glob(pattern: \"src/**/*.rs\") to find modules\n\
-         RIGHT: tree() or overview(path: \"src/\")\n\n\
-         Report findings concisely — do not edit files.\n\n\
-         ## Tool guide\n\
-         - query: find symbols by name, kind, signature, or attribute\n\
-         - context: full definition + source + callers + callees (use sections param to limit output)\n\
-         - batch_context: context for multiple symbols at once\n\
-         - overview: structural map of a directory (functions, structs, traits)\n\
-         - tree: file/module tree layout\n\
-         - neighborhood: bidirectional call graph around a symbol\n\
-         - callpath: shortest call chain between two symbols\n\
-         - implements: find trait implementations or types implementing a trait\n\
-         - docs: documentation for external dependencies\n\
-         - symbols_at: find symbols at a specific file:line\n\
-         - file_graph: file-level dependency visualization\n\
-         - crate_graph: workspace crate dependency graph\n\
-         - stats: codebase statistics dashboard\n\
-         - freshness: check if the index is current\n\n\
-         ## Workflow\n\
-         query to locate → context to understand → \
-         neighborhood/callpath to trace flow. \
-         Use sections: [\"source\", \"callers\"] to save tokens. \
-         Use exclude_tests: true to focus on production code.",
-    ),
-    (
-        "illu-review",
-        "Review code changes using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
-        &[
-            "Read",
-            "Glob",
-            "Grep",
-            "query",
-            "impact",
-            "diff_impact",
-            "test_impact",
-            "boundary",
-            "references",
-            "blame",
-            "history",
-            "context",
-            "doc_coverage",
-        ],
-        "You are an illu-powered code review agent.\n\n\
-         ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
-         You MUST use illu MCP tools for ALL code analysis (Rust, Python, TypeScript/JavaScript). \
-         Do NOT use Read to view source files — use `context` instead. \
-         Do NOT use Grep to search code — use `query` instead. \
-         Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\
-         Read/Grep/Glob are ONLY permitted for non-code content \
-         (config files, markdown, logs, TOML, JSON) or when an illu tool \
-         explicitly returns no results.\n\n\
-         WRONG: Read(\"src/db.rs\") to see a function\n\
-         RIGHT: context(symbol_name: \"Database::open\")\n\n\
-         WRONG: Grep(pattern: \"fn refresh\") to find a function\n\
-         RIGHT: query(query: \"refresh\")\n\n\
-         Report findings concisely — do not edit files.\n\n\
-         ## Tool guide\n\
-         - query: find symbols by name to start analysis\n\
-         - context: full definition + callers + callees (use sections param to limit output)\n\
-         - impact: see all downstream dependents of a symbol before changes\n\
-         - diff_impact: analyze impact of git diff changes (use compact: true for large diffs)\n\
-         - test_impact: find which tests break when changing a symbol\n\
-         - boundary: classify symbols as public API vs internal (safe to refactor)\n\
-         - references: unified view of all references (callers, type usage, trait impls)\n\
-         - blame: git blame on a symbol's line range\n\
-         - history: git commit history for a symbol (use show_diff: true for code changes)\n\
-         - doc_coverage: find symbols missing doc comments\n\n\
-         ## Workflow\n\
-         diff_impact for changed symbols → impact on key symbols → \
-         test_impact to verify coverage → boundary to check API surface. \
-         Use exclude_tests: true to focus on production callers.",
-    ),
-    (
-        "illu-refactor",
-        "Plan refactoring using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
-        &[
-            "Read",
-            "Glob",
-            "Grep",
-            "rename_plan",
-            "unused",
-            "orphaned",
-            "similar",
-            "type_usage",
-            "hotspots",
-            "context",
-            "impact",
-            "references",
-            "boundary",
-        ],
-        "You are an illu-powered refactoring agent.\n\n\
-         ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
-         You MUST use illu MCP tools for ALL code analysis (Rust, Python, TypeScript/JavaScript). \
-         Do NOT use Read to view source files — use `context` instead. \
-         Do NOT use Grep to search code — use `query` instead. \
-         Do NOT use Glob to find files — use `tree` or `overview` instead.\n\n\
-         Read/Grep/Glob are ONLY permitted for non-code content \
-         (config files, markdown, logs, TOML, JSON) or when an illu tool \
-         explicitly returns no results.\n\n\
-         WRONG: Read(\"src/db.rs\") to see a function\n\
-         RIGHT: context(symbol_name: \"Database::open\")\n\n\
-         WRONG: Grep(pattern: \"fn refresh\") to find a function\n\
-         RIGHT: query(query: \"refresh\")\n\n\
-         Report findings concisely — do not edit files.\n\n\
-         ## Tool guide\n\
-         - rename_plan: preview all locations affected by renaming a symbol\n\
-         - unused: find symbols with zero incoming references\n\
-         - orphaned: find symbols with no callers AND no test coverage (safe to remove)\n\
-         - similar: find structurally similar symbols (candidates for dedup)\n\
-         - type_usage: find where a type appears in signatures and struct fields\n\
-         - hotspots: identify high-complexity and high-coupling symbols\n\
-         - context: full definition + callers + callees (use sections param to limit output)\n\
-         - impact: see all downstream dependents before changing a symbol\n\
-         - references: unified view of all references to a symbol\n\
-         - boundary: classify symbols as public API vs internal\n\n\
-         ## Workflow\n\
-         hotspots to find targets → unused/orphaned for dead code → \
-         impact before any change → rename_plan to preview renames → \
-         boundary to verify API surface. \
-         Use exclude_tests: true to focus on production code.",
-    ),
-];
-
-const BUILTIN_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
-
-fn generate_agent_files(
-    agents_dir: &Path,
-    tool_prefix: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    use std::fmt::Write;
-
-    std::fs::create_dir_all(agents_dir)?;
-
-    for (name, description, tools, body) in AGENT_DEFS {
-        let mut tools_yaml = String::new();
-        for tool in *tools {
-            let full_name = if BUILTIN_TOOLS.contains(tool) {
-                (*tool).to_string()
-            } else {
-                format!("{tool_prefix}{tool}")
-            };
-            writeln!(tools_yaml, "  - {full_name}")?;
-        }
-        let content = format!(
-            "---\nname: {name}\n\
-             description: {description}\n\
-             tools:\n{tools_yaml}\
-             ---\n\n{body}\n"
-        );
-        std::fs::write(agents_dir.join(format!("{name}.md")), content)?;
-    }
-
-    Ok(())
-}
-
 fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error>> {
     illu_rs::status::init(repo_path);
     let db_path = repo_path.join(".illu/index.db");
@@ -408,9 +216,15 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     println!("  updated GEMINI.md");
 
     // 3. Generate agent definition files
-    generate_agent_files(&repo_path.join(".claude/agents"), "mcp__illu__")?;
+    illu_rs::agents::agent_files::generate_agent_files(
+        &repo_path.join(".claude/agents"),
+        "mcp__illu__",
+    )?;
     println!("  wrote .claude/agents/ (Claude agent files)");
-    generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
+    illu_rs::agents::agent_files::generate_agent_files(
+        &repo_path.join(".gemini/agents"),
+        "mcp_illu_",
+    )?;
     println!("  wrote .gemini/agents/ (Gemini agent files)");
 
     // 4. Auto-allow illu tools in project-level Claude settings
@@ -589,9 +403,12 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!("  updated {}", home.join(".gemini/GEMINI.md").display());
 
-    generate_agent_files(&home.join(".claude/agents"), "mcp__illu__")?;
+    illu_rs::agents::agent_files::generate_agent_files(
+        &home.join(".claude/agents"),
+        "mcp__illu__",
+    )?;
     println!("  wrote {}", home.join(".claude/agents/").display());
-    generate_agent_files(&home.join(".gemini/agents"), "mcp_illu_")?;
+    illu_rs::agents::agent_files::generate_agent_files(&home.join(".gemini/agents"), "mcp_illu_")?;
     println!("  wrote {}", home.join(".gemini/agents/").display());
 
     install_statusline(&home)?;
@@ -840,8 +657,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "# GEMINI.md",
                     &illu_rs::agents::instruction_md::illu_agent_section("mcp_illu_"),
                 )?;
-                generate_agent_files(&repo_path.join(".claude/agents"), "mcp__illu__")?;
-                generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
+                illu_rs::agents::agent_files::generate_agent_files(
+                    &repo_path.join(".claude/agents"),
+                    "mcp__illu__",
+                )?;
+                illu_rs::agents::agent_files::generate_agent_files(
+                    &repo_path.join(".gemini/agents"),
+                    "mcp_illu_",
+                )?;
                 let local_settings = repo_path.join(".claude/settings.local.json");
                 if let Err(e) = illu_rs::agents::allow_list::ensure_tools_allowed(&local_settings) {
                     tracing::warn!("Could not auto-allow tools: {e}");
@@ -1059,70 +882,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_generate_agent_files_creates_three_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let agents_dir = dir.path().join("agents");
-
-        // Test Claude variant
-        generate_agent_files(&agents_dir, "mcp__illu__").unwrap();
-
-        let explore = std::fs::read_to_string(agents_dir.join("illu-explore.md")).unwrap();
-        let review = std::fs::read_to_string(agents_dir.join("illu-review.md")).unwrap();
-        let refactor = std::fs::read_to_string(agents_dir.join("illu-refactor.md")).unwrap();
-
-        // All three exist and have frontmatter
-        assert!(explore.starts_with("---"));
-        assert!(review.starts_with("---"));
-        assert!(refactor.starts_with("---"));
-
-        // Each has the correct name
-        assert!(explore.contains("name: illu-explore"));
-        assert!(review.contains("name: illu-review"));
-        assert!(refactor.contains("name: illu-refactor"));
-
-        // None allow Edit, Write, or Bash in tools section
-        for content in [&explore, &review, &refactor] {
-            let tool_entries: Vec<&str> =
-                content.lines().filter(|l| l.starts_with("  - ")).collect();
-            assert!(!tool_entries.is_empty(), "should have tool entries");
-            for entry in &tool_entries {
-                assert!(!entry.contains("Edit"), "tools should not contain Edit");
-                assert!(!entry.contains("Write"), "tools should not contain Write");
-                assert!(!entry.contains("Bash"), "tools should not contain Bash");
-            }
-        }
-
-        // Frontmatter structure validation
-        for content in [&explore, &review, &refactor] {
-            assert!(
-                content.matches("---").count() >= 2,
-                "should have opening and closing frontmatter"
-            );
-        }
-
-        // Each has illu tools with correct prefix
-        assert!(explore.contains("mcp__illu__query"));
-        assert!(review.contains("mcp__illu__impact"));
-        assert!(refactor.contains("mcp__illu__rename_plan"));
-
-        // tools: key must be a YAML array (no inline value on same line)
-        for content in [&explore, &review, &refactor] {
-            assert!(
-                content.contains("\ntools:\n"),
-                "tools must be a YAML array (no inline value)"
-            );
-        }
-
-        // Test Gemini variant
-        let gemini_dir = dir.path().join("gemini_agents");
-        generate_agent_files(&gemini_dir, "mcp_illu_").unwrap();
-
-        let explore_g = std::fs::read_to_string(gemini_dir.join("illu-explore.md")).unwrap();
-        assert!(explore_g.contains("mcp_illu_query"));
-        assert!(!explore_g.contains("mcp__illu__query"));
-    }
 
     #[test]
     fn test_append_gitignore_entry_manages_entries() {
