@@ -195,7 +195,12 @@ pub static AGENTS: &[Agent] = &[
         detection: Detection {
             env_vars: &[],
             binaries: &[],
-            config_dirs: &["Library/Application Support/Claude"],
+            // No `config_dirs` entry: the only platform Claude Desktop ships on
+            // uses `Library/Application Support/Claude` which is already covered
+            // by the macOS-gated `app_bundles` check below. A literal
+            // `~/Library/Application Support/Claude` lookup on Linux would be
+            // a nonsensical false lead.
+            config_dirs: &[],
             app_bundles: &["/Applications/Claude.app"],
         },
         repo_config: None,
