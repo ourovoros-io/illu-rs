@@ -2,6 +2,7 @@
 
 pub mod agent_files;
 pub mod allow_list;
+pub mod detect;
 pub mod instruction_md;
 
 use std::path::PathBuf;
