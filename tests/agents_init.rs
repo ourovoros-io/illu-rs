@@ -95,8 +95,24 @@ fn init_with_two_agents_writes_both() {
         ..SetupFlags::default()
     };
     configure_repo(dir.path(), &flags).unwrap();
-    assert!(dir.path().join(".mcp.json").exists());
-    assert!(dir.path().join(".cursor/mcp.json").exists());
+
+    let claude: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join(".mcp.json")).unwrap()).unwrap();
+    assert_eq!(claude["mcpServers"]["illu"]["command"], "illu-rs");
+    // Claude's .mcp.json uses mcpServers, not servers.
+    assert!(
+        claude.get("servers").is_none(),
+        "unexpected 'servers' key in Claude Code config"
+    );
+
+    let cursor: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join(".cursor/mcp.json")).unwrap())
+            .unwrap();
+    assert_eq!(cursor["mcpServers"]["illu"]["command"], "illu-rs");
+
+    // Neither file should have cross-contaminated shape from the other format.
+    assert!(claude["mcpServers"].get("illu").is_some());
+    assert!(cursor["mcpServers"].get("illu").is_some());
 }
 
 #[test]

@@ -68,6 +68,19 @@ impl RealContext {
         };
         Ok(Self { home, os })
     }
+
+    /// Create a `RealContext` with a caller-supplied `home`, picking up
+    /// the OS from the current compilation target. Useful for tests and
+    /// for callers that already know HOME (e.g. `configure_global`).
+    #[must_use]
+    pub fn with_home(home: PathBuf) -> Self {
+        let os = match std::env::consts::OS {
+            "macos" => TargetOs::MacOs,
+            "windows" => TargetOs::Windows,
+            _ => TargetOs::Linux,
+        };
+        Self { home, os }
+    }
 }
 
 impl DetectionContext for RealContext {

@@ -392,7 +392,7 @@ pub fn configure_global(
     home: &Path,
     flags: &SetupFlags,
 ) -> Result<Vec<AgentWriteReport>, Box<dyn std::error::Error>> {
-    let ctx = detect::RealContext::new()?;
+    let ctx = detect::RealContext::with_home(home.to_path_buf());
     let scoped: Vec<&Agent> = AGENTS
         .iter()
         .filter(|a| a.global_config.is_some())
