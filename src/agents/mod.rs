@@ -420,11 +420,15 @@ pub fn self_heal_on_serve(
         if detect::detect_level(agent, &ctx) != DetectionLevel::Active {
             continue;
         }
-        if let (Some(repo), Some(_)) = (repo_path, &agent.repo_config) {
-            let _ = write_repo_for(agent, repo, &cmd, false);
+        if let (Some(repo), Some(_)) = (repo_path, &agent.repo_config)
+            && let Err(e) = write_repo_for(agent, repo, &cmd, false)
+        {
+            tracing::warn!(agent = agent.id, "self-heal repo write failed: {e}");
         }
-        if agent.global_config.is_some() {
-            let _ = write_global_for(agent, home, ctx.os(), &cmd, false);
+        if agent.global_config.is_some()
+            && let Err(e) = write_global_for(agent, home, ctx.os(), &cmd, false)
+        {
+            tracing::warn!(agent = agent.id, "self-heal global write failed: {e}");
         }
     }
     Ok(())
