@@ -122,8 +122,179 @@ pub struct AgentWriteReport {
     pub skipped: bool,
 }
 
-/// Master registry. Populated in Phase 5 tasks.
-pub static AGENTS: &[Agent] = &[];
+/// Master registry of supported agents.
+pub static AGENTS: &[Agent] = &[
+    Agent {
+        id: "claude-code",
+        display_name: "Claude Code",
+        detection: Detection {
+            env_vars: &["CLAUDECODE"],
+            binaries: &["claude"],
+            config_dirs: &[".claude"],
+            app_bundles: &[],
+        },
+        repo_config: Some(RepoConfig {
+            mcp_config_path: ".mcp.json",
+            mcp_format: McpFormat::ClaudeCodeJson,
+            instruction_file: Some("CLAUDE.md"),
+            agents_dir: Some(".claude/agents"),
+            allow_list_path: Some(".claude/settings.local.json"),
+        }),
+        global_config: Some(GlobalConfig {
+            mcp_config_path: GlobalPath::Home(".claude/settings.json"),
+            mcp_format: McpFormat::ClaudeCodeJson,
+            instruction_file: Some(GlobalPath::Home(".claude/CLAUDE.md")),
+            agents_dir: Some(GlobalPath::Home(".claude/agents")),
+            allow_list_path: Some(GlobalPath::Home(".claude/settings.json")),
+        }),
+        tool_prefix: "mcp__illu__",
+    },
+    Agent {
+        id: "gemini-cli",
+        display_name: "Gemini CLI",
+        detection: Detection {
+            env_vars: &[],
+            binaries: &["gemini"],
+            config_dirs: &[".gemini"],
+            app_bundles: &[],
+        },
+        repo_config: Some(RepoConfig {
+            mcp_config_path: ".gemini/settings.json",
+            mcp_format: McpFormat::GeminiJson,
+            instruction_file: Some("GEMINI.md"),
+            agents_dir: Some(".gemini/agents"),
+            allow_list_path: None,
+        }),
+        global_config: Some(GlobalConfig {
+            mcp_config_path: GlobalPath::Home(".gemini/settings.json"),
+            mcp_format: McpFormat::GeminiJson,
+            instruction_file: Some(GlobalPath::Home(".gemini/GEMINI.md")),
+            agents_dir: Some(GlobalPath::Home(".gemini/agents")),
+            allow_list_path: None,
+        }),
+        tool_prefix: "mcp_illu_",
+    },
+    Agent {
+        id: "codex-cli",
+        display_name: "Codex CLI",
+        detection: Detection {
+            env_vars: &[],
+            binaries: &["codex"],
+            config_dirs: &[".codex"],
+            app_bundles: &[],
+        },
+        repo_config: None,
+        global_config: Some(GlobalConfig {
+            mcp_config_path: GlobalPath::Home(".codex/config.toml"),
+            mcp_format: McpFormat::CodexToml,
+            instruction_file: None,
+            agents_dir: None,
+            allow_list_path: None,
+        }),
+        tool_prefix: "mcp__illu__",
+    },
+    Agent {
+        id: "claude-desktop",
+        display_name: "Claude Desktop",
+        detection: Detection {
+            env_vars: &[],
+            binaries: &[],
+            config_dirs: &["Library/Application Support/Claude"],
+            app_bundles: &["/Applications/Claude.app"],
+        },
+        repo_config: None,
+        global_config: Some(GlobalConfig {
+            mcp_config_path: GlobalPath::AppSupport("Claude", "claude_desktop_config.json"),
+            mcp_format: McpFormat::ClaudeDesktopJson,
+            instruction_file: None,
+            agents_dir: None,
+            allow_list_path: None,
+        }),
+        tool_prefix: "mcp__illu__",
+    },
+    Agent {
+        id: "cursor",
+        display_name: "Cursor",
+        detection: Detection {
+            env_vars: &[],
+            binaries: &["cursor"],
+            config_dirs: &[".cursor"],
+            app_bundles: &["/Applications/Cursor.app"],
+        },
+        repo_config: Some(RepoConfig {
+            mcp_config_path: ".cursor/mcp.json",
+            mcp_format: McpFormat::CursorJson,
+            instruction_file: None,
+            agents_dir: None,
+            allow_list_path: None,
+        }),
+        global_config: Some(GlobalConfig {
+            mcp_config_path: GlobalPath::Home(".cursor/mcp.json"),
+            mcp_format: McpFormat::CursorJson,
+            instruction_file: None,
+            agents_dir: None,
+            allow_list_path: None,
+        }),
+        tool_prefix: "mcp__illu__",
+    },
+    Agent {
+        id: "vscode-copilot",
+        display_name: "VS Code + Copilot",
+        detection: Detection {
+            env_vars: &["VSCODE_PID"],
+            binaries: &["code"],
+            config_dirs: &[],
+            app_bundles: &["/Applications/Visual Studio Code.app"],
+        },
+        repo_config: Some(RepoConfig {
+            mcp_config_path: ".vscode/mcp.json",
+            mcp_format: McpFormat::VsCodeJson,
+            instruction_file: None,
+            agents_dir: None,
+            allow_list_path: None,
+        }),
+        global_config: None,
+        tool_prefix: "mcp__illu__",
+    },
+    Agent {
+        id: "codex-desktop",
+        display_name: "Codex Desktop",
+        detection: Detection {
+            env_vars: &[],
+            binaries: &[],
+            config_dirs: &[".codex"],
+            app_bundles: &["/Applications/Codex.app", "/Applications/ChatGPT.app"],
+        },
+        repo_config: None,
+        global_config: Some(GlobalConfig {
+            mcp_config_path: GlobalPath::Home(".codex/config.toml"),
+            mcp_format: McpFormat::CodexToml,
+            instruction_file: None,
+            agents_dir: None,
+            allow_list_path: None,
+        }),
+        tool_prefix: "mcp__illu__",
+    },
+    Agent {
+        id: "antigravity",
+        display_name: "Antigravity",
+        detection: Detection {
+            env_vars: &[],
+            binaries: &["antigravity"],
+            config_dirs: &[".antigravity"],
+            app_bundles: &["/Applications/Antigravity.app"],
+        },
+        repo_config: None,
+        global_config: Some(GlobalConfig {
+            mcp_config_path: GlobalPath::Home(".antigravity/mcp.json"),
+            mcp_format: McpFormat::AntigravityJson,
+            instruction_file: None,
+            agents_dir: None,
+            allow_list_path: None,
+        }),
+        tool_prefix: "mcp__illu__",
+    },
+];
 
 /// Detect every agent with a per-repo config target.
 #[must_use]
