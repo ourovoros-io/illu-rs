@@ -34,6 +34,25 @@ fn install_codex_cli_writes_toml_under_home() {
 }
 
 #[test]
+fn install_rejects_agent_with_no_global_config() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let dir = tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+    }
+    let flags = SetupFlags {
+        explicit_agents: vec!["vscode-copilot".into()],
+        ..SetupFlags::default()
+    };
+    let err = configure_global(dir.path(), &flags).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("vscode-copilot"),
+        "error should mention vscode-copilot, got: {msg}"
+    );
+}
+
+#[test]
 fn install_claude_code_writes_global_settings() {
     let _guard = ENV_LOCK.lock().unwrap();
     let dir = tempdir().unwrap();

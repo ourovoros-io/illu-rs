@@ -375,8 +375,9 @@ pub fn configure_repo(
     flags: &SetupFlags,
 ) -> Result<Vec<AgentWriteReport>, Box<dyn std::error::Error>> {
     let ctx = detect::RealContext::new()?;
-    let detection = detect_repo_agents(&ctx);
-    let chosen = resolve_selection(&detection, flags)?;
+    let scoped: Vec<&Agent> = AGENTS.iter().filter(|a| a.repo_config.is_some()).collect();
+    let detection = detect_scoped(&ctx, |a| a.repo_config.is_some());
+    let chosen = resolve_selection(&scoped, &detection, flags)?;
     let cmd = IlluCommand::serve();
     let mut reports = Vec::with_capacity(chosen.len());
     for agent in chosen {
@@ -392,8 +393,12 @@ pub fn configure_global(
     flags: &SetupFlags,
 ) -> Result<Vec<AgentWriteReport>, Box<dyn std::error::Error>> {
     let ctx = detect::RealContext::new()?;
-    let detection = detect_global_agents(&ctx);
-    let chosen = resolve_selection(&detection, flags)?;
+    let scoped: Vec<&Agent> = AGENTS
+        .iter()
+        .filter(|a| a.global_config.is_some())
+        .collect();
+    let detection = detect_scoped(&ctx, |a| a.global_config.is_some());
+    let chosen = resolve_selection(&scoped, &detection, flags)?;
     let cmd = IlluCommand::serve();
     let mut reports = Vec::with_capacity(chosen.len());
     for agent in chosen {
@@ -426,14 +431,15 @@ pub fn self_heal_on_serve(
 }
 
 fn resolve_selection<'a>(
+    scoped_agents: &[&'a Agent],
     detection: &[(&'a Agent, DetectionLevel, String)],
     flags: &SetupFlags,
 ) -> Result<Vec<&'a Agent>, Box<dyn std::error::Error>> {
     let pairs: Vec<(&Agent, DetectionLevel)> = detection.iter().map(|(a, l, _)| (*a, *l)).collect();
-    match selection::select_from_flags(AGENTS, flags, &pairs, prompt::has_tty()) {
+    match selection::select_from_flags(scoped_agents, flags, &pairs, prompt::has_tty()) {
         Ok(picked) => Ok(picked),
         Err(selection::SelectionError::UnknownId(id)) => {
-            Err(format!("unknown agent id: {id}").into())
+            Err(format!("unknown agent id for this scope: {id}").into())
         }
         Err(selection::SelectionError::NeedsPrompt) => prompt::prompt_agents(detection),
     }

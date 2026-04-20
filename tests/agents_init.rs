@@ -100,6 +100,22 @@ fn init_with_two_agents_writes_both() {
 }
 
 #[test]
+fn init_rejects_agent_with_no_repo_config() {
+    let dir = tempdir().unwrap();
+    fake_cargo_repo(dir.path());
+    let flags = SetupFlags {
+        explicit_agents: vec!["codex-cli".into()],
+        ..SetupFlags::default()
+    };
+    let err = configure_repo(dir.path(), &flags).unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("codex-cli"),
+        "error should mention codex-cli, got: {msg}"
+    );
+}
+
+#[test]
 fn registry_has_expected_agents() {
     let ids: Vec<&str> = AGENTS.iter().map(|a| a.id).collect();
     for expected in [

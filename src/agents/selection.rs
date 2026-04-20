@@ -30,6 +30,12 @@ pub fn mode(flags: &SetupFlags, has_tty: bool) -> Mode {
 
 /// Select the agents to configure from [`SetupFlags`] and detection results.
 ///
+/// `agents` is the scope-filtered candidate pool — callers must pre-filter to
+/// only the agents that apply to the current subcommand (e.g. agents with a
+/// per-repo target for `illu init`, or with a global target for `illu install`).
+/// All resolution modes (Explicit, All, `AutoDetect`) operate on this scoped pool,
+/// so agents outside the scope are rejected even when mentioned by `--agent`.
+///
 /// Returns [`SelectionError::NeedsPrompt`] when the caller must defer to an
 /// interactive prompt (i.e. we're in [`Mode::Interactive`]).
 ///
@@ -40,27 +46,27 @@ pub fn mode(flags: &SetupFlags, has_tty: bool) -> Mode {
 /// - [`SelectionError::NeedsPrompt`] if the mode resolves to
 ///   [`Mode::Interactive`].
 pub fn select_from_flags<'a>(
-    agents: &'a [Agent],
+    agents: &[&'a Agent],
     flags: &SetupFlags,
     detection: &[(&'a Agent, DetectionLevel)],
     has_tty: bool,
 ) -> Result<Vec<&'a Agent>, SelectionError> {
     match mode(flags, has_tty) {
         Mode::Explicit => select_explicit(agents, &flags.explicit_agents),
-        Mode::All => Ok(agents.iter().collect()),
+        Mode::All => Ok(agents.to_vec()),
         Mode::AutoDetect => Ok(detected(detection)),
         Mode::Interactive => Err(SelectionError::NeedsPrompt),
     }
 }
 
 fn select_explicit<'a>(
-    agents: &'a [Agent],
+    agents: &[&'a Agent],
     ids: &[String],
 ) -> Result<Vec<&'a Agent>, SelectionError> {
     let mut out = Vec::with_capacity(ids.len());
     for id in ids {
         match agents.iter().find(|a| a.id == id) {
-            Some(a) => out.push(a),
+            Some(a) => out.push(*a),
             None => return Err(SelectionError::UnknownId(id.clone())),
         }
     }
@@ -118,12 +124,12 @@ mod tests {
     fn explicit_single_agent() {
         let a = agent("x");
         let b = agent("y");
-        let agents = &[a, b];
+        let pool: Vec<&Agent> = vec![&a, &b];
         let flags = SetupFlags {
             explicit_agents: vec!["x".into()],
             ..SetupFlags::default()
         };
-        let picked = select_from_flags(agents, &flags, &[], false).unwrap();
+        let picked = select_from_flags(&pool, &flags, &[], false).unwrap();
         assert_eq!(picked.len(), 1);
         assert_eq!(picked[0].id, "x");
     }
@@ -131,11 +137,12 @@ mod tests {
     #[test]
     fn explicit_unknown_errors() {
         let a = agent("x");
+        let pool: Vec<&Agent> = vec![&a];
         let flags = SetupFlags {
             explicit_agents: vec!["z".into()],
             ..SetupFlags::default()
         };
-        let Err(err) = select_from_flags(&[a], &flags, &[], false) else {
+        let Err(err) = select_from_flags(&pool, &flags, &[], false) else {
             unreachable!("expected error for unknown agent id")
         };
         assert!(matches!(err, SelectionError::UnknownId(_)));
@@ -145,12 +152,12 @@ mod tests {
     fn all_selects_every_agent() {
         let a = agent("x");
         let b = agent("y");
-        let agents = &[a, b];
+        let pool: Vec<&Agent> = vec![&a, &b];
         let flags = SetupFlags {
             all: true,
             ..SetupFlags::default()
         };
-        let picked = select_from_flags(agents, &flags, &[], false).unwrap();
+        let picked = select_from_flags(&pool, &flags, &[], false).unwrap();
         assert_eq!(picked.len(), 2);
     }
 
@@ -158,16 +165,16 @@ mod tests {
     fn yes_uses_detection() {
         let a = agent("x");
         let b = agent("y");
-        let agents = &[a, b];
+        let pool: Vec<&Agent> = vec![&a, &b];
         let detection = vec![
-            (&agents[0], DetectionLevel::Installed),
-            (&agents[1], DetectionLevel::Unknown),
+            (pool[0], DetectionLevel::Installed),
+            (pool[1], DetectionLevel::Unknown),
         ];
         let flags = SetupFlags {
             yes: true,
             ..SetupFlags::default()
         };
-        let picked = select_from_flags(agents, &flags, &detection, false).unwrap();
+        let picked = select_from_flags(&pool, &flags, &detection, false).unwrap();
         assert_eq!(picked.len(), 1);
         assert_eq!(picked[0].id, "x");
     }
@@ -176,13 +183,13 @@ mod tests {
     fn no_tty_behaves_like_yes() {
         let a = agent("x");
         let b = agent("y");
-        let agents = &[a, b];
+        let pool: Vec<&Agent> = vec![&a, &b];
         let detection = vec![
-            (&agents[0], DetectionLevel::Active),
-            (&agents[1], DetectionLevel::Unknown),
+            (pool[0], DetectionLevel::Active),
+            (pool[1], DetectionLevel::Unknown),
         ];
         let flags = SetupFlags::default();
-        let picked = select_from_flags(agents, &flags, &detection, false).unwrap();
+        let picked = select_from_flags(&pool, &flags, &detection, false).unwrap();
         assert_eq!(picked.len(), 1);
         assert_eq!(picked[0].id, "x");
     }
@@ -190,8 +197,9 @@ mod tests {
     #[test]
     fn interactive_returns_needs_prompt() {
         let a = agent("x");
+        let pool: Vec<&Agent> = vec![&a];
         let flags = SetupFlags::default();
-        let Err(err) = select_from_flags(&[a], &flags, &[], true) else {
+        let Err(err) = select_from_flags(&pool, &flags, &[], true) else {
             unreachable!("expected needs-prompt error in interactive mode")
         };
         assert!(matches!(err, SelectionError::NeedsPrompt));
