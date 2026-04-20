@@ -3,6 +3,7 @@
 pub mod agent_files;
 pub mod allow_list;
 pub mod detect;
+pub mod formats;
 pub mod instruction_md;
 pub mod paths;
 
