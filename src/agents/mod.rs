@@ -296,6 +296,12 @@ pub static AGENTS: &[Agent] = &[
     },
 ];
 
+/// All agent IDs currently supported. Derived from `AGENTS`.
+#[must_use]
+pub fn known_agent_ids() -> Vec<&'static str> {
+    AGENTS.iter().map(|a| a.id).collect()
+}
+
 /// Detect every agent with a per-repo config target.
 #[must_use]
 pub fn detect_repo_agents(

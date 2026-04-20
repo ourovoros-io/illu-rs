@@ -1,6 +1,6 @@
 #![expect(clippy::unwrap_used, reason = "integration tests")]
 
-use illu_rs::agents::{AGENTS, SetupFlags, configure_repo};
+use illu_rs::agents::{AGENTS, SetupFlags, configure_repo, known_agent_ids};
 use std::fs;
 use tempfile::tempdir;
 
@@ -146,4 +146,12 @@ fn registry_has_expected_agents() {
     ] {
         assert!(ids.contains(&expected), "missing agent: {expected}");
     }
+    // If `AGENTS` grows or shrinks without an update to the expected list
+    // above, this assertion catches the drift.
+    let known = known_agent_ids();
+    assert_eq!(
+        known.len(),
+        8,
+        "known_agent_ids() count mismatch: {known:?}"
+    );
 }
