@@ -455,51 +455,120 @@ fn resolve_selection<'a>(
     }
 }
 
+/// Fully-resolved on-disk targets for one agent (either repo- or global-scoped).
+///
+/// Collapses the shape of `RepoConfig` and `GlobalConfig` into the same
+/// concrete `PathBuf` layout so the actual write logic lives in one place.
+struct ResolvedTargets {
+    mcp: (PathBuf, McpFormat),
+    /// `(path, heading)` for the instruction markdown file.
+    instruction: Option<(PathBuf, String)>,
+    agents_dir: Option<PathBuf>,
+    allow_list: Option<PathBuf>,
+}
+
+impl ResolvedTargets {
+    fn from_repo(agent: &Agent, repo_path: &Path) -> Option<Self> {
+        let cfg = agent.repo_config.as_ref()?;
+        Some(Self {
+            mcp: (repo_path.join(cfg.mcp_config_path), cfg.mcp_format),
+            instruction: cfg
+                .instruction_file
+                .map(|md| (repo_path.join(md), format!("# {md}"))),
+            agents_dir: cfg.agents_dir.map(|ad| repo_path.join(ad)),
+            allow_list: cfg.allow_list_path.map(|al| repo_path.join(al)),
+        })
+    }
+
+    fn from_global(agent: &Agent, home: &Path, os: detect::TargetOs) -> Option<Self> {
+        let cfg = agent.global_config.as_ref()?;
+        let instruction = if let Some(md_gp) = &cfg.instruction_file {
+            let md_path = paths::resolve(md_gp, os, home);
+            let file_name = md_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_owned)?;
+            let heading = format!("# {file_name}");
+            Some((md_path, heading))
+        } else {
+            None
+        };
+        Some(Self {
+            mcp: (
+                paths::resolve(&cfg.mcp_config_path, os, home),
+                cfg.mcp_format,
+            ),
+            instruction,
+            agents_dir: cfg
+                .agents_dir
+                .as_ref()
+                .map(|gp| paths::resolve(gp, os, home)),
+            allow_list: cfg
+                .allow_list_path
+                .as_ref()
+                .map(|gp| paths::resolve(gp, os, home)),
+        })
+    }
+
+    fn apply(
+        self,
+        agent: &Agent,
+        cmd: &IlluCommand,
+        dry_run: bool,
+    ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+        let mut written = Vec::new();
+        let (mcp_path, fmt) = self.mcp;
+        if !dry_run {
+            formats::write(&mcp_path, fmt, cmd)?;
+        }
+        written.push(mcp_path);
+        if let Some((md_path, heading)) = self.instruction {
+            if !dry_run {
+                let parent = md_path.parent().ok_or("instruction file has no parent")?;
+                std::fs::create_dir_all(parent)?;
+                let file_name = md_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .ok_or("instruction file has no name")?;
+                instruction_md::write_md_section(
+                    parent,
+                    file_name,
+                    &heading,
+                    &instruction_md::illu_agent_section(agent.tool_prefix),
+                )?;
+            }
+            written.push(md_path);
+        }
+        if let Some(dir) = self.agents_dir {
+            if !dry_run {
+                agent_files::generate_agent_files(&dir, agent.tool_prefix)?;
+            }
+            written.push(dir);
+        }
+        if let Some(al) = self.allow_list {
+            if !dry_run {
+                allow_list::ensure_tools_allowed(&al)?;
+            }
+            written.push(al);
+        }
+        Ok(written)
+    }
+}
+
 fn write_repo_for(
     agent: &Agent,
     repo_path: &Path,
     cmd: &IlluCommand,
     dry_run: bool,
 ) -> Result<AgentWriteReport, Box<dyn std::error::Error>> {
-    let mut written = Vec::new();
-    let Some(cfg) = &agent.repo_config else {
+    let Some(targets) = ResolvedTargets::from_repo(agent, repo_path) else {
         return Ok(AgentWriteReport {
             agent_id: agent.id,
-            written_paths: written,
+            written_paths: vec![],
             skipped: true,
         });
     };
-    let mcp_path = repo_path.join(cfg.mcp_config_path);
-    if !dry_run {
-        formats::write(&mcp_path, cfg.mcp_format, cmd)?;
-    }
-    written.push(mcp_path);
-    if let Some(md_rel) = cfg.instruction_file {
-        let heading = format!("# {md_rel}");
-        if !dry_run {
-            instruction_md::write_md_section(
-                repo_path,
-                md_rel,
-                &heading,
-                &instruction_md::illu_agent_section(agent.tool_prefix),
-            )?;
-        }
-        written.push(repo_path.join(md_rel));
-    }
-    if let Some(ad_rel) = cfg.agents_dir {
-        let target = repo_path.join(ad_rel);
-        if !dry_run {
-            agent_files::generate_agent_files(&target, agent.tool_prefix)?;
-        }
-        written.push(target);
-    }
-    if let Some(al_rel) = cfg.allow_list_path {
-        let target = repo_path.join(al_rel);
-        if !dry_run {
-            allow_list::ensure_tools_allowed(&target)?;
-        }
-        written.push(target);
-    }
+    let written = targets.apply(agent, cmd, dry_run)?;
     Ok(AgentWriteReport {
         agent_id: agent.id,
         written_paths: written,
@@ -514,52 +583,14 @@ fn write_global_for(
     cmd: &IlluCommand,
     dry_run: bool,
 ) -> Result<AgentWriteReport, Box<dyn std::error::Error>> {
-    let mut written = Vec::new();
-    let Some(cfg) = &agent.global_config else {
+    let Some(targets) = ResolvedTargets::from_global(agent, home, os) else {
         return Ok(AgentWriteReport {
             agent_id: agent.id,
-            written_paths: written,
+            written_paths: vec![],
             skipped: true,
         });
     };
-    let mcp_path = paths::resolve(&cfg.mcp_config_path, os, home);
-    if !dry_run {
-        formats::write(&mcp_path, cfg.mcp_format, cmd)?;
-    }
-    written.push(mcp_path);
-    if let Some(md_gp) = &cfg.instruction_file {
-        let md_path = paths::resolve(md_gp, os, home);
-        let file_name = md_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or("instruction file has no name")?;
-        let heading = format!("# {file_name}");
-        if !dry_run {
-            let parent = md_path.parent().ok_or("instruction file has no parent")?;
-            std::fs::create_dir_all(parent)?;
-            instruction_md::write_md_section(
-                parent,
-                file_name,
-                &heading,
-                &instruction_md::illu_agent_section(agent.tool_prefix),
-            )?;
-        }
-        written.push(md_path);
-    }
-    if let Some(ad_gp) = &cfg.agents_dir {
-        let target = paths::resolve(ad_gp, os, home);
-        if !dry_run {
-            agent_files::generate_agent_files(&target, agent.tool_prefix)?;
-        }
-        written.push(target);
-    }
-    if let Some(al_gp) = &cfg.allow_list_path {
-        let target = paths::resolve(al_gp, os, home);
-        if !dry_run {
-            allow_list::ensure_tools_allowed(&target)?;
-        }
-        written.push(target);
-    }
+    let written = targets.apply(agent, cmd, dry_run)?;
     Ok(AgentWriteReport {
         agent_id: agent.id,
         written_paths: written,
