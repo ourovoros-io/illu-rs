@@ -1,5 +1,7 @@
 //! Per-agent config registry and orchestration.
 
+pub mod allow_list;
+
 use std::path::PathBuf;
 
 /// Static metadata for one supported agent.

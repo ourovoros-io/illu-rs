@@ -497,7 +497,7 @@ fn init_repo(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Auto-allow illu tools in project-level Claude settings
     let local_settings = repo_path.join(".claude/settings.local.json");
-    ensure_tools_allowed(&local_settings)?;
+    illu_rs::agents::allow_list::ensure_tools_allowed(&local_settings)?;
     println!("  auto-allowed illu tools in .claude/settings.local.json");
 
     // 5. Build initial index
@@ -582,38 +582,6 @@ fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error:
     write_mcp_config_to(config_path, &["serve"])
 }
 
-/// Ensure all illu MCP tools are auto-allowed in Claude settings.
-fn ensure_tools_allowed(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut config: serde_json::Value = std::fs::read_to_string(config_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-
-    let pattern = "mcp__illu__*";
-
-    let allow = config["permissions"]["allow"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-
-    let already = allow
-        .iter()
-        .any(|v| v.as_str().is_some_and(|s| s == pattern));
-
-    if !already {
-        let mut allow = allow;
-        allow.push(serde_json::json!(pattern));
-        config["permissions"]["allow"] = serde_json::Value::Array(allow);
-        std::fs::write(config_path, serde_json::to_string_pretty(&config)?)?;
-    }
-
-    Ok(())
-}
-
 const STATUSLINE_SH: &str = include_str!("../assets/statusline.sh");
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
@@ -680,7 +648,7 @@ fn install_global() -> Result<(), Box<dyn std::error::Error>> {
 
     let claude_settings = home.join(".claude/settings.json");
     write_global_mcp_config(&claude_settings)?;
-    ensure_tools_allowed(&claude_settings)?;
+    illu_rs::agents::allow_list::ensure_tools_allowed(&claude_settings)?;
     println!("  wrote {}", claude_settings.display());
 
     let gemini_settings = home.join(".gemini/settings.json");
@@ -947,7 +915,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 generate_agent_files(&repo_path.join(".claude/agents"), "mcp__illu__")?;
                 generate_agent_files(&repo_path.join(".gemini/agents"), "mcp_illu_")?;
                 let local_settings = repo_path.join(".claude/settings.local.json");
-                if let Err(e) = ensure_tools_allowed(&local_settings) {
+                if let Err(e) = illu_rs::agents::allow_list::ensure_tools_allowed(&local_settings) {
                     tracing::warn!("Could not auto-allow tools: {e}");
                 }
 
@@ -1265,48 +1233,5 @@ mod tests {
         let content4 = std::fs::read_to_string(&gitignore3).unwrap();
         assert!(content4.starts_with("/target\n"));
         assert!(content4.contains(".illu/"));
-    }
-
-    #[test]
-    fn test_ensure_tools_allowed() {
-        let dir = tempfile::tempdir().unwrap();
-
-        // Creates parent dir and file if they don't exist
-        let settings = dir.path().join("subdir/.claude/settings.local.json");
-        ensure_tools_allowed(&settings).unwrap();
-        let content = std::fs::read_to_string(&settings).unwrap();
-        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
-        let allow = val["permissions"]["allow"].as_array().unwrap();
-        assert!(allow.iter().any(|v| v.as_str() == Some("mcp__illu__*")));
-
-        // Idempotent: second call doesn't duplicate the entry
-        ensure_tools_allowed(&settings).unwrap();
-        let content2 = std::fs::read_to_string(&settings).unwrap();
-        let val2: serde_json::Value = serde_json::from_str(&content2).unwrap();
-        let allow2 = val2["permissions"]["allow"].as_array().unwrap();
-        assert_eq!(
-            allow2
-                .iter()
-                .filter(|v| v.as_str() == Some("mcp__illu__*"))
-                .count(),
-            1,
-            "mcp__illu__* must not be duplicated"
-        );
-
-        // Preserves existing entries
-        let settings2 = dir.path().join("settings2.json");
-        std::fs::write(
-            &settings2,
-            r#"{"permissions":{"allow":["Bash"],"deny":["rm"]}}"#,
-        )
-        .unwrap();
-        ensure_tools_allowed(&settings2).unwrap();
-        let content3 = std::fs::read_to_string(&settings2).unwrap();
-        let val3: serde_json::Value = serde_json::from_str(&content3).unwrap();
-        let allow3 = val3["permissions"]["allow"].as_array().unwrap();
-        assert!(allow3.iter().any(|v| v.as_str() == Some("Bash")));
-        assert!(allow3.iter().any(|v| v.as_str() == Some("mcp__illu__*")));
-        let deny3 = val3["permissions"]["deny"].as_array().unwrap();
-        assert!(deny3.iter().any(|v| v.as_str() == Some("rm")));
     }
 }
