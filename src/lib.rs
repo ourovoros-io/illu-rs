@@ -1,3 +1,4 @@
+pub mod agents;
 pub mod db;
 pub mod git;
 pub mod indexer;
