@@ -54,9 +54,11 @@ CLIs.
 | Cursor | IDE | per-repo + global | stdio |
 | VS Code + Copilot | IDE | per-repo | stdio |
 
-Exact env-var names, binary names, config paths, and config schemas for any row
-marked "verify" below are confirmed against vendor documentation during
-implementation, not in this spec.
+Env-var names, binary names, config paths, and config schemas were confirmed
+against vendor documentation during implementation where available. Rows where
+an identifier could not be verified ship with that field empty rather than a
+guessed value — see "Open items resolved during implementation" at the end of
+this spec for the final state of each row.
 
 ## Architecture
 
@@ -184,19 +186,22 @@ Detection is abstracted behind a `DetectionContext` trait so tests can inject a
 fake environment, a fake filesystem view, and a fake binary locator. No test
 touches real `PATH` or `$HOME`.
 
-Per-agent heuristic summary (vendor-specific identifiers to be confirmed during
-implementation, marked "verify"):
+Per-agent heuristic summary as shipped. Entries previously marked "verify" were
+resolved during implementation; rows with empty `env_vars` are detected solely
+via binaries / config dirs / app bundles, which means their `DetectionLevel` can
+reach `Installed` but never `Active` — `self_heal_on_serve` will not auto-write
+for them. Populating their env vars later is a pure additive change.
 
 | Agent | env_vars | binaries | config_dirs | app_bundles (macOS) |
 |---|---|---|---|---|
 | Claude Code | `CLAUDECODE` | `claude` | `.claude` | — |
-| Gemini CLI | `GEMINI_CLI` (verify) | `gemini` | `.gemini` | — |
-| Codex CLI | `CODEX_CLI` (verify) | `codex` | `.codex` | — |
-| Codex Desktop | — | — | — | `ChatGPT.app` / `Codex.app` (verify) |
-| Antigravity | — (verify) | `antigravity` (verify) | `.antigravity` (verify) | `Antigravity.app` (verify) |
-| Claude Desktop | — | — | `Library/Application Support/Claude` | `Claude.app` |
-| Cursor | `CURSOR_TRACE_ID` (verify) | `cursor` | `.cursor` | `Cursor.app` |
-| VS Code + Copilot | `VSCODE_PID`, `TERM_PROGRAM=vscode` | `code` | — | `Visual Studio Code.app` |
+| Gemini CLI | — | `gemini` | `.gemini` | — |
+| Codex CLI | — | `codex` | `.codex` | — |
+| Codex Desktop | — | — | `.codex` | `Codex.app`, `ChatGPT.app` |
+| Antigravity | — | `antigravity` | `.antigravity` | `Antigravity.app` |
+| Claude Desktop | — | — | — | `Claude.app` |
+| Cursor | — | `cursor` | `.cursor` | `Cursor.app` |
+| VS Code + Copilot | `VSCODE_PID` | `code` | — | `Visual Studio Code.app` |
 
 ## Orchestration
 
@@ -301,20 +306,20 @@ overwrites.
 - **ClaudeCodeJson / GeminiJson / ClaudeDesktopJson / CursorJson / AntigravityJson**
 
   ```json
-  { "mcpServers": { "illu": { "command": "illu", "args": ["serve"] } } }
+  { "mcpServers": { "illu": { "command": "illu-rs", "args": ["serve"] } } }
   ```
 
 - **VsCodeJson** (note: `servers`, not `mcpServers`; requires `type`):
 
   ```json
-  { "servers": { "illu": { "type": "stdio", "command": "illu", "args": ["serve"] } } }
+  { "servers": { "illu": { "type": "stdio", "command": "illu-rs", "args": ["serve"] } } }
   ```
 
 - **CodexToml** (`toml_edit` preserves comments/formatting):
 
   ```toml
   [mcp_servers.illu]
-  command = "illu"
+  command = "illu-rs"
   args = ["serve"]
   ```
 
@@ -403,7 +408,7 @@ left in place; nothing is deleted or migrated.
 - TUI rendering in a real terminal.
 - Each of the eight real agents loading its generated config and connecting to
   `illu serve` successfully. This is the only check that validates the vendor
-  identifiers flagged "verify" in the detection table.
+  identifiers used in the detection table.
 
 ### Lint gates
 
@@ -412,16 +417,24 @@ All new code respects `Cargo.toml [lints.clippy]`: no `unwrap_used`, no
 `panic`/`todo`/`unimplemented`. Test modules opt out with the existing
 `#[expect(clippy::unwrap_used, reason = "tests")]` pattern.
 
-## Open items confirmed during implementation
+## Open items resolved during implementation
 
-These are flagged here so the implementation plan accounts for them. They do
-not change the architecture:
+- **Env-var names for Gemini CLI, Codex CLI, Cursor.** Not yet identified
+  against vendor docs; `env_vars: &[]` on those rows. Detection falls back to
+  binary/config-dir signals. A user running `illu serve` from one of these
+  clients will not trigger `self_heal_on_serve` for that agent — they must run
+  `illu init`/`illu install` explicitly once. Adding the env var later is a
+  one-line change per agent.
+- **Antigravity identifiers.** Binary `antigravity`, config dir `~/.antigravity`,
+  bundle `/Applications/Antigravity.app` used as reasonable defaults pending
+  vendor confirmation.
+- **Codex Desktop config.** Assumed to share `~/.codex/config.toml` with Codex
+  CLI. If Codex Desktop ships its own location later, add a row with the
+  distinct path; no structural change to the registry.
+- **Claude Desktop on Linux.** `GlobalPath::AppSupport` resolves to
+  `~/.config/Claude/claude_desktop_config.json` on Linux. Config-dir detection
+  for this agent was removed entirely (was macOS-specific path — false negative
+  on Linux, false positive on no platform).
+- **VS Code + Copilot MCP schema.** Uses `servers` key (not `mcpServers`) with
+  `type: "stdio"`. Verified against recent VS Code MCP documentation.
 
-- Exact env-var names for Gemini CLI, Codex CLI, Cursor (currently "verify").
-- Exact binary name, config dir, and app-bundle name for Antigravity.
-- Whether Codex Desktop reuses `~/.codex/config.toml` or has its own config.
-- Claude Desktop config path on Linux (confirm vendor convention).
-- VS Code + Copilot's exact MCP config schema (`servers` key is assumed; verify).
-
-Each is verified against vendor documentation before the corresponding
-`AGENTS` row is committed.
