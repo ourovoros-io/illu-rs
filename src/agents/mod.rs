@@ -1,6 +1,7 @@
 //! Per-agent config registry and orchestration.
 
 pub mod allow_list;
+pub mod instruction_md;
 
 use std::path::PathBuf;
 
