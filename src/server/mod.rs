@@ -1,3 +1,4 @@
+pub mod dashboard;
 pub mod tools;
 
 use crate::db::Database;

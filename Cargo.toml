@@ -18,6 +18,7 @@ tokio = { version = "1.50.0", features = [
     "io-std",
     "time",
     "fs",
+    "signal",
 ] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -36,6 +37,10 @@ async-process = "2"
 futures = "0.3"
 url = "2"
 thiserror = "2"
+
+# Web dashboard
+axum = "0.8"
+opener = "0.7"
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -67,6 +67,12 @@ enum Command {
         #[arg(default_value = "src/")]
         path: String,
     },
+    /// Show web dashboard with indexing status and health
+    Status {
+        /// Port to run the dashboard on
+        #[arg(short, long, default_value_t = 3000)]
+        port: u16,
+    },
     /// Set up illu in a repo (configures Claude Code + Gemini CLI, builds index)
     Init,
     /// Install illu globally (configures Claude Code + Gemini CLI for all repos)
@@ -1052,7 +1058,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
             }
 
-            service.waiting().await?;
+            let shutdown = async {
+                #[cfg(unix)]
+                {
+                    match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    {
+                        Ok(mut sigterm) => {
+                            tokio::select! {
+                                _ = tokio::signal::ctrl_c() => {},
+                                _ = sigterm.recv() => {},
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to install SIGTERM handler: {e}");
+                            let _ = tokio::signal::ctrl_c().await;
+                        }
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = tokio::signal::ctrl_c().await;
+                }
+            };
+
+            tokio::select! {
+                res = service.waiting() => {
+                    if let Err(e) = res {
+                        tracing::error!("MCP server error: {e}");
+                    }
+                }
+                () = shutdown => {
+                    tracing::info!("Received shutdown signal, shutting down");
+                }
+            }
+
             tracing::info!("MCP server shut down");
             if has_cargo {
                 illu_rs::status::clear();
@@ -1095,6 +1134,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let db = open_or_index(repo_path)?;
             let result = handle_tree(&db, &path)?;
             print_result(&result);
+        }
+        Some(Command::Status { port }) => {
+            let registry = {
+                let path = illu_rs::registry::Registry::default_path()
+                    .unwrap_or_else(|_| repo_path.join(".illu/registry.toml"));
+                illu_rs::registry::Registry::load(&path)
+                    .unwrap_or_else(|_| illu_rs::registry::Registry::empty())
+            };
+            illu_rs::server::dashboard::start_dashboard(registry, port).await?;
         }
         Some(Command::Init) => {
             init_repo(repo_path)?;

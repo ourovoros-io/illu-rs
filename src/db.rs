@@ -116,6 +116,7 @@ impl Database {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
+             PRAGMA busy_timeout = 5000;
              PRAGMA cache_size = -8000;
              PRAGMA mmap_size = 67108864;
              PRAGMA temp_store = MEMORY;
@@ -137,6 +138,7 @@ impl Database {
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        conn.execute_batch("PRAGMA busy_timeout = 5000;")?;
         let repo_root = path
             .parent()
             .filter(|p| p.file_name().is_some_and(|n| n == ".illu"))
@@ -856,7 +858,22 @@ impl Database {
 
     pub fn file_count(&self) -> SqlResult<i64> {
         self.conn
-            .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+    }
+
+    pub fn symbol_count(&self) -> SqlResult<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0))
+    }
+
+    pub fn dep_count(&self) -> SqlResult<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM dependencies", [], |r| r.get(0))
+    }
+
+    pub fn ref_count(&self) -> SqlResult<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM symbol_refs", [], |r| r.get(0))
     }
 
     /// Count symbol refs grouped by confidence level.
