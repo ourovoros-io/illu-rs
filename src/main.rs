@@ -150,10 +150,12 @@ fn write_mcp_server_config(config_path: &Path) -> Result<(), Box<dyn std::error:
     write_mcp_config_to(config_path, &["serve"])
 }
 
+#[expect(dead_code, reason = "removed in task 16 cleanup")]
 fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     write_mcp_server_config(&repo_path.join(".mcp.json"))
 }
 
+#[expect(dead_code, reason = "removed in task 16 cleanup")]
 fn write_gemini_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     write_mcp_server_config(&repo_path.join(".gemini/settings.json"))
 }
@@ -631,31 +633,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::fs::create_dir_all(&db_dir)?;
                 illu_rs::status::init(repo_path);
                 illu_rs::status::set("starting");
-                write_mcp_config(repo_path)?;
-                illu_rs::agents::instruction_md::write_md_section(
-                    repo_path,
-                    "CLAUDE.md",
-                    "# CLAUDE.md",
-                    &illu_rs::agents::instruction_md::illu_agent_section("mcp__illu__"),
-                )?;
-                write_gemini_config(repo_path)?;
-                illu_rs::agents::instruction_md::write_md_section(
-                    repo_path,
-                    "GEMINI.md",
-                    "# GEMINI.md",
-                    &illu_rs::agents::instruction_md::illu_agent_section("mcp_illu_"),
-                )?;
-                illu_rs::agents::agent_files::generate_agent_files(
-                    &repo_path.join(".claude/agents"),
-                    "mcp__illu__",
-                )?;
-                illu_rs::agents::agent_files::generate_agent_files(
-                    &repo_path.join(".gemini/agents"),
-                    "mcp_illu_",
-                )?;
-                let local_settings = repo_path.join(".claude/settings.local.json");
-                if let Err(e) = illu_rs::agents::allow_list::ensure_tools_allowed(&local_settings) {
-                    tracing::warn!("Could not auto-allow tools: {e}");
+                let home = std::env::var("HOME").ok().map(PathBuf::from);
+                if let Some(home) = &home
+                    && let Err(e) = illu_rs::agents::self_heal_on_serve(Some(repo_path), home)
+                {
+                    tracing::warn!("Agent self-heal failed: {e}");
                 }
 
                 let config = IndexConfig {
