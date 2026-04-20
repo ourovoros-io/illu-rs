@@ -581,17 +581,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let has_python = illu_rs::indexer::has_python_project(repo_path);
             let has_project = has_cargo || has_ts || has_python;
 
+            let home = std::env::var("HOME").ok().map(PathBuf::from);
+            if let Some(home) = &home
+                && let Err(e) = illu_rs::agents::self_heal_on_serve(
+                    if has_project { Some(repo_path) } else { None },
+                    home,
+                )
+            {
+                tracing::warn!("Agent self-heal failed: {e}");
+            }
+
             let (db, config) = if has_project {
                 let db_dir = repo_path.join(".illu");
                 std::fs::create_dir_all(&db_dir)?;
                 illu_rs::status::init(repo_path);
                 illu_rs::status::set("starting");
-                let home = std::env::var("HOME").ok().map(PathBuf::from);
-                if let Some(home) = &home
-                    && let Err(e) = illu_rs::agents::self_heal_on_serve(Some(repo_path), home)
-                {
-                    tracing::warn!("Agent self-heal failed: {e}");
-                }
 
                 let config = IndexConfig {
                     repo_path: repo_path.clone(),
