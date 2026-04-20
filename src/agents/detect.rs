@@ -20,31 +20,41 @@ pub enum TargetOs {
 }
 
 pub fn detect_level(agent: &Agent, ctx: &dyn DetectionContext) -> DetectionLevel {
+    detect_with_reason(agent, ctx).0
+}
+
+/// Classify an agent and return both the detection level and a human-readable
+/// reason string in a single pass over the detection heuristics.
+///
+/// The reason is empty for `DetectionLevel::Unknown` and otherwise names
+/// the first signal that matched (e.g. `"env:CLAUDECODE"`, `"binary:claude"`,
+/// `"~/.cursor"`, or `"/Applications/Claude.app"`).
+pub fn detect_with_reason(agent: &Agent, ctx: &dyn DetectionContext) -> (DetectionLevel, String) {
     // Active: any env var present
     for var in agent.detection.env_vars {
         if ctx.env_var(var).is_some() {
-            return DetectionLevel::Active;
+            return (DetectionLevel::Active, format!("env:{var}"));
         }
     }
     // Installed: binary on PATH, or config dir present, or (macOS) app bundle
     for bin in agent.detection.binaries {
         if ctx.binary_on_path(bin) {
-            return DetectionLevel::Installed;
+            return (DetectionLevel::Installed, format!("binary:{bin}"));
         }
     }
     for rel in agent.detection.config_dirs {
         if ctx.path_exists(&ctx.home().join(rel)) {
-            return DetectionLevel::Installed;
+            return (DetectionLevel::Installed, format!("~/{rel}"));
         }
     }
     if ctx.os() == TargetOs::MacOs {
         for bundle in agent.detection.app_bundles {
             if ctx.path_exists(Path::new(bundle)) {
-                return DetectionLevel::Installed;
+                return (DetectionLevel::Installed, (*bundle).to_string());
             }
         }
     }
-    DetectionLevel::Unknown
+    (DetectionLevel::Unknown, String::new())
 }
 
 /// Real detection context backed by the process environment and filesystem.

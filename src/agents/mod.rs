@@ -326,53 +326,10 @@ fn detect_scoped(
         .iter()
         .filter(filter)
         .map(|a| {
-            let lvl = detect::detect_level(a, ctx);
-            let reason = detection_reason(a, ctx, lvl);
+            let (lvl, reason) = detect::detect_with_reason(a, ctx);
             (a, lvl, reason)
         })
         .collect()
-}
-
-fn detection_reason(
-    agent: &Agent,
-    ctx: &dyn detect::DetectionContext,
-    lvl: DetectionLevel,
-) -> String {
-    match lvl {
-        DetectionLevel::Active => agent
-            .detection
-            .env_vars
-            .iter()
-            .find(|v| ctx.env_var(v).is_some())
-            .map_or_else(|| "env".to_string(), |v| format!("env:{v}")),
-        DetectionLevel::Installed => {
-            if let Some(b) = agent
-                .detection
-                .binaries
-                .iter()
-                .find(|b| ctx.binary_on_path(b))
-            {
-                format!("binary:{b}")
-            } else if let Some(d) = agent
-                .detection
-                .config_dirs
-                .iter()
-                .find(|d| ctx.path_exists(&ctx.home().join(d)))
-            {
-                format!("~/{d}")
-            } else if let Some(b) = agent
-                .detection
-                .app_bundles
-                .iter()
-                .find(|b| ctx.path_exists(Path::new(b)))
-            {
-                (*b).to_string()
-            } else {
-                "installed".to_string()
-            }
-        }
-        DetectionLevel::Unknown => String::new(),
-    }
 }
 
 /// Configure per-repo agents in `repo_path` according to `flags`.
