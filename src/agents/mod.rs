@@ -59,10 +59,6 @@ pub enum GlobalPath {
     /// `~/.config/<vendor>/<file>` on Linux. Use when the agent follows
     /// platform-native config conventions (e.g. Claude Desktop).
     AppSupport(&'static str, &'static str),
-    /// Windows-style `AppData` path: `~/AppData/Roaming/<vendor>/<file>` on Windows,
-    /// `~/.config/<vendor>/<file>` elsewhere. Use when the macOS target does NOT
-    /// live under `Library/Application Support`.
-    AppData(&'static str, &'static str),
     /// Always `~/.config/<rel>` on all platforms. `XDG_CONFIG_HOME` is the
     /// caller's responsibility, not this resolver's.
     XdgConfig(&'static str),
