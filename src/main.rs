@@ -696,7 +696,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let watcher_db = server.db();
             let transport = stdio();
             tracing::info!("MCP transport ready, starting handshake");
-            if has_cargo {
+            if has_project {
                 illu_rs::status::set(illu_rs::status::READY);
             }
             let service = server.serve(transport).await?;
@@ -765,7 +765,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             tracing::info!("MCP server shut down");
-            if has_cargo {
+            if has_project {
                 illu_rs::status::clear();
             }
         }
