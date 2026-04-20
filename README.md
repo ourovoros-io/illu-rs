@@ -8,7 +8,12 @@
 
 <p align="center">
   <a href="#works-with"><img src="https://img.shields.io/badge/Claude_Code-5A29E4?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Code"/></a>
+  <a href="#works-with"><img src="https://img.shields.io/badge/Claude_Desktop-5A29E4?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude Desktop"/></a>
   <a href="#works-with"><img src="https://img.shields.io/badge/Gemini_CLI-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini CLI"/></a>
+  <a href="#works-with"><img src="https://img.shields.io/badge/Codex-000000?style=for-the-badge&logo=openai&logoColor=white" alt="Codex"/></a>
+  <a href="#works-with"><img src="https://img.shields.io/badge/Cursor-000000?style=for-the-badge&logoColor=white" alt="Cursor"/></a>
+  <a href="#works-with"><img src="https://img.shields.io/badge/VS_Code-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white" alt="VS Code + Copilot"/></a>
+  <a href="#works-with"><img src="https://img.shields.io/badge/Antigravity-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Antigravity"/></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-818cf8?style=for-the-badge" alt="MCP"/></a>
 </p>
 
@@ -16,7 +21,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-dea584?style=flat-square&logo=rust" alt="Rust 2024"/>
   <img src="https://img.shields.io/badge/tools-49-blue?style=flat-square" alt="49 tools"/>
-  <img src="https://img.shields.io/badge/tests-575_passing-brightgreen?style=flat-square" alt="575 tests"/>
+  <img src="https://img.shields.io/badge/agents-8_supported-blueviolet?style=flat-square" alt="8 agents supported"/>
+  <img src="https://img.shields.io/badge/tests-841_passing-brightgreen?style=flat-square" alt="841 tests"/>
 </p>
 
 ---
@@ -30,13 +36,24 @@ Install illu and set it up globally:
 git clone https://github.com/GeorgiosDelkos/illu-rs.git
 cargo install --path illu-rs
 
-# Global setup — works in every Rust repo automatically
+# Global setup — detects your agents, prompts you to pick
 illu-rs install
 ```
 
-That's it. Open **Claude Code** or **Gemini CLI** in any Rust project — illu auto-detects the repo, indexes it, and starts serving tools. Works with **git worktrees** too — each worktree gets its own isolated index.
+That's it. Open any supported agent in a Rust / TypeScript / Python project — illu auto-detects the repo, indexes it, and starts serving tools. Works with **git worktrees** too — each worktree gets its own isolated index.
 
-`install` writes MCP config to `~/.claude/settings.json` and `~/.gemini/settings.json`, adds usage instructions to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`, installs a [statusline](#statusline) for Claude Code, and sets up a global gitignore for `.illu/`.
+`install` runs an interactive multi-select prompt listing the agents it detected on your system (boxes pre-checked for installed ones, unchecked for others you can opt into). For each selected agent it writes MCP config to the right location — `~/.claude/settings.json`, `~/Library/Application Support/Claude/claude_desktop_config.json`, `~/.codex/config.toml`, `~/.cursor/mcp.json`, etc. — plus a [statusline](#statusline) for Claude Code and a global gitignore for `.illu/`.
+
+**Non-interactive and scripted flows:**
+
+```bash
+illu-rs install --yes                             # no prompt, accept detected agents
+illu-rs install --agent claude-code --agent cursor # configure exactly these
+illu-rs install --all                             # every agent, no prompt
+illu-rs install --dry-run                          # print what would be written, touch nothing
+```
+
+If `illu-rs install` runs without a TTY (CI, piped, etc.) it behaves as `--yes`. If no agents are detected and no explicit flags are passed, it exits non-zero with a list of supported agent IDs.
 
 > **Requirements:** Rust toolchain and a C compiler (Xcode CLI tools on macOS, `build-essential` on Linux). All C dependencies (SQLite, tree-sitter) are compiled from source — no system libraries needed. For `ra_*` tools, install rust-analyzer: `rustup component add rust-analyzer` (optional — core tools work without it).
 
@@ -50,7 +67,7 @@ cd your-project
 illu-rs init
 ```
 
-This writes `.mcp.json` and agent instructions to the repo itself. Useful for repo-specific overrides.
+Same interactive prompt as `install`, but scoped to agents with per-repo config support (Claude Code, Gemini CLI, Cursor, VS Code + Copilot). Writes `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `CLAUDE.md`, etc. as appropriate. The same flags work: `--agent`, `--all`, `--yes`, `--dry-run`.
 
 </details>
 
@@ -567,42 +584,34 @@ from: "process_request", to: "handle_event", target_repo: "event-service"
 
 ## Works With
 
-<table>
-<tr>
-<td width="50%" align="center">
+`illu-rs install` / `illu-rs init` ship with first-class support for eight MCP-capable agents. Pick any combination at setup time — detect-and-confirm, or explicit via `--agent <id>`.
 
-### <img src="https://img.shields.io/badge/-5A29E4?style=flat-square&logo=anthropic&logoColor=white" height="20" align="center"/> &nbsp;Claude Code
+| Agent | Type | Scope | Config location written |
+|---|---|---|---|
+| Claude Code | CLI | per-repo + global | `.mcp.json`, `.claude/`, `~/.claude/settings.json` |
+| Claude Desktop | Desktop | global | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) |
+| Gemini CLI | CLI | per-repo + global | `.gemini/settings.json`, `~/.gemini/settings.json` |
+| Codex CLI | CLI | global | `~/.codex/config.toml` |
+| Codex Desktop | Desktop | global | `~/.codex/config.toml` |
+| Cursor | IDE | per-repo + global | `.cursor/mcp.json`, `~/.cursor/mcp.json` |
+| VS Code + Copilot | IDE | per-repo | `.vscode/mcp.json` |
+| Antigravity | IDE | global | `~/.antigravity/mcp.json` |
 
-Auto-configured via `illu-rs install` (global) or `illu-rs init` (per-repo)
-
-49 tools: `mcp__illu__query`, `mcp__illu__context`, `mcp__illu__ra_definition`, etc.
-
-</td>
-<td width="50%" align="center">
-
-### <img src="https://img.shields.io/badge/-4285F4?style=flat-square&logo=google&logoColor=white" height="20" align="center"/> &nbsp;Gemini CLI
-
-Auto-configured via `illu-rs install` (global) or `illu-rs init` (per-repo)
-
-49 tools: `@illu query`, `@illu context`, `@illu ra_definition`, etc.
-
-</td>
-</tr>
-</table>
-
-Any MCP client with stdio transport support works — illu speaks standard MCP.
+All 49 tools are available to every configured agent. Claude-family agents see them as `mcp__illu__query`, Gemini CLI as `@illu query`, Codex / Cursor / VS Code / Antigravity per their respective MCP conventions. Any other MCP client with stdio transport support works too — illu speaks standard MCP and can be wired in manually via the [manual MCP config](#get-started) block above.
 
 ## Features
 
 | Feature | What it does |
 |---------|-------------|
-| **Global install** | `illu-rs install` configures Claude Code + Gemini CLI globally — works in every repo |
+| **Multi-agent setup** | `illu-rs install` / `illu-rs init` support 8 agents (Claude Code/Desktop, Gemini CLI, Codex CLI/Desktop, Cursor, VS Code + Copilot, Antigravity) — detect + prompt, no blanket writes |
+| **Scripted setup** | `--agent <id>`, `--all`, `--yes`, `--dry-run` flags for CI and dotfiles; no-TTY auto-accepts detected agents |
+| **Read-modify-write configs** | Merges into existing MCP config files, preserves unrelated server entries, errors cleanly on malformed input |
+| **Self-heal on serve** | `illu-rs serve` detects the calling agent via env vars and rewrites only that agent's config — no cross-contamination |
 | **Worktree support** | Each git worktree gets its own isolated index, auto-detected from CWD |
 | **Multi-repo registry** | Repos auto-register in `~/.illu/registry.toml`; worktrees dedup by shared git dir |
 | **Cross-repo search** | `cross_query` searches symbols across all registered repos |
 | **Cross-repo impact** | `cross_impact` finds references to a symbol in other repos |
 | **Cross-repo dependencies** | `cross_deps` shows path deps and shared crates between repos |
-| **Zero-config setup** | `illu-rs init` configures everything for both Claude and Gemini |
 | **Incremental indexing** | Content-hashed — only re-parses files that changed, cleans stale refs |
 | **Workspace support** | Multi-crate workspaces with cross-crate reference resolution |
 | **Full-text search** | FTS5 prefix matching + trigram-indexed substring search |
@@ -707,9 +716,11 @@ The script requires `jq` and `git` on PATH.
               │  36 core + 13 ra_* tools   │
               └────────────┬──────────────┘
                            │
-          ┌────────────────┼────────────────┐
-          │                │                 │
-    Claude Code      Gemini CLI       Any MCP client
+       ┌───────────────────┼───────────────────┐
+       │                   │                   │
+  Claude Code           Cursor            Gemini CLI
+  Claude Desktop        VS Code+Copilot   Codex CLI/Desktop
+                                          Antigravity
 ```
 
 **Two engines:** tree-sitter provides fast offline indexing (36 tools). rust-analyzer provides compiler-accurate intelligence (13 `ra_*` tools) when available. Both run simultaneously.
@@ -727,6 +738,16 @@ src/
 ├── git.rs               # Git operations (worktree detection, toplevel)
 ├── registry.rs          # Multi-repo registry (~/.illu/registry.toml)
 ├── db.rs                # SQLite (schema, queries, FTS5 + trigram)
+├── agents/              # Per-agent config registry and orchestration
+│   ├── mod.rs           # AGENTS static, configure_repo/global, self_heal_on_serve
+│   ├── detect.rs        # DetectionContext trait + RealContext (env/PATH/fs)
+│   ├── formats.rs       # MCP config writers (JSON + TOML, read-modify-write)
+│   ├── paths.rs         # Platform-aware GlobalPath resolver
+│   ├── selection.rs     # Pure flags + detection -> Vec<&Agent>
+│   ├── prompt.rs        # dialoguer-based multi-select prompt
+│   ├── allow_list.rs    # Claude-family settings.local.json allow-list
+│   ├── instruction_md.rs# CLAUDE.md / GEMINI.md section injection
+│   └── agent_files.rs   # .claude/agents/* / .gemini/agents/* generation
 ├── indexer/
 │   ├── mod.rs           # Orchestrator (index, refresh, skill file)
 │   ├── parser.rs        # Tree-sitter (symbols, refs, visibility)
@@ -792,8 +813,8 @@ src/
 <summary>Development</summary>
 
 ```bash
-cargo test                                                    # 397+ tests
-cargo clippy --all-targets -- -D warnings                     # strict lints
+cargo test                                                    # 841 tests
+cargo clippy --all-targets --all-features -- -D warnings      # strict lints
 cargo fmt --all -- --check                                    # formatting
 RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
 RUST_LOG=debug cargo run -- --no-ra serve                     # without rust-analyzer
@@ -801,12 +822,14 @@ RUST_LOG=debug cargo run -- --no-ra serve                     # without rust-ana
 
 | Test Suite | Count | What it guards |
 |------------|-------|----------------|
-| Unit | 393 | Parser, DB, indexer, tool handlers, registry |
+| Unit | 528 | Parser, DB, indexer, tool handlers, registry, agent setup |
+| Agents end-to-end | 8 | `configure_repo` / `configure_global` write correct files per agent |
 | Data integrity | 68 | Line numbers, refs, cross-crate resolution, stale cleanup |
 | Data quality | 61 | End-to-end tool output format and content |
-| Integration | 28 | Full pipeline: index, query, verify + cross-repo |
-| Self-index | 19 | illu indexes itself — validates real-world accuracy |
-| Error paths | 6 | Edge cases: empty files, missing symbols, Unicode |
+| Integration | 27 | Full pipeline: index, query, verify + cross-repo |
+| Self-index | 24 | illu indexes itself — validates real-world accuracy |
+| TypeScript / Python | 29 | Non-Rust language parsers |
+| Error paths + misc | 96 | Edge cases, incremental correctness, cross-repo, etc. |
 
 </details>
 
