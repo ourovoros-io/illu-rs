@@ -86,4 +86,24 @@ mod tests {
         );
         assert_eq!(resolved, Path::new("/h/.config/antigravity/mcp.json"));
     }
+
+    #[test]
+    fn app_data_windows() {
+        let resolved = resolve(
+            &GlobalPath::AppData("Claude", "config.json"),
+            TargetOs::Windows,
+            Path::new("/h"),
+        );
+        assert_eq!(resolved, Path::new("/h/AppData/Roaming/Claude/config.json"));
+    }
+
+    #[test]
+    fn app_data_non_windows_falls_back_to_dot_config() {
+        let resolved = resolve(
+            &GlobalPath::AppData("Claude", "config.json"),
+            TargetOs::MacOs,
+            Path::new("/h"),
+        );
+        assert_eq!(resolved, Path::new("/h/.config/Claude/config.json"));
+    }
 }
