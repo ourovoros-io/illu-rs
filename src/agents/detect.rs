@@ -56,9 +56,11 @@ pub struct RealContext {
 impl RealContext {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
+            .ok()
+            .or_else(|| std::env::var("USERPROFILE").ok())
+            .filter(|s| !s.is_empty())
             .map(PathBuf::from)
-            .map_err(|_| "neither HOME nor USERPROFILE set")?;
+            .ok_or("neither HOME nor USERPROFILE set")?;
         let os = match std::env::consts::OS {
             "macos" => TargetOs::MacOs,
             "windows" => TargetOs::Windows,
@@ -77,9 +79,24 @@ impl DetectionContext for RealContext {
         let Some(path) = std::env::var_os("PATH") else {
             return false;
         };
+        let extensions: Vec<String> = if self.os == TargetOs::Windows {
+            std::env::var("PATHEXT")
+                .unwrap_or_else(|_| ".EXE;.BAT;.CMD;.COM".to_string())
+                .split(';')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim_start_matches('.').to_ascii_lowercase())
+                .collect()
+        } else {
+            Vec::new()
+        };
         std::env::split_paths(&path).any(|dir| {
             let candidate = dir.join(name);
-            candidate.is_file() || candidate.with_extension("exe").is_file()
+            if candidate.is_file() {
+                return true;
+            }
+            extensions
+                .iter()
+                .any(|ext| candidate.with_extension(ext).is_file())
         })
     }
 
