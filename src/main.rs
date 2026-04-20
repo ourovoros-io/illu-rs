@@ -806,8 +806,7 @@ fn handle_repo_command(command: RepoCommand) -> Result<(), Box<dyn std::error::E
 
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+                .map_or(0, |d| d.as_secs());
 
             for repo in &registry.repos {
                 let ts: u64 = repo.last_indexed.parse().unwrap_or(0);
@@ -1005,7 +1004,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let ra = std::sync::Arc::new(ra);
                         server = server.with_ra(ra.clone());
                         tokio::spawn(async move {
-                            match ra.wait_for_ready(std::time::Duration::from_secs(120)).await {
+                            match ra.wait_for_ready(std::time::Duration::from_mins(2)).await {
                                 Ok(()) => tracing::info!("rust-analyzer is ready"),
                                 Err(e) => {
                                     tracing::warn!("rust-analyzer readiness timeout: {e}");

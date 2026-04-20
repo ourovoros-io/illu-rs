@@ -141,7 +141,7 @@ fn score_candidates<'a>(
         }
     }
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|v| std::cmp::Reverse(v.0));
     scored.truncate(10);
     Ok(scored)
 }

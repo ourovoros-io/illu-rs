@@ -99,7 +99,7 @@ pub fn handle_stats(
 
     // Largest files
     let mut sorted_files = file_counts;
-    sorted_files.sort_by(|a, b| b.count.cmp(&a.count));
+    sorted_files.sort_by_key(|v| std::cmp::Reverse(v.count));
     sorted_files.truncate(5);
     if !sorted_files.is_empty() {
         let _ = writeln!(output, "### Largest Files\n");

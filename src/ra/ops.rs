@@ -316,7 +316,7 @@ fn apply_text_edits(path: &std::path::Path, edits: &[TextEdit]) -> Result<()> {
         })
         .collect();
 
-    indexed_edits.sort_by(|a, b| b.0.cmp(&a.0));
+    indexed_edits.sort_by_key(|v| std::cmp::Reverse(v.0));
 
     let mut result = content;
     for (start, end, new_text) in indexed_edits {

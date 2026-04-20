@@ -42,7 +42,7 @@ pub fn generate_cargo_docs(
         .spawn()?;
 
     let start = std::time::Instant::now();
-    let deadline = start + std::time::Duration::from_secs(60);
+    let deadline = start + std::time::Duration::from_mins(1);
     loop {
         match child.try_wait()? {
             Some(status) if status.success() => break,

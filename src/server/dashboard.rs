@@ -141,7 +141,7 @@ fn read_index_stats(repo_path: &std::path::Path) -> Result<RepoIndexStats, Strin
 
     // The existence check above guarantees metadata is present; treat a
     // metadata failure as non-fatal (size is best-effort).
-    let index_size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+    let index_size_bytes = std::fs::metadata(&db_path).map_or(0, |m| m.len());
     let db = Database::open_readonly(&db_path).map_err(|e| format!("Failed to open index: {e}"))?;
 
     let confidence_distribution = db

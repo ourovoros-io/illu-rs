@@ -164,7 +164,7 @@ fn render_shared_deps(out: &mut String, repo_deps: &HashMap<String, HashSet<Stri
         return;
     }
 
-    shared.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    shared.sort_by_key(|v| std::cmp::Reverse(v.1.len()));
     out.push_str("### Shared Dependencies\n\n");
     out.push_str("| Crate | Used By |\n|-------|---------|\n");
     for (dep, users) in shared.iter().take(30) {
