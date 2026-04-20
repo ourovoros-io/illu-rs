@@ -118,48 +118,6 @@ enum RepoCommand {
     },
 }
 
-fn write_mcp_config_to(
-    config_path: &Path,
-    args: &[&str],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let binary = "illu-rs";
-
-    let illu_entry = serde_json::json!({
-        "command": binary,
-        "args": args,
-        "env": { "RUST_LOG": "warn" }
-    });
-
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut config: serde_json::Value = std::fs::read_to_string(config_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({"mcpServers": {}}));
-
-    config["mcpServers"]["illu"] = illu_entry;
-
-    std::fs::write(config_path, serde_json::to_string_pretty(&config)?)?;
-    tracing::info!("Wrote MCP config to {}", config_path.display());
-    Ok(())
-}
-
-fn write_mcp_server_config(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    write_mcp_config_to(config_path, &["serve"])
-}
-
-#[expect(dead_code, reason = "removed in task 16 cleanup")]
-fn write_mcp_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    write_mcp_server_config(&repo_path.join(".mcp.json"))
-}
-
-#[expect(dead_code, reason = "removed in task 16 cleanup")]
-fn write_gemini_config(repo_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    write_mcp_server_config(&repo_path.join(".gemini/settings.json"))
-}
-
 fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error>> {
     illu_rs::status::init(repo_path);
     let db_path = repo_path.join(".illu/index.db");
@@ -312,11 +270,6 @@ fn register_repo(repo_path: &Path) {
     });
     registry.prune();
     let _ = registry.save();
-}
-
-#[expect(dead_code, reason = "removed in task 16 cleanup")]
-fn write_global_mcp_config(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    write_mcp_config_to(config_path, &["serve"])
 }
 
 const STATUSLINE_SH: &str = include_str!("../assets/statusline.sh");
