@@ -871,11 +871,6 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM dependencies", [], |r| r.get(0))
     }
 
-    pub fn ref_count(&self) -> SqlResult<i64> {
-        self.conn
-            .query_row("SELECT COUNT(*) FROM symbol_refs", [], |r| r.get(0))
-    }
-
     /// Count symbol refs grouped by confidence level.
     pub fn count_refs_by_confidence(&self) -> SqlResult<Vec<(String, i64)>> {
         let mut stmt = self.conn.prepare(

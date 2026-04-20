@@ -68,9 +68,10 @@ enum Command {
         path: String,
     },
     /// Show web dashboard with indexing status and health
-    Status {
+    #[cfg(feature = "dashboard")]
+    Dashboard {
         /// Port to run the dashboard on
-        #[arg(short, long, default_value_t = 3000)]
+        #[arg(short, long, default_value_t = 7879)]
         port: u16,
     },
     /// Set up illu in a repo (configures Claude Code + Gemini CLI, builds index)
@@ -1135,7 +1136,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let result = handle_tree(&db, &path)?;
             print_result(&result);
         }
-        Some(Command::Status { port }) => {
+        #[cfg(feature = "dashboard")]
+        Some(Command::Dashboard { port }) => {
             let registry = {
                 let path = illu_rs::registry::Registry::default_path()
                     .unwrap_or_else(|_| repo_path.join(".illu/registry.toml"));

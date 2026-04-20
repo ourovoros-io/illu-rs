@@ -1,3 +1,4 @@
+#[cfg(feature = "dashboard")]
 pub mod dashboard;
 pub mod tools;
 

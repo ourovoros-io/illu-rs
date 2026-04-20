@@ -36,7 +36,14 @@ pub fn handle_freshness(
 
     let version_current = stored_version.as_deref() == Some(current_version);
     let commit_current = indexed_hash.as_deref() == Some(current_head.as_str());
-    let is_current = commit_current && version_current;
+    // Mirror the dashboard: fresh iff both version and commit match.
+    // Delegates the canonical rule to the shared helper so the two
+    // views cannot drift.
+    let is_current = !crate::indexer::is_index_stale(
+        stored_version.as_deref(),
+        indexed_hash.as_deref(),
+        Some(current_head.as_str()),
+    );
 
     if version_current {
         let _ = writeln!(

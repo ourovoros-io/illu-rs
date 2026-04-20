@@ -17,8 +17,9 @@ struct RegistryFile {
     repos: Vec<RepoEntry>,
 }
 
+#[derive(Clone)]
 pub struct Registry {
-    pub file_path: PathBuf,
+    file_path: PathBuf,
     pub repos: Vec<RepoEntry>,
 }
 
@@ -69,9 +70,18 @@ impl Registry {
         self.repos.retain(|r| r.path.exists());
     }
 
-    /// Remove a repository by its path.
-    pub fn remove(&mut self, path: &Path) {
-        self.repos.retain(|r| r.path != path);
+    /// Remove a repository by its path. Canonicalizes both sides so
+    /// trailing slashes, `./` prefixes, or case differences on
+    /// case-insensitive filesystems match correctly. Returns `true`
+    /// if at least one entry was removed.
+    pub fn remove(&mut self, path: &Path) -> bool {
+        let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let before = self.repos.len();
+        self.repos.retain(|r| {
+            let canon = std::fs::canonicalize(&r.path).unwrap_or_else(|_| r.path.clone());
+            canon != target
+        });
+        self.repos.len() != before
     }
 
     /// Write registry to disk, creating parent directories as needed.
@@ -302,9 +312,13 @@ mod tests {
         ));
         assert_eq!(reg.repos.len(), 2);
 
-        reg.remove(&path_a);
+        assert!(reg.remove(&path_a));
         assert_eq!(reg.repos.len(), 1);
         assert_eq!(reg.repos[0].name, "repo-b");
+
+        // Removing an unknown path is a no-op and returns false.
+        assert!(!reg.remove(&dir.path().join("repo-unknown")));
+        assert_eq!(reg.repos.len(), 1);
     }
 
     #[test]
