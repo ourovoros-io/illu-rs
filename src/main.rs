@@ -188,7 +188,20 @@ fn init_repo(
         }
     }
     if reports.is_empty() || reports.iter().all(|r| r.skipped) {
-        println!("  no agents configured (nothing detected, nothing passed via --agent)");
+        if flags.explicit_agents.is_empty() && !flags.all {
+            let scoped_ids: Vec<&str> = illu_rs::agents::AGENTS
+                .iter()
+                .filter(|a| a.repo_config.is_some())
+                .map(|a| a.id)
+                .collect();
+            return Err(format!(
+                "no agents detected. Pass --agent <id> to configure one explicitly. \
+                 Supported per-repo agents: {}",
+                scoped_ids.join(", ")
+            )
+            .into());
+        }
+        println!("  no agents configured (nothing selected)");
     }
 
     if flags.dry_run {
@@ -347,7 +360,20 @@ fn install_global(flags: &illu_rs::agents::SetupFlags) -> Result<(), Box<dyn std
         }
     }
     if reports.is_empty() || reports.iter().all(|r| r.skipped) {
-        println!("  no agents configured (nothing detected, nothing passed via --agent)");
+        if flags.explicit_agents.is_empty() && !flags.all {
+            let scoped_ids: Vec<&str> = illu_rs::agents::AGENTS
+                .iter()
+                .filter(|a| a.global_config.is_some())
+                .map(|a| a.id)
+                .collect();
+            return Err(format!(
+                "no agents detected. Pass --agent <id> to configure one explicitly. \
+                 Supported global agents: {}",
+                scoped_ids.join(", ")
+            )
+            .into());
+        }
+        println!("  no agents configured (nothing selected)");
     }
 
     if flags.dry_run {
