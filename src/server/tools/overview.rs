@@ -116,7 +116,7 @@ pub fn handle_overview(
         },
     );
     let mut kinds: Vec<_> = kind_counts.into_iter().collect();
-    kinds.sort_by(|a, b| b.1.cmp(&a.1));
+    kinds.sort_by_key(|v| std::cmp::Reverse(v.1));
     let kind_summary: Vec<String> = kinds.iter().map(|(k, c)| format!("{c} {k}s")).collect();
     let _ = writeln!(output, "{}", kind_summary.join(", "));
     let _ = writeln!(

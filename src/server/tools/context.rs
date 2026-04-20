@@ -22,8 +22,7 @@ pub fn handle_context(
         return Ok(super::symbol_not_found(db, symbol_name));
     }
 
-    let show =
-        |name: &str| -> bool { sections.is_none() || sections.is_some_and(|s| s.contains(&name)) };
+    let show = |name: &str| -> bool { sections.is_none_or(|s| s.contains(&name)) };
 
     let repo_root = db.repo_root();
     let mut output = String::new();

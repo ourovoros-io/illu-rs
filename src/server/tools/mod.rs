@@ -156,7 +156,7 @@ pub(crate) fn symbol_not_found(db: &Database, name: &str) -> String {
     let lev_matches = levenshtein_suggestions(db, name);
     if !lev_matches.is_empty() {
         use std::fmt::Write;
-        let mut out = format!("No symbol found matching '{name}'.\n\nDid you mean:\n",);
+        let mut out = format!("No symbol found matching '{name}'.\n\nDid you mean:\n");
         for (sym_name, impl_type) in &lev_matches {
             let qname = if let Some(it) = impl_type {
                 format!("{it}::{sym_name}")

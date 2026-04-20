@@ -31,11 +31,7 @@ pub fn handle_doc_coverage(
     let mut output = String::new();
     let _ = writeln!(output, "## Doc Coverage\n");
 
-    let pct = if total > 0 {
-        documented.len() * 100 / total
-    } else {
-        0
-    };
+    let pct = (documented.len() * 100).checked_div(total).unwrap_or(0);
     let _ = writeln!(
         output,
         "**Coverage:** {}/{} symbols documented ({}%)\n",

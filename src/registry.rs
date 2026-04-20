@@ -17,6 +17,7 @@ struct RegistryFile {
     repos: Vec<RepoEntry>,
 }
 
+#[derive(Clone)]
 pub struct Registry {
     file_path: PathBuf,
     pub repos: Vec<RepoEntry>,
@@ -67,6 +68,20 @@ impl Registry {
     /// Remove entries whose `path` no longer exists on disk.
     pub fn prune(&mut self) {
         self.repos.retain(|r| r.path.exists());
+    }
+
+    /// Remove a repository by its path. Canonicalizes both sides so
+    /// trailing slashes, `./` prefixes, or case differences on
+    /// case-insensitive filesystems match correctly. Returns `true`
+    /// if at least one entry was removed.
+    pub fn remove(&mut self, path: &Path) -> bool {
+        let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let before = self.repos.len();
+        self.repos.retain(|r| {
+            let canon = std::fs::canonicalize(&r.path).unwrap_or_else(|_| r.path.clone());
+            canon != target
+        });
+        self.repos.len() != before
     }
 
     /// Write registry to disk, creating parent directories as needed.
@@ -272,6 +287,38 @@ mod tests {
 
         assert_eq!(reg.repos.len(), 1);
         assert_eq!(reg.repos[0].name, "alive");
+    }
+
+    #[test]
+    fn remove_by_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg_path = dir.path().join("registry.toml");
+        let mut reg = Registry::load(&reg_path).unwrap();
+
+        let path_a = dir.path().join("repo-a");
+        let path_b = dir.path().join("repo-b");
+
+        reg.register(make_entry(
+            "repo-a",
+            path_a.clone(),
+            dir.path().join(".git-a"),
+            "2026-01-01T00:00:00Z",
+        ));
+        reg.register(make_entry(
+            "repo-b",
+            path_b.clone(),
+            dir.path().join(".git-b"),
+            "2026-01-01T00:00:00Z",
+        ));
+        assert_eq!(reg.repos.len(), 2);
+
+        assert!(reg.remove(&path_a));
+        assert_eq!(reg.repos.len(), 1);
+        assert_eq!(reg.repos[0].name, "repo-b");
+
+        // Removing an unknown path is a no-op and returns false.
+        assert!(!reg.remove(&dir.path().join("repo-unknown")));
+        assert_eq!(reg.repos.len(), 1);
     }
 
     #[test]

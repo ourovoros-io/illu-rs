@@ -808,6 +808,19 @@ fn generate_skill_file(
 /// Binary version compiled into the binary at build time.
 pub const INDEX_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// True iff the stored index is out of date relative to the binary's
+/// schema version or the repo's current HEAD. The canonical rule —
+/// both the `freshness` MCP tool and the dashboard defer to this so
+/// the two surfaces cannot disagree about what "stale" means.
+#[must_use]
+pub fn is_index_stale(
+    stored_version: Option<&str>,
+    indexed_commit: Option<&str>,
+    current_head: Option<&str>,
+) -> bool {
+    stored_version != Some(INDEX_VERSION) || indexed_commit != current_head
+}
+
 fn update_metadata(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
     let commit_hash =
         get_current_commit_hash(&config.repo_path).unwrap_or_else(|_| "unknown".to_string());
