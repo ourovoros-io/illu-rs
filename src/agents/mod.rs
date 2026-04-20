@@ -6,6 +6,7 @@ pub mod detect;
 pub mod formats;
 pub mod instruction_md;
 pub mod paths;
+pub mod prompt;
 pub mod selection;
 
 use std::path::PathBuf;
