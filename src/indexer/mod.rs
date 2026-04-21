@@ -795,8 +795,17 @@ fn generate_skill_file(
     Ok(())
 }
 
-/// Binary version compiled into the binary at build time.
-pub const INDEX_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Key used to detect stale on-disk indexes. Combines the crate version
+/// with a monotonic schema revision suffix (`+schema.N`) so we can force
+/// a full re-index when ref-extraction or symbol-storage logic changes
+/// in a way that invalidates existing rows — without having to bump the
+/// crate version just for that.
+///
+/// Bump the suffix when: a new ref kind is emitted; call-site context
+/// broadens; a bug fix should retroactively reindex. Suffix history:
+///   - `schema.1` (PR #84): ref-extraction fix for `super::fn` call
+///     sites; earlier indexes may have missed handler-file refs.
+pub const INDEX_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+schema.1");
 
 /// True iff the stored index is out of date relative to the binary's
 /// schema version or the repo's current HEAD. The canonical rule —

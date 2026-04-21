@@ -1795,6 +1795,7 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
 
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests")]
+#[expect(clippy::expect_used, reason = "tests")]
 mod tests {
     use super::*;
 
@@ -2042,6 +2043,96 @@ pub fn caller() -> i32 {
         let helper_ref = refs.iter().find(|r| r.target_name == "helper");
         assert!(helper_ref.is_some(), "should find helper call");
         assert_eq!(helper_ref.unwrap().source_name, "caller");
+    }
+
+    #[test]
+    fn test_extract_refs_super_fn_high_confidence() {
+        // `super::helper()` should produce a file-qualified ref that
+        // resolves at high confidence (target_file = parent mod.rs).
+        // Regression for `references` / `rename_plan` missing these sites.
+        let source = r"
+pub fn caller() {
+    super::helper();
+}
+";
+        let known: std::collections::HashSet<String> = ["helper", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/foo/bar.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let r = refs
+            .iter()
+            .find(|r| r.target_name == "helper")
+            .expect("should find super::helper call");
+        assert_eq!(r.source_name, "caller");
+        assert_eq!(r.target_file.as_deref(), Some("src/foo/mod.rs"));
+    }
+
+    #[test]
+    fn test_extract_refs_super_fn_with_args() {
+        // Mirrors the real `super::retain_kind(&mut symbols, kind)` site
+        // in doc_coverage.rs — nested call expression, &mut arg, local
+        // var passed by move. If this fails while the simpler test
+        // passes, the bug is in how call_expression is walked.
+        let source = r"
+pub fn handle_doc_coverage(kind: Option<&str>) {
+    let mut symbols: Vec<u32> = Vec::new();
+    symbols.retain(|s| *s > 0);
+    super::retain_kind(&mut symbols, kind);
+    let _ = symbols;
+}
+";
+        let known: std::collections::HashSet<String> = ["handle_doc_coverage", "retain_kind"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/server/tools/doc_coverage.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let r = refs
+            .iter()
+            .find(|r| r.target_name == "retain_kind")
+            .expect("should find super::retain_kind call in a realistic body");
+        assert_eq!(r.source_name, "handle_doc_coverage");
+        assert_eq!(r.target_file.as_deref(), Some("src/server/tools/mod.rs"));
+    }
+
+    #[test]
+    fn test_extract_refs_self_fn_high_confidence() {
+        // `self::helper()` should resolve to the current file.
+        let source = r"
+pub fn caller() {
+    self::helper();
+}
+
+fn helper() {}
+";
+        let known: std::collections::HashSet<String> = ["helper", "caller"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/foo/bar.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let r = refs
+            .iter()
+            .find(|r| r.target_name == "helper" && r.source_name == "caller")
+            .expect("should find self::helper call");
+        assert_eq!(r.target_file.as_deref(), Some("src/foo/bar.rs"));
     }
 
     #[test]

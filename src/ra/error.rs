@@ -15,6 +15,9 @@ pub enum RaError {
     #[error("LSP request failed: {0}")]
     RequestFailed(String),
 
+    #[error("LSP method not supported by this rust-analyzer: {0}")]
+    MethodNotSupported(String),
+
     #[error("content modified (retryable)")]
     ContentModified,
 

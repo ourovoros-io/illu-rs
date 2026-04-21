@@ -50,6 +50,61 @@ where
 /// at most one level of stringification.
 const MAX_STRING_UNWRAP_DEPTH: usize = 4;
 
+/// Deserialize `Option<i64>` leniently. Some MCP clients serialise
+/// numeric tool-call parameters as JSON strings regardless of the
+/// schema's declared type; accept both to avoid surfacing that as a
+/// deserialization error to the user.
+fn lenient_opt_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Number(n) => n.as_i64().map(Some).ok_or_else(|| {
+            serde::de::Error::custom(format!("expected i64, got non-integer number {n}"))
+        }),
+        serde_json::Value::String(s) => s
+            .parse::<i64>()
+            .map(Some)
+            .map_err(|e| serde::de::Error::custom(format!("expected i64, got string {s:?}: {e}"))),
+        other => Err(serde::de::Error::custom(format!(
+            "expected i64 or string, got {other}"
+        ))),
+    }
+}
+
+/// Required variant of [`lenient_opt_i64`]. Null or missing is an error.
+fn lenient_i64<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    lenient_opt_i64(deserializer)?.ok_or_else(|| serde::de::Error::custom("expected i64, got null"))
+}
+
+/// Deserialize `Option<bool>` leniently. Accepts real booleans and the
+/// stringified forms `"true"` / `"false"` (case-insensitive).
+fn lenient_opt_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::Bool(b) => Ok(Some(b)),
+        serde_json::Value::String(s) => match s.to_ascii_lowercase().as_str() {
+            "true" => Ok(Some(true)),
+            "false" => Ok(Some(false)),
+            _ => Err(serde::de::Error::custom(format!(
+                "expected bool, got string {s:?}"
+            ))),
+        },
+        other => Err(serde::de::Error::custom(format!(
+            "expected bool or string, got {other}"
+        ))),
+    }
+}
+
 /// Coerce a JSON value into `Vec<String>`, accepting the shapes MCP callers
 /// produce in practice:
 ///
@@ -285,6 +340,7 @@ struct QueryParams {
     /// Filter results to files under this path prefix (e.g. "src/db.rs", "src/server/")
     path: Option<String>,
     /// Max number of results to return (default: 50)
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     limit: Option<i64>,
 }
 
@@ -293,6 +349,7 @@ struct ContextParams {
     #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Return full untruncated source body (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     full_body: Option<bool>,
     /// Filter results to a specific file path (e.g. "src/db.rs")
     file: Option<String>,
@@ -304,6 +361,7 @@ struct ContextParams {
     /// Filter callers and callees to this path prefix (e.g. "src/" to exclude test callers)
     callers_path: Option<String>,
     /// Exclude test functions from callers/callees (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     exclude_tests: Option<bool>,
 }
 
@@ -312,11 +370,14 @@ struct ImpactParams {
     #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Max recursion depth (default: 5). Use 1 for direct callers only.
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     depth: Option<i64>,
     /// Summarize deep levels by file instead of listing every symbol (default: true).
     /// Set to false for full verbose output at all depths.
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     summary: Option<bool>,
     /// Exclude test functions from impact results (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     exclude_tests: Option<bool>,
 }
 
@@ -330,8 +391,10 @@ struct DocsParams {
 struct OverviewParams {
     path: String,
     /// Include private symbols (default: false, shows only public/pub(crate))
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     include_private: Option<bool>,
     /// Max symbols to show (default: all)
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     limit: Option<i64>,
 }
 
@@ -345,8 +408,10 @@ struct DiffImpactParams {
     /// Git ref range (e.g. "HEAD~3..HEAD", "main"). Omit for unstaged changes.
     git_ref: Option<String>,
     /// Only list changed symbols, skip downstream impact analysis (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     changes_only: Option<bool>,
     /// Skip downstream impact but still show untested changes and related tests (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     compact: Option<bool>,
 }
 
@@ -357,12 +422,16 @@ struct CallpathParams {
     /// Target symbol name
     to: String,
     /// Max search depth (default: 10)
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     max_depth: Option<i64>,
     /// Find all paths instead of just the shortest (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     all_paths: Option<bool>,
     /// Max number of paths when `all_paths=true` (default: 5)
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     max_paths: Option<i64>,
     /// Exclude test functions from paths (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     exclude_tests: Option<bool>,
 }
 
@@ -372,6 +441,7 @@ struct BatchContextParams {
     #[serde(alias = "symbol_names", deserialize_with = "lenient_vec_string")]
     symbols: Vec<String>,
     /// Return full untruncated source bodies (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     full_body: Option<bool>,
     /// Select specific sections: `source`, `callers`, `callees`,
     /// `tested_by`, `traits`, `related`, `docs`. Omit for all.
@@ -387,8 +457,10 @@ struct UnusedParams {
     /// Filter by symbol kind: function, struct, enum, trait, etc.
     kind: Option<String>,
     /// Include private symbols (default: false, shows only pub/pub(crate))
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     include_private: Option<bool>,
     /// Find symbols with no test coverage instead of unused symbols (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     untested: Option<bool>,
 }
 
@@ -407,6 +479,7 @@ struct TypeUsageParams {
     /// Filter to files under this path prefix
     path: Option<String>,
     /// Group results by file with counts instead of listing every entry (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     compact: Option<bool>,
 }
 
@@ -416,12 +489,14 @@ struct NeighborhoodParams {
     #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Max hops in each direction (default: 2)
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     depth: Option<i64>,
     /// Direction: "both" (default), "down" (callees only), "up" (callers only)
     direction: Option<String>,
     /// Format: "list" (default flat), "tree" (hierarchical indented)
     format: Option<String>,
     /// Exclude test functions from results (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     exclude_tests: Option<bool>,
 }
 
@@ -436,6 +511,7 @@ struct SymbolsAtParams {
     /// File path (e.g. "src/db.rs")
     file: String,
     /// Line number to look up
+    #[serde(deserialize_with = "lenient_i64")]
     line: i64,
 }
 
@@ -444,6 +520,7 @@ struct StatsParams {
     /// Filter to files under this path prefix (default: all)
     path: Option<String>,
     /// Exclude test function references from "Most Referenced" counts (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     exclude_tests: Option<bool>,
 }
 
@@ -452,8 +529,10 @@ struct HotspotsParams {
     /// Filter to files under this path prefix
     path: Option<String>,
     /// Max entries per section (default: 10)
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     limit: Option<i64>,
     /// Exclude test function references from "Most Referenced" counts (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     exclude_tests: Option<bool>,
 }
 
@@ -486,8 +565,10 @@ struct HistoryParams {
     #[serde(alias = "symbol", alias = "name")]
     symbol_name: String,
     /// Max commits to show (default: 10)
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     max_commits: Option<i64>,
     /// Show code diffs for each commit (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     show_diff: Option<bool>,
 }
 
@@ -499,6 +580,7 @@ struct ReferencesParams {
     /// Filter results to files under this path prefix
     path: Option<String>,
     /// Exclude test functions from call sites (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     exclude_tests: Option<bool>,
 }
 
@@ -509,6 +591,7 @@ struct DocCoverageParams {
     /// Filter by symbol kind: function, struct, enum, trait, etc.
     kind: Option<String>,
     /// Include private symbols (default: false, shows only pub/pub(crate))
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     include_private: Option<bool>,
 }
 
@@ -519,6 +602,7 @@ struct TestImpactParams {
     symbol_name: String,
     /// Max call graph depth to search for tests (default: 5).
     /// Use 1 for direct test callers only, 2-3 for focused results.
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     depth: Option<i64>,
 }
 
@@ -557,6 +641,7 @@ struct GraphExportParams {
     /// Path prefix for file dependency graph export (provide this or `symbol_name`, not both)
     path: Option<String>,
     /// Max traversal depth for symbol graphs (default: 2)
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     depth: Option<i64>,
     /// Direction for symbol graph: "down" (callees only), "up" (callers only),
     /// "both" (default). Only applies to symbol graphs, not file graphs.
@@ -581,6 +666,7 @@ struct CrossQueryParams {
     attribute: Option<String>,
     signature: Option<String>,
     path: Option<String>,
+    #[serde(default, deserialize_with = "lenient_opt_i64")]
     limit: Option<i64>,
 }
 
@@ -658,6 +744,7 @@ struct RaSsrParams {
     /// SSR pattern, e.g. "foo($a) ==>> bar($a)"
     pattern: String,
     /// If true, preview changes without applying (default: false)
+    #[serde(default, deserialize_with = "lenient_opt_bool")]
     dry_run: Option<bool>,
 }
 
@@ -1669,6 +1756,14 @@ impl IlluServer {
         let spec = parse_position(&params.position)?;
         let items = match ra.prepare_type_hierarchy(&spec).await {
             Ok(items) => items,
+            Err(crate::ra::RaError::MethodNotSupported(_)) => {
+                return Ok(text_result(
+                    "Type hierarchy is not supported by this rust-analyzer. \
+                     Use `implements` for trait/type relationships or `ra_call_hierarchy` \
+                     for caller/callee navigation."
+                        .to_string(),
+                ));
+            }
             Err(e) => return Ok(ra_error(e)),
         };
         if items.is_empty() {
@@ -1977,7 +2072,25 @@ impl IlluServer {
         let ra = self.ra()?;
         let path = std::path::PathBuf::from(&params.file);
         match ra.syntax_tree(&path).await {
-            Ok(tree) => Ok(text_result(tree)),
+            Ok(tree) => {
+                // Syntax trees are S-expressions that can run 300KB+ for a
+                // 100-line file. Cap at ~60KB with a clear hint so the
+                // response fits in typical MCP tool-result budgets.
+                const MAX_BYTES: usize = 60_000;
+                let out = if tree.len() > MAX_BYTES {
+                    format!(
+                        "{}\n\n…truncated ({} chars total, showing {} chars). \
+                         Syntax trees are large; slice with grep or narrow \
+                         to a range in your own editor if you need more.",
+                        crate::truncate_at(&tree, MAX_BYTES),
+                        tree.len(),
+                        MAX_BYTES,
+                    )
+                } else {
+                    tree
+                };
+                Ok(text_result(out))
+            }
             Err(e) => Ok(ra_error(e)),
         }
     }
@@ -2077,7 +2190,10 @@ impl ServerHandler for IlluServer {
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod lenient_deser_tests {
-    use super::{BatchContextParams, ContextParams};
+    use super::{
+        BatchContextParams, ContextParams, ImpactParams, NeighborhoodParams, SymbolsAtParams,
+        TypeUsageParams,
+    };
 
     #[test]
     fn batch_context_accepts_real_arrays() {
@@ -2219,5 +2335,90 @@ mod lenient_deser_tests {
         }))
         .unwrap();
         assert_eq!(params.symbol_name, "foo");
+    }
+
+    // Lenient primitive deserializers — MCP clients sometimes stringify
+    // numeric and boolean parameters despite schema type.
+
+    #[test]
+    fn symbols_at_accepts_line_as_number() {
+        let params: SymbolsAtParams = serde_json::from_value(serde_json::json!({
+            "file": "src/db.rs",
+            "line": 378,
+        }))
+        .unwrap();
+        assert_eq!(params.line, 378);
+    }
+
+    #[test]
+    fn symbols_at_accepts_line_as_string() {
+        let params: SymbolsAtParams = serde_json::from_value(serde_json::json!({
+            "file": "src/db.rs",
+            "line": "378",
+        }))
+        .unwrap();
+        assert_eq!(params.line, 378);
+    }
+
+    #[test]
+    fn impact_params_accepts_depth_as_string() {
+        let params: ImpactParams = serde_json::from_value(serde_json::json!({
+            "symbol_name": "foo",
+            "depth": "3",
+            "summary": "false",
+            "exclude_tests": "true",
+        }))
+        .unwrap();
+        assert_eq!(params.depth, Some(3));
+        assert_eq!(params.summary, Some(false));
+        assert_eq!(params.exclude_tests, Some(true));
+    }
+
+    #[test]
+    fn neighborhood_params_accepts_depth_as_string() {
+        let params: NeighborhoodParams = serde_json::from_value(serde_json::json!({
+            "symbol_name": "foo",
+            "depth": "2",
+        }))
+        .unwrap();
+        assert_eq!(params.depth, Some(2));
+    }
+
+    #[test]
+    fn type_usage_params_accepts_compact_as_string() {
+        let params: TypeUsageParams = serde_json::from_value(serde_json::json!({
+            "type_name": "Foo",
+            "compact": "true",
+        }))
+        .unwrap();
+        assert_eq!(params.compact, Some(true));
+    }
+
+    #[test]
+    fn bool_false_string_is_accepted() {
+        let params: TypeUsageParams = serde_json::from_value(serde_json::json!({
+            "type_name": "Foo",
+            "compact": "FALSE",
+        }))
+        .unwrap();
+        assert_eq!(params.compact, Some(false));
+    }
+
+    #[test]
+    fn invalid_i64_string_rejected() {
+        let result: Result<SymbolsAtParams, _> = serde_json::from_value(serde_json::json!({
+            "file": "src/db.rs",
+            "line": "not-a-number",
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invalid_bool_string_rejected() {
+        let result: Result<TypeUsageParams, _> = serde_json::from_value(serde_json::json!({
+            "type_name": "Foo",
+            "compact": "maybe",
+        }));
+        assert!(result.is_err());
     }
 }
