@@ -680,8 +680,7 @@ fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
 /// Parse a `"file:line:col"` string into a [`PositionSpec`], mapping
 /// any failure to `McpError` so RA tool handlers can use `?` directly.
 fn parse_position(s: &str) -> Result<crate::ra::PositionSpec, McpError> {
-    s.parse::<crate::ra::PositionSpec>()
-        .map_err(|e: crate::ra::RaError| to_mcp_err(e))
+    s.parse::<crate::ra::PositionSpec>().map_err(to_mcp_err)
 }
 
 /// Build an MCP tool error result from any displayable error. Used by

@@ -63,6 +63,16 @@ pub struct RealContext {
     os: TargetOs,
 }
 
+/// Derive the target-OS enum from `std::env::consts::OS`, collapsing
+/// everything that isn't macOS or Windows to Linux.
+fn current_os() -> TargetOs {
+    match std::env::consts::OS {
+        "macos" => TargetOs::MacOs,
+        "windows" => TargetOs::Windows,
+        _ => TargetOs::Linux,
+    }
+}
+
 impl RealContext {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let home = std::env::var("HOME")
@@ -86,16 +96,6 @@ impl RealContext {
             home,
             os: current_os(),
         }
-    }
-}
-
-/// Derive the target-OS enum from `std::env::consts::OS`, collapsing
-/// everything that isn't macOS or Windows to Linux.
-fn current_os() -> TargetOs {
-    match std::env::consts::OS {
-        "macos" => TargetOs::MacOs,
-        "windows" => TargetOs::Windows,
-        _ => TargetOs::Linux,
     }
 }
 

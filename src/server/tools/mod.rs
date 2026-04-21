@@ -513,4 +513,57 @@ mod tests {
              got: {result}"
         );
     }
+
+    fn stored(kind: crate::indexer::parser::SymbolKind, name: &str) -> StoredSymbol {
+        StoredSymbol {
+            name: name.to_string(),
+            kind,
+            visibility: crate::indexer::parser::Visibility::Public,
+            file_path: "src/lib.rs".to_string(),
+            line_start: 1,
+            line_end: 2,
+            signature: String::new(),
+            doc_comment: None,
+            body: None,
+            details: None,
+            attributes: None,
+            impl_type: None,
+        }
+    }
+
+    #[test]
+    fn retain_kind_none_leaves_list_unchanged() {
+        use crate::indexer::parser::SymbolKind;
+        let mut symbols = vec![
+            stored(SymbolKind::Function, "a"),
+            stored(SymbolKind::Struct, "b"),
+        ];
+        retain_kind(&mut symbols, None);
+        assert_eq!(symbols.len(), 2);
+    }
+
+    #[test]
+    fn retain_kind_ascii_filter_is_case_insensitive() {
+        use crate::indexer::parser::SymbolKind;
+        let mut symbols = vec![
+            stored(SymbolKind::Function, "a"),
+            stored(SymbolKind::Struct, "b"),
+            stored(SymbolKind::Function, "c"),
+        ];
+        retain_kind(&mut symbols, Some("FUNCTION"));
+        assert_eq!(symbols.len(), 2);
+        assert!(symbols.iter().all(|s| s.kind == SymbolKind::Function));
+    }
+
+    #[test]
+    fn retain_kind_non_ascii_filter_matches_nothing() {
+        // Documents ASCII-only folding: `SymbolKind::Display` output is
+        // always ASCII (`"function"`, etc.), so a full-width or otherwise
+        // non-ASCII filter string cannot match any real kind. Retaining
+        // this behaviour avoids the cost of a general `to_lowercase`.
+        use crate::indexer::parser::SymbolKind;
+        let mut symbols = vec![stored(SymbolKind::Function, "a")];
+        retain_kind(&mut symbols, Some("Ｆｕｎｃｔｉｏｎ"));
+        assert!(symbols.is_empty());
+    }
 }

@@ -379,7 +379,12 @@ impl Database {
 
     /// Return true if `table` has a column named `column`. Used by the
     /// schema migrations to make ALTER TABLE idempotent on older DBs.
-    fn has_column(&self, table: &str, column: &str) -> bool {
+    ///
+    /// Both parameters are `&'static str` rather than `&str` so the
+    /// compiler refuses runtime-constructed identifiers — the SQL is
+    /// interpolated via `format!`, and we don't want to leave that
+    /// door open to injection by a future caller wiring in user input.
+    fn has_column(&self, table: &'static str, column: &'static str) -> bool {
         self.conn
             .prepare(&format!("SELECT {column} FROM {table} LIMIT 0"))
             .is_ok()
@@ -2309,6 +2314,20 @@ mod tests {
     use super::*;
     use crate::indexer::parser::Symbol;
     use crate::indexer::store::store_symbols;
+
+    #[test]
+    fn has_column_reports_existing_and_missing_columns() {
+        let db = Database::open_in_memory().unwrap();
+        // Columns created by migrate() up front — probe should find them.
+        assert!(db.has_column("symbols", "impl_type"));
+        assert!(db.has_column("symbols", "is_test"));
+        assert!(db.has_column("symbol_refs", "confidence"));
+        assert!(db.has_column("symbol_refs", "ref_line"));
+        assert!(db.has_column("docs", "module"));
+        // Obviously-missing columns return false.
+        assert!(!db.has_column("symbols", "nonexistent_column"));
+        assert!(!db.has_column("docs", "nonexistent_column"));
+    }
 
     #[test]
     fn test_creates_schema() {
