@@ -1,6 +1,7 @@
 use tree_sitter::{Node, Parser};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SymbolKind {
     Function,
     Struct,
@@ -67,6 +68,7 @@ impl std::str::FromStr for SymbolKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Visibility {
     Public,
     PublicCrate,
@@ -744,12 +746,14 @@ pub(crate) fn get_signature(node: &Node, source: &str) -> String {
 
 /// Resolved import path for a short name.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ImportInfo {
     pub qualified_path: String,
 }
 
 /// A reference from one symbol to another, identified by name.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SymbolRef {
     /// Name of the symbol that contains the reference
     pub source_name: String,
@@ -768,6 +772,7 @@ pub struct SymbolRef {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum RefKind {
     /// Type used in signature or body
     TypeRef,
@@ -776,6 +781,7 @@ pub enum RefKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TraitImpl {
     pub type_name: String,
     pub trait_name: String,
@@ -1157,6 +1163,7 @@ fn collect_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
             }
             "struct_item" | "enum_item" => {
                 collect_derive_refs(&child, ctx, refs);
+                collect_field_refs(&child, ctx, refs);
             }
             _ => {}
         }
@@ -1198,6 +1205,63 @@ fn collect_derive_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
                     target_context: None,
                     ref_line: i64::try_from(node.start_position().row + 1).ok(),
                 });
+            }
+        }
+    }
+}
+
+/// Extract `TypeRef` refs from the field types of a struct or the variant
+/// payload types of an enum. Without this, a type used only as a struct field
+/// (the common case for data-container types) has zero entries in
+/// `symbol_refs` and is therefore invisible to `impact`, which filters on
+/// `high`-confidence refs.
+///
+/// The `seen` set is shared across the entire subtree walk (generics,
+/// nested `Vec<Option<T>>`, trait bounds, etc.), so each target symbol
+/// contributes at most one ref per source struct/enum — a struct that
+/// mentions the same type in three fields still emits one `TypeRef`.
+fn collect_field_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
+    node: &Node,
+    ctx: &RefContext<'_, S, S2>,
+    refs: &mut Vec<SymbolRef>,
+) {
+    let name_node = find_child_by_kind(node, "type_identifier")
+        .or_else(|| find_child_by_kind(node, "identifier"));
+    let Some(name_node) = name_node else { return };
+    let source_name = node_text(&name_node, ctx.source);
+
+    let body = match node.kind() {
+        "struct_item" => find_child_by_kind(node, "field_declaration_list")
+            .or_else(|| find_child_by_kind(node, "ordered_field_declaration_list")),
+        "enum_item" => find_child_by_kind(node, "enum_variant_list"),
+        _ => None,
+    };
+    let Some(body) = body else { return };
+
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut stack = vec![body];
+    while let Some(n) = stack.pop() {
+        let mut cursor = n.walk();
+        for child in n.children(&mut cursor) {
+            if child.kind() == "type_identifier" {
+                let name = node_text(&child, ctx.source);
+                if name != source_name
+                    && ctx.known_symbols.contains(&name)
+                    && seen.insert(name.clone())
+                {
+                    let line = i64::try_from(child.start_position().row + 1).ok();
+                    refs.push(SymbolRef {
+                        source_name: source_name.clone(),
+                        source_file: ctx.file_path.to_string(),
+                        target_name: name.clone(),
+                        kind: RefKind::TypeRef,
+                        target_file: resolve_target_file(&name, ctx),
+                        target_context: None,
+                        ref_line: line,
+                    });
+                }
+            } else {
+                stack.push(child);
             }
         }
     }
@@ -1836,6 +1900,123 @@ pub fn create_config() -> Config {
         let config_ref = refs.iter().find(|r| r.target_name == "Config");
         assert!(config_ref.is_some(), "should find Config reference");
         assert_eq!(config_ref.unwrap().source_name, "create_config");
+    }
+
+    #[test]
+    fn test_extract_refs_struct_field_type() {
+        // Regression: a type used only as a struct field (never in a fn signature
+        // or body) was invisible to `impact`, because `collect_refs` did not walk
+        // struct field type positions.
+        let source = r"
+pub struct LiveQuoteUpdate { pub px: f64 }
+
+pub struct Book {
+    pub last: Option<LiveQuoteUpdate>,
+}
+";
+        let known: std::collections::HashSet<String> = ["LiveQuoteUpdate", "Book"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let field_ref = refs
+            .iter()
+            .find(|r| r.target_name == "LiveQuoteUpdate" && r.source_name == "Book");
+        assert!(
+            field_ref.is_some(),
+            "struct field type should produce a TypeRef from Book -> LiveQuoteUpdate: {refs:?}"
+        );
+        assert!(matches!(field_ref.unwrap().kind, RefKind::TypeRef));
+    }
+
+    #[test]
+    fn test_extract_refs_tuple_struct_field_type() {
+        let source = r"
+pub struct Inner { pub x: u32 }
+
+pub struct Wrapper(pub Inner);
+";
+        let known: std::collections::HashSet<String> = ["Inner", "Wrapper"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let field_ref = refs
+            .iter()
+            .find(|r| r.target_name == "Inner" && r.source_name == "Wrapper");
+        assert!(
+            field_ref.is_some(),
+            "tuple struct field type should produce a TypeRef from Wrapper -> Inner: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_refs_enum_variant_type() {
+        let source = r"
+pub struct Payload { pub n: u32 }
+
+pub enum Event {
+    Tick,
+    Data(Payload),
+}
+";
+        let known: std::collections::HashSet<String> = ["Payload", "Event"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let variant_ref = refs
+            .iter()
+            .find(|r| r.target_name == "Payload" && r.source_name == "Event");
+        assert!(
+            variant_ref.is_some(),
+            "enum variant payload type should produce a TypeRef from Event -> Payload: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_refs_struct_field_no_self_ref() {
+        // A struct referencing itself recursively (via a Box) should not
+        // produce a Foo -> Foo self-reference.
+        let source = r"
+pub struct Foo {
+    pub next: Option<Box<Foo>>,
+}
+";
+        let known: std::collections::HashSet<String> =
+            ["Foo"].iter().map(|s| (*s).to_string()).collect();
+        let refs = extract_refs(
+            source,
+            "src/lib.rs",
+            &known,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let self_ref = refs
+            .iter()
+            .find(|r| r.target_name == "Foo" && r.source_name == "Foo");
+        assert!(
+            self_ref.is_none(),
+            "struct should not produce a self-reference through its own field: {refs:?}"
+        );
     }
 
     #[test]

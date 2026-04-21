@@ -2,9 +2,37 @@
 
 use std::path::Path;
 
-/// Agent definitions: (name, description, tool short names, body text).
-pub const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
-    (
+/// Single agent definition. Using a named struct over the original
+/// `(&str, &str, &[&str], &str)` tuple so each field is self-documenting
+/// at the declaration site and new fields (e.g. `#[non_exhaustive]`
+/// metadata) can be added without reshaping every call site.
+#[non_exhaustive]
+pub struct AgentDef {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub tools: &'static [&'static str],
+    pub body: &'static str,
+}
+
+impl AgentDef {
+    #[must_use]
+    pub const fn new(
+        name: &'static str,
+        description: &'static str,
+        tools: &'static [&'static str],
+        body: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            tools,
+            body,
+        }
+    }
+}
+
+pub const AGENT_DEFS: &[AgentDef] = &[
+    AgentDef::new(
         "illu-explore",
         "Explore codebases using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
         &[
@@ -63,7 +91,7 @@ pub const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
          Use sections: [\"source\", \"callers\"] to save tokens. \
          Use exclude_tests: true to focus on production code.",
     ),
-    (
+    AgentDef::new(
         "illu-review",
         "Review code changes using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
         &[
@@ -111,7 +139,7 @@ pub const AGENT_DEFS: &[(&str, &str, &[&str], &str)] = &[
          test_impact to verify coverage → boundary to check API surface. \
          Use exclude_tests: true to focus on production callers.",
     ),
-    (
+    AgentDef::new(
         "illu-refactor",
         "Plan refactoring using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
         &[
@@ -177,9 +205,9 @@ pub fn generate_agent_files(
 
     std::fs::create_dir_all(agents_dir)?;
 
-    for (name, description, tools, body) in AGENT_DEFS {
+    for agent in AGENT_DEFS {
         let mut tools_yaml = String::new();
-        for tool in *tools {
+        for tool in agent.tools {
             let full_name = if BUILTIN_TOOLS.contains(tool) {
                 (*tool).to_string()
             } else {
@@ -187,6 +215,12 @@ pub fn generate_agent_files(
             };
             writeln!(tools_yaml, "  - {full_name}")?;
         }
+        let AgentDef {
+            name,
+            description,
+            body,
+            ..
+        } = agent;
         let content = format!(
             "---\nname: {name}\n\
              description: {description}\n\

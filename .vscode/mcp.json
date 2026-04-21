@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "illu": {
+      "args": [
+        "serve"
+      ],
+      "command": "illu-rs",
+      "env": {
+        "RUST_LOG": "warn"
+      },
+      "type": "stdio"
+    }
+  }
+}

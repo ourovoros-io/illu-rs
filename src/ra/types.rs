@@ -226,12 +226,15 @@ pub fn symbol_kind_name(kind: SymbolKind) -> &'static str {
 }
 
 /// Read surrounding lines of context from a file around a given line.
-pub fn read_context_lines(
+/// Async because RA ops consume it from async context; using `tokio::fs`
+/// keeps the read off the reactor without needing `spawn_blocking` at
+/// the caller.
+pub async fn read_context_lines(
     path: &Path,
     target_line: u32,
     context: u32,
 ) -> std::io::Result<(Vec<String>, String, Vec<String>)> {
-    let content = std::fs::read_to_string(path)?;
+    let content = tokio::fs::read_to_string(path).await?;
     let lines: Vec<&str> = content.lines().collect();
     if lines.is_empty() {
         return Ok((vec![], String::new(), vec![]));

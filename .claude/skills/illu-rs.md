@@ -78,9 +78,12 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 
 - async-lsp
 - async-process
+- axum
 - clap
+- dialoguer
 - futures
 - lsp-types
+- opener
 - regex-lite
 - reqwest
 - rmcp
@@ -90,6 +93,7 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 - thiserror
 - tokio
 - toml
+- toml_edit
 - tower
 - tracing
 - tracing-subscriber

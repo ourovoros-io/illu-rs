@@ -32,7 +32,7 @@ impl RaClient {
             RichLocation::from_location,
         );
 
-        let def_location = enrich_location(def_location);
+        let def_location = enrich_location(def_location).await;
 
         let hover = self.hover(spec).await.unwrap_or(None);
         let refs = self.references(spec, false).await.unwrap_or_default();
@@ -115,9 +115,12 @@ impl RaClient {
 }
 
 /// Add source text context to a `RichLocation` by reading from disk.
-fn enrich_location(mut loc: RichLocation) -> RichLocation {
-    if let Ok(path) = std::path::Path::new(&loc.file).canonicalize()
-        && let Ok((before, text, after)) = super::types::read_context_lines(&path, loc.line, 2)
+/// Async so both the `canonicalize` and `read_context_lines` steps use
+/// `tokio::fs` and don't stall the reactor.
+async fn enrich_location(mut loc: RichLocation) -> RichLocation {
+    if let Ok(path) = tokio::fs::canonicalize(&loc.file).await
+        && let Ok((before, text, after)) =
+            super::types::read_context_lines(&path, loc.line, 2).await
     {
         loc.context_before = Some(before);
         loc.text = text;
@@ -211,15 +214,19 @@ impl RaClient {
             ));
         };
 
-        let files_changed = apply_workspace_edit(&edit)?;
         let total_edits = count_edits(&edit);
+        let files_changed = apply_workspace_edit(&edit).await?;
 
-        for file in &files_changed {
+        // Re-open every edited file concurrently. tokio::fs::metadata
+        // stats the path; only opened files whose path exists get
+        // diagnostics from RA.
+        let ensure_open_futs = files_changed.iter().map(|file| async move {
             let path = std::path::Path::new(file);
-            if path.exists() {
+            if tokio::fs::metadata(path).await.is_ok() {
                 let _ = self.ensure_open(path).await;
             }
-        }
+        });
+        futures::future::join_all(ensure_open_futs).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
@@ -243,7 +250,7 @@ impl RaClient {
 // ── Workspace Edit Application ──────────────────────────────────────────
 
 /// Apply a `WorkspaceEdit` to files on disk. Returns the list of changed files.
-pub fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<Vec<String>> {
+pub async fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<Vec<String>> {
     let mut changed_files = vec![];
 
     if let Some(changes) = &edit.changes {
@@ -251,7 +258,7 @@ pub fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<Vec<String>> {
             let path = uri
                 .to_file_path()
                 .map_err(|()| RaError::RequestFailed(format!("invalid URI: {uri}")))?;
-            apply_text_edits(&path, edits)?;
+            apply_text_edits(&path, edits).await?;
             changed_files.push(path.display().to_string());
         }
     }
@@ -271,7 +278,7 @@ pub fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<Vec<String>> {
                             lsp_types::OneOf::Right(ate) => ate.text_edit.clone(),
                         })
                         .collect();
-                    apply_text_edits(&path, &text_edits)?;
+                    apply_text_edits(&path, &text_edits).await?;
                     changed_files.push(path.display().to_string());
                 }
             }
@@ -292,7 +299,7 @@ pub fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<Vec<String>> {
                                 lsp_types::OneOf::Right(ate) => ate.text_edit.clone(),
                             })
                             .collect();
-                        apply_text_edits(&path, &text_edits)?;
+                        apply_text_edits(&path, &text_edits).await?;
                         changed_files.push(path.display().to_string());
                     }
                 }
@@ -303,8 +310,8 @@ pub fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<Vec<String>> {
     Ok(changed_files)
 }
 
-fn apply_text_edits(path: &std::path::Path, edits: &[TextEdit]) -> Result<()> {
-    let content = std::fs::read_to_string(path)?;
+async fn apply_text_edits(path: &std::path::Path, edits: &[TextEdit]) -> Result<()> {
+    let content = tokio::fs::read_to_string(path).await?;
     let lines: Vec<&str> = content.lines().collect();
 
     let mut indexed_edits: Vec<(usize, usize, &str)> = edits
@@ -325,7 +332,7 @@ fn apply_text_edits(path: &std::path::Path, edits: &[TextEdit]) -> Result<()> {
         }
     }
 
-    std::fs::write(path, result)?;
+    tokio::fs::write(path, result).await?;
     Ok(())
 }
 

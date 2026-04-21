@@ -236,33 +236,57 @@ impl RaClient {
         })
     }
 
-    /// Wait for rust-analyzer to finish indexing. Polls with timeout.
+    /// Wait for rust-analyzer to finish indexing. Driven by state-change
+    /// notifications from the transport router rather than polling, so
+    /// readiness is observed with minimal latency.
+    ///
+    /// The `Notified` future is registered *before* each state check: if
+    /// `set_ready(true)` fires between the check and the await, the
+    /// pre-registered waiter still observes the wake-up. Without this,
+    /// `notify_waiters` (which does not store a permit) could lose the
+    /// signal and the caller would wait up to `timeout` on a hung loop.
     pub async fn wait_for_ready(&self, timeout: Duration) -> Result<()> {
+        const WARMUP: Duration = Duration::from_secs(2);
         let start = std::time::Instant::now();
-        let poll_interval = Duration::from_millis(200);
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        let notify = self.server_state.readiness_notifier();
 
         loop {
+            // Register interest BEFORE reading state. `enable()` installs
+            // this future as a waiter immediately; any subsequent
+            // `notify_waiters` call will wake it, even if we're not yet
+            // `.await`-ing.
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
             if self.server_state.is_ready() {
                 info!("rust-analyzer is ready (token match)");
                 return Ok(());
             }
-
             if self.server_state.received_progress()
                 && self.server_state.active_progress() == 0
-                && start.elapsed() > Duration::from_secs(2)
+                && start.elapsed() > WARMUP
             {
                 info!("rust-analyzer is ready (all progress completed)");
                 self.server_state.set_ready(true);
                 return Ok(());
             }
 
-            if start.elapsed() > timeout {
+            // Bound the wait: respect the overall deadline, and cap during
+            // WARMUP so the soft-readiness arm above fires promptly if RA
+            // goes silent without emitting a terminal progress event.
+            let remaining = timeout
+                .checked_sub(start.elapsed())
+                .ok_or(RaError::Timeout(timeout))?;
+            let warmup_left = WARMUP.checked_sub(start.elapsed()).unwrap_or_default();
+            let wait = if warmup_left.is_zero() {
+                remaining
+            } else {
+                remaining.min(warmup_left)
+            };
+            if tokio::time::timeout(wait, notified).await.is_err() && start.elapsed() >= timeout {
                 return Err(RaError::Timeout(timeout));
             }
-
-            tokio::time::sleep(poll_interval).await;
         }
     }
 

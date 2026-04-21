@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DiffHunk {
     pub file_path: String,
     pub new_start: i64,

@@ -2063,40 +2063,35 @@ impl Database {
         target_name: &str,
         target_impl_type: Option<&str>,
     ) -> SqlResult<Vec<CrossRef>> {
-        let (sql, params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) =
-            if let Some(it) = target_impl_type {
-                (
-                    "SELECT DISTINCT s.name, s.impl_type, f.path, s.line_start
-                     FROM symbol_refs sr
-                     JOIN symbols s ON sr.source_symbol_id = s.id
-                     JOIN symbols t ON sr.target_symbol_id = t.id
-                     JOIN files f ON s.file_id = f.id
-                     WHERE t.name = ?1 AND t.impl_type = ?2 AND sr.confidence = 'high'
-                     ORDER BY f.path, s.line_start LIMIT 50",
-                    vec![Box::new(target_name.to_string()), Box::new(it.to_string())],
-                )
-            } else {
-                (
-                    "SELECT DISTINCT s.name, s.impl_type, f.path, s.line_start
-                     FROM symbol_refs sr
-                     JOIN symbols s ON sr.source_symbol_id = s.id
-                     JOIN symbols t ON sr.target_symbol_id = t.id
-                     JOIN files f ON s.file_id = f.id
-                     WHERE t.name = ?1 AND sr.confidence = 'high'
-                     ORDER BY f.path, s.line_start LIMIT 50",
-                    vec![Box::new(target_name.to_string())],
-                )
-            };
-        let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+        const BASE: &str = "SELECT DISTINCT s.name, s.impl_type, f.path, s.line_start
+             FROM symbol_refs sr
+             JOIN symbols s ON sr.source_symbol_id = s.id
+             JOIN symbols t ON sr.target_symbol_id = t.id
+             JOIN files f ON s.file_id = f.id
+             WHERE t.name = ?1 AND sr.confidence = 'high'";
+        const ORDER: &str = " ORDER BY f.path, s.line_start LIMIT 50";
+        let map_row = |row: &rusqlite::Row<'_>| {
             Ok(CrossRef {
                 name: row.get(0)?,
                 impl_type: row.get(1)?,
                 file_path: row.get(2)?,
                 line_start: row.get(3)?,
             })
-        })?;
-        Ok(rows.filter_map(std::result::Result::ok).collect())
+        };
+        let rows: Vec<CrossRef> = if let Some(it) = target_impl_type {
+            let sql = format!("{BASE} AND t.impl_type = ?2{ORDER}");
+            let mut stmt = self.conn.prepare(&sql)?;
+            stmt.query_map(params![target_name, it], map_row)?
+                .filter_map(std::result::Result::ok)
+                .collect()
+        } else {
+            let sql = format!("{BASE}{ORDER}");
+            let mut stmt = self.conn.prepare(&sql)?;
+            stmt.query_map(params![target_name], map_row)?
+                .filter_map(std::result::Result::ok)
+                .collect()
+        };
+        Ok(rows)
     }
 
     /// Check if a symbol with the given name exists.
@@ -2149,6 +2144,7 @@ impl Database {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CrossRef {
     pub name: String,
     pub impl_type: Option<String>,
@@ -2209,12 +2205,14 @@ fn mod_rs_alternative(path: &str) -> Option<String> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FileSymbolCount {
     pub path: String,
     pub count: i64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FileRecord {
     pub path: String,
     pub content_hash: String,
@@ -2222,6 +2220,7 @@ pub struct FileRecord {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ImpactEntry {
     pub name: String,
     pub file_path: String,
@@ -2231,6 +2230,7 @@ pub struct ImpactEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TestEntry {
     pub name: String,
     pub file_path: String,
@@ -2238,6 +2238,7 @@ pub struct TestEntry {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StoredCrate {
     pub id: CrateId,
     pub name: String,
@@ -2245,6 +2246,7 @@ pub struct StoredCrate {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DocResult {
     pub content: String,
     pub source: String,
@@ -2254,6 +2256,7 @@ pub struct DocResult {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StoredDep {
     pub name: String,
     pub version: String,
@@ -2263,6 +2266,7 @@ pub struct StoredDep {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StoredSymbol {
     pub name: String,
     pub kind: SymbolKind,
@@ -2279,6 +2283,7 @@ pub struct StoredSymbol {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StoredTraitImpl {
     pub type_name: String,
     pub trait_name: String,
@@ -2288,6 +2293,7 @@ pub struct StoredTraitImpl {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LargestFunction {
     pub name: String,
     pub file_path: String,
@@ -2296,6 +2302,7 @@ pub struct LargestFunction {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CalleeInfo {
     pub name: String,
     pub kind: String,

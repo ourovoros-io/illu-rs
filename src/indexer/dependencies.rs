@@ -16,6 +16,7 @@ pub struct LockedDep {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolvedDep {
     pub name: String,
     pub version: String,
@@ -43,38 +44,35 @@ struct LockPackage {
 
 pub fn parse_cargo_toml(content: &str) -> Result<Vec<DirectDep>, toml::de::Error> {
     let parsed: CargoToml = toml::from_str(content)?;
-    let Some(deps) = parsed.dependencies else {
-        return Ok(vec![]);
-    };
-    let mut result = Vec::new();
-    for (name, value) in &deps {
-        if !matches!(value, toml::Value::String(_) | toml::Value::Table(_)) {
-            continue;
-        }
-        let (version_req, features) = crate::indexer::workspace::extract_version_features(value);
-        result.push(DirectDep {
-            name: name.clone(),
-            version_req,
-            features,
-        });
-    }
-    Ok(result)
+    Ok(parsed
+        .dependencies
+        .unwrap_or_default()
+        .iter()
+        .filter(|(_, v)| matches!(v, toml::Value::String(_) | toml::Value::Table(_)))
+        .map(|(name, value)| {
+            let (version_req, features) =
+                crate::indexer::workspace::extract_version_features(value);
+            DirectDep {
+                name: name.clone(),
+                version_req,
+                features,
+            }
+        })
+        .collect())
 }
 
 pub(crate) fn parse_cargo_lock(content: &str) -> Result<Vec<LockedDep>, toml::de::Error> {
     let parsed: CargoLock = toml::from_str(content)?;
-    let Some(packages) = parsed.package else {
-        return Ok(vec![]);
-    };
-    let mut result = Vec::new();
-    for pkg in packages {
-        result.push(LockedDep {
+    Ok(parsed
+        .package
+        .unwrap_or_default()
+        .into_iter()
+        .map(|pkg| LockedDep {
             name: pkg.name,
             version: pkg.version,
             source: pkg.source,
-        });
-    }
-    Ok(result)
+        })
+        .collect())
 }
 
 /// Extract a repository URL from a Cargo.lock `source` field.
@@ -93,22 +91,20 @@ pub fn resolve_dependencies(direct: &[DirectDep], locked: &[LockedDep]) -> Vec<R
     let direct_names: HashMap<&str, &DirectDep> =
         direct.iter().map(|d| (d.name.as_str(), d)).collect();
 
-    let mut result = Vec::new();
-    for lock in locked {
-        let is_direct = direct_names.contains_key(lock.name.as_str());
-        let features = direct_names
-            .get(lock.name.as_str())
-            .map(|d| d.features.clone())
-            .unwrap_or_default();
-        result.push(ResolvedDep {
-            name: lock.name.clone(),
-            version: lock.version.clone(),
-            is_direct,
-            repository_url: repo_url_from_lock_source(lock.source.as_ref()),
-            features,
-        });
-    }
-    result
+    locked
+        .iter()
+        .map(|lock| {
+            let direct_entry = direct_names.get(lock.name.as_str()).copied();
+            let features = direct_entry.map(|d| d.features.clone()).unwrap_or_default();
+            ResolvedDep {
+                name: lock.name.clone(),
+                version: lock.version.clone(),
+                is_direct: direct_entry.is_some(),
+                repository_url: repo_url_from_lock_source(lock.source.as_ref()),
+                features,
+            }
+        })
+        .collect()
 }
 
 /// Parse Python dependencies from `pyproject.toml` or `requirements.txt`.

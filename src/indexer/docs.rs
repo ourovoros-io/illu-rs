@@ -23,12 +23,13 @@ async fn fetch_docs_rs(
 
 fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
-        .user_agent("illu-rs/0.1.0")
+        .user_agent(concat!("illu-rs/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(15))
         .connect_timeout(std::time::Duration::from_secs(5))
         .build()
 }
 
+#[non_exhaustive]
 pub struct PendingDoc {
     pub dep_id: crate::db::DepId,
     pub name: String,
@@ -61,6 +62,7 @@ pub fn pending_docs(
     Ok(pending)
 }
 
+#[non_exhaustive]
 pub struct FetchedDoc {
     pub dep_id: crate::db::DepId,
     pub source: &'static str,
@@ -211,13 +213,22 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
 
     let mut results = Vec::new();
 
-    // Phase 1: Try cargo doc (local, nightly, structured JSON)
+    // Phase 1: Try cargo doc (local, nightly, structured JSON).
+    // `generate_cargo_docs` shells out and polls with a blocking sleep, so
+    // it must not run on the tokio reactor — wrap in `spawn_blocking`.
     {
         let total = pending.len();
         crate::status::set(&format!("fetching docs ▸ cargo doc [0/{total}]"));
         let dep_names: Vec<String> = pending.iter().map(|p| p.name.clone()).collect();
-        match super::cargo_doc::generate_cargo_docs(repo_path, &dep_names) {
-            Ok(docs) => {
+        let repo_pb = repo_path.to_path_buf();
+        // `generate_cargo_docs` returns `Box<dyn Error>` which is not `Send`;
+        // stringify inside the blocking task so the JoinHandle is Send.
+        let cargo_result = tokio::task::spawn_blocking(move || {
+            super::cargo_doc::generate_cargo_docs(&repo_pb, &dep_names).map_err(|e| e.to_string())
+        })
+        .await;
+        match cargo_result {
+            Ok(Ok(docs)) => {
                 for (name, module_docs) in docs {
                     if let Some(p) = pending.iter().find(|p| p.name == name) {
                         for md in module_docs {
@@ -232,8 +243,11 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
                 }
                 tracing::info!(count = results.len(), "Got docs from cargo doc");
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 tracing::info!("cargo doc failed, falling back to network: {e}");
+            }
+            Err(e) => {
+                tracing::warn!("cargo doc blocking task panicked: {e}");
             }
         }
     }

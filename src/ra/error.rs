@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RaError {
     #[error("server not ready: {0}")]
     ServerNotReady(String),
