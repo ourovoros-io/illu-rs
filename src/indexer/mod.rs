@@ -516,13 +516,7 @@ fn index_typescript(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn s
     {
         let resolved: Vec<_> = deps
             .iter()
-            .map(|d| dependencies::ResolvedDep {
-                name: d.name.clone(),
-                version: d.version_req.clone(),
-                is_direct: true,
-                repository_url: None,
-                features: Vec::new(),
-            })
+            .map(dependencies::ResolvedDep::from_direct)
             .collect();
         store::store_dependencies(db, &resolved)?;
     }
@@ -624,13 +618,7 @@ fn index_python(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::
     if let Ok(deps) = dependencies::parse_python_deps(&config.repo_path) {
         let resolved: Vec<_> = deps
             .iter()
-            .map(|d| dependencies::ResolvedDep {
-                name: d.name.clone(),
-                version: d.version_req.clone(),
-                is_direct: true,
-                repository_url: None,
-                features: Vec::new(),
-            })
+            .map(dependencies::ResolvedDep::from_direct)
             .collect();
         store::store_dependencies(db, &resolved)?;
     }

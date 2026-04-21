@@ -200,6 +200,14 @@ pub(crate) fn kind_matches(kind: SymbolKind, filter: &str) -> bool {
     kind.to_string().eq_ignore_ascii_case(filter)
 }
 
+/// Retain only symbols whose kind matches `filter` (case-insensitive).
+/// If `filter` is `None`, the list is unchanged.
+pub(crate) fn retain_kind(symbols: &mut Vec<StoredSymbol>, filter: Option<&str>) {
+    if let Some(k) = filter {
+        symbols.retain(|s| kind_matches(s.kind, k));
+    }
+}
+
 pub(crate) const NOISY_CALLEES: &[&str] = &[
     // Constructors / conversions
     "new",

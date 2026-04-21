@@ -25,6 +25,22 @@ pub struct ResolvedDep {
     pub features: Vec<String>,
 }
 
+impl ResolvedDep {
+    /// Build a direct-only `ResolvedDep` from a manifest-parsed
+    /// `DirectDep`. Used by the TS/Python indexers, where there is no
+    /// lockfile to enrich `repository_url` / transitive dependencies.
+    #[must_use]
+    pub fn from_direct(d: &DirectDep) -> Self {
+        Self {
+            name: d.name.clone(),
+            version: d.version_req.clone(),
+            is_direct: true,
+            repository_url: None,
+            features: Vec::new(),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct CargoToml {
     dependencies: Option<HashMap<String, toml::Value>>,

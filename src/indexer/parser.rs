@@ -860,21 +860,21 @@ fn is_noisy_symbol(name: &str) -> bool {
 /// Derive a target file path from a module-qualified call like `parser::foo`.
 /// For `src/indexer/mod.rs` calling `parser::foo`, returns `src/indexer/parser.rs`.
 fn module_to_file(current_file: &str, module_name: &str) -> Option<String> {
-    let parent = std::path::Path::new(current_file).parent()?;
-    Some(
-        parent
-            .join(format!("{module_name}.rs"))
-            .to_string_lossy()
-            .to_string(),
-    )
+    sibling_file(current_file, &format!("{module_name}.rs"))
 }
 
 /// Resolve `super::` to the parent module's file.
 /// `src/server/tools/impact.rs` -> `src/server/tools/mod.rs`
 fn super_to_file(current_file: &str) -> Option<String> {
-    let path = std::path::Path::new(current_file);
-    let parent = path.parent()?;
-    Some(parent.join("mod.rs").to_string_lossy().to_string())
+    sibling_file(current_file, "mod.rs")
+}
+
+/// Join `file_name` to the parent directory of `current_file`, returning
+/// the result as a UTF-8 string (lossy if needed). Shared by the
+/// module-path resolvers in this file.
+fn sibling_file(current_file: &str, file_name: &str) -> Option<String> {
+    let parent = std::path::Path::new(current_file).parent()?;
+    Some(parent.join(file_name).to_string_lossy().to_string())
 }
 
 /// Extract type context from a simple scoped identifier like `Database::new`.

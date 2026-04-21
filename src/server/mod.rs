@@ -11,6 +11,7 @@ use rmcp::schemars;
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::fmt::Write;
 use std::sync::{Mutex, MutexGuard};
 
 const REFRESH_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
@@ -674,6 +675,20 @@ struct RaFileParams {
 
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
     McpError::internal_error(e.to_string(), None)
+}
+
+/// Parse a `"file:line:col"` string into a [`PositionSpec`], mapping
+/// any failure to `McpError` so RA tool handlers can use `?` directly.
+fn parse_position(s: &str) -> Result<crate::ra::PositionSpec, McpError> {
+    s.parse::<crate::ra::PositionSpec>()
+        .map_err(|e: crate::ra::RaError| to_mcp_err(e))
+}
+
+/// Build an MCP tool error result from any displayable error. Used by
+/// RA tool handlers that prefer to return a tool-error response rather
+/// than propagating via `?` (which would surface as a protocol error).
+fn ra_error(e: impl std::fmt::Display) -> CallToolResult {
+    CallToolResult::error(vec![Content::text(e.to_string())])
 }
 
 /// Flatten an error and its `source()` chain to a multi-line string.
@@ -1510,10 +1525,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, "Tool call: ra_definition");
         let ra = self.ra()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         match ra.definition(&spec).await {
             Ok(locs) => {
                 let mut out = String::new();
@@ -1531,7 +1543,7 @@ impl IlluServer {
                 }
                 Ok(text_result(out))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -1545,14 +1557,11 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, "Tool call: ra_hover");
         let ra = self.ra()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         match ra.hover(&spec).await {
             Ok(Some(text)) => Ok(text_result(text)),
             Ok(None) => Ok(text_result("No hover information available.".to_string())),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -1573,7 +1582,7 @@ impl IlluServer {
                     let json = serde_json::to_string_pretty(&diags).unwrap_or_default();
                     Ok(text_result(format!("```json\n{json}\n```")))
                 }
-                Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                Err(e) => Ok(ra_error(e)),
             }
         } else {
             let all = ra.get_all_diagnostics();
@@ -1592,13 +1601,10 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, "Tool call: ra_call_hierarchy");
         let ra = self.ra()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         let items = match ra.prepare_call_hierarchy(&spec).await {
             Ok(items) => items,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => return Ok(ra_error(e)),
         };
         if items.is_empty() {
             return Ok(text_result("No call hierarchy item found.".to_string()));
@@ -1625,7 +1631,7 @@ impl IlluServer {
                     }
                     out.push('\n');
                 }
-                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                Err(e) => return Ok(ra_error(e)),
             }
         }
         if dir == "out" || dir == "both" {
@@ -1644,7 +1650,7 @@ impl IlluServer {
                     }
                     out.push('\n');
                 }
-                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                Err(e) => return Ok(ra_error(e)),
             }
         }
 
@@ -1661,13 +1667,10 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, "Tool call: ra_type_hierarchy");
         let ra = self.ra()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         let items = match ra.prepare_type_hierarchy(&spec).await {
             Ok(items) => items,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => return Ok(ra_error(e)),
         };
         if items.is_empty() {
             return Ok(text_result("No type hierarchy item found.".to_string()));
@@ -1692,7 +1695,7 @@ impl IlluServer {
                 }
                 out.push('\n');
             }
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => return Ok(ra_error(e)),
             _ => {}
         }
 
@@ -1711,7 +1714,7 @@ impl IlluServer {
                 }
                 out.push('\n');
             }
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => return Ok(ra_error(e)),
             _ => {}
         }
 
@@ -1731,10 +1734,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, new_name = %params.new_name, "Tool call: ra_rename");
         let ra = self.require_ra_ready()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         match ra.rename_preview(&spec, &params.new_name).await {
             Ok(impact) => {
                 let mut out = format!(
@@ -1753,7 +1753,7 @@ impl IlluServer {
                 }
                 Ok(text_result(out))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -1767,10 +1767,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, new_name = %params.new_name, "Tool call: ra_safe_rename");
         let ra = self.require_ra_ready()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         match ra.safe_rename(&spec, &params.new_name).await {
             Ok(result) => {
                 let mut out = format!(
@@ -1781,8 +1778,7 @@ impl IlluServer {
                     result.files_changed.len()
                 );
                 for file in &result.files_changed {
-                    std::fmt::Write::write_fmt(&mut out, format_args!("- `{file}`\n"))
-                        .map_err(to_mcp_err)?;
+                    let _ = writeln!(out, "- `{file}`");
                 }
                 if !result.new_diagnostics.is_empty() {
                     out.push_str("\n### New Diagnostics\n");
@@ -1799,7 +1795,7 @@ impl IlluServer {
                 }
                 Ok(text_result(out))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -1813,10 +1809,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, "Tool call: ra_code_actions");
         let ra = self.ra()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         match ra.code_actions(&spec, params.kind.as_deref()).await {
             Ok(actions) => {
                 let mut out = String::new();
@@ -1845,7 +1838,7 @@ impl IlluServer {
                 }
                 Ok(text_result(out))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -1859,10 +1852,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, "Tool call: ra_expand_macro");
         let ra = self.ra()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         match ra.expand_macro(&spec).await {
             Ok(Some(expanded)) => {
                 let out = format!(
@@ -1872,7 +1862,7 @@ impl IlluServer {
                 Ok(text_result(out))
             }
             Ok(None) => Ok(text_result("No macro at this position.".to_string())),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -1896,16 +1886,15 @@ impl IlluServer {
                         Ok(changed) => {
                             let mut out = String::from("## SSR Applied\nFiles changed:\n");
                             for f in &changed {
-                                std::fmt::Write::write_fmt(&mut out, format_args!("  - {f}\n"))
-                                    .map_err(to_mcp_err)?;
+                                let _ = writeln!(out, "  - {f}");
                             }
                             Ok(text_result(out))
                         }
-                        Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+                        Err(e) => Ok(ra_error(e)),
                     }
                 }
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -1919,87 +1908,61 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, "Tool call: ra_context");
         let ra = self.ra()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         match ra.symbol_context(&spec).await {
             Ok(ctx) => {
                 let mut out = format!("## {}\n\n", ctx.name);
                 if let Some(hover) = &ctx.hover {
-                    std::fmt::Write::write_fmt(&mut out, format_args!("{hover}\n\n"))
-                        .map_err(to_mcp_err)?;
+                    let _ = writeln!(out, "{hover}\n");
                 }
-                std::fmt::Write::write_fmt(
-                    &mut out,
-                    format_args!(
-                        "**Definition:** `{}:{}:{}`\n",
-                        ctx.definition.file, ctx.definition.line, ctx.definition.col
-                    ),
-                )
-                .map_err(to_mcp_err)?;
+                let _ = writeln!(
+                    out,
+                    "**Definition:** `{}:{}:{}`",
+                    ctx.definition.file, ctx.definition.line, ctx.definition.col
+                );
                 if !ctx.definition.text.is_empty() {
-                    std::fmt::Write::write_fmt(
-                        &mut out,
-                        format_args!("```rust\n{}\n```\n\n", ctx.definition.text),
-                    )
-                    .map_err(to_mcp_err)?;
+                    let _ = writeln!(out, "```rust\n{}\n```\n", ctx.definition.text);
                 }
-                std::fmt::Write::write_fmt(
-                    &mut out,
-                    format_args!("**References:** {}\n\n", ctx.reference_count),
-                )
-                .map_err(to_mcp_err)?;
+                let _ = writeln!(out, "**References:** {}\n", ctx.reference_count);
                 if !ctx.incoming_calls.is_empty() {
                     out.push_str("### Callers\n");
                     for call in &ctx.incoming_calls {
-                        std::fmt::Write::write_fmt(
-                            &mut out,
-                            format_args!(
-                                "- `{}` ({}) at `{}:{}`\n",
-                                call.name, call.kind, call.file, call.line
-                            ),
-                        )
-                        .map_err(to_mcp_err)?;
+                        let _ = writeln!(
+                            out,
+                            "- `{}` ({}) at `{}:{}`",
+                            call.name, call.kind, call.file, call.line
+                        );
                     }
                     out.push('\n');
                 }
                 if !ctx.outgoing_calls.is_empty() {
                     out.push_str("### Callees\n");
                     for call in &ctx.outgoing_calls {
-                        std::fmt::Write::write_fmt(
-                            &mut out,
-                            format_args!(
-                                "- `{}` ({}) at `{}:{}`\n",
-                                call.name, call.kind, call.file, call.line
-                            ),
-                        )
-                        .map_err(to_mcp_err)?;
+                        let _ = writeln!(
+                            out,
+                            "- `{}` ({}) at `{}:{}`",
+                            call.name, call.kind, call.file, call.line
+                        );
                     }
                     out.push('\n');
                 }
                 if !ctx.implementations.is_empty() {
                     out.push_str("### Implementations\n");
                     for loc in &ctx.implementations {
-                        std::fmt::Write::write_fmt(
-                            &mut out,
-                            format_args!("- `{}:{}:{}`\n", loc.file, loc.line, loc.col),
-                        )
-                        .map_err(to_mcp_err)?;
+                        let _ = writeln!(out, "- `{}:{}:{}`", loc.file, loc.line, loc.col);
                     }
                     out.push('\n');
                 }
                 if !ctx.related_tests.is_empty() {
                     out.push_str("### Related Tests\n");
                     for test in &ctx.related_tests {
-                        std::fmt::Write::write_fmt(&mut out, format_args!("- `{test}`\n"))
-                            .map_err(to_mcp_err)?;
+                        let _ = writeln!(out, "- `{test}`");
                     }
                     out.push('\n');
                 }
                 Ok(text_result(out))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -2016,7 +1979,7 @@ impl IlluServer {
         let path = std::path::PathBuf::from(&params.file);
         match ra.syntax_tree(&path).await {
             Ok(tree) => Ok(text_result(tree)),
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 
@@ -2030,10 +1993,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(position = %params.position, "Tool call: ra_related_tests");
         let ra = self.ra()?;
-        let spec: crate::ra::PositionSpec = params
-            .position
-            .parse()
-            .map_err(|e: crate::ra::RaError| to_mcp_err(e))?;
+        let spec = parse_position(&params.position)?;
         match ra.related_tests(&spec).await {
             Ok(tests) => {
                 if tests.is_empty() {
@@ -2050,7 +2010,7 @@ impl IlluServer {
                     Ok(text_result(out))
                 }
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+            Err(e) => Ok(ra_error(e)),
         }
     }
 }

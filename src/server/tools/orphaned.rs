@@ -19,10 +19,7 @@ pub fn handle_orphaned(
     });
     unused.retain(|s| !super::is_entry_point(s));
 
-    if let Some(k) = kind {
-        let k_lower = k.to_lowercase();
-        unused.retain(|s| s.kind.to_string().to_lowercase() == k_lower);
-    }
+    super::retain_kind(&mut unused, kind);
 
     // Further filter to symbols with no test coverage
     let mut orphaned = Vec::new();

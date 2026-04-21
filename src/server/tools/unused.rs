@@ -15,10 +15,7 @@ pub fn handle_unused(
 
     let mut symbols = db.get_unreferenced_symbols(path, include_private)?;
 
-    if let Some(k) = kind {
-        let k_lower = k.to_lowercase();
-        symbols.retain(|s| s.kind.to_string().to_lowercase() == k_lower);
-    }
+    super::retain_kind(&mut symbols, kind);
 
     symbols.retain(|s| !super::is_entry_point(s));
     symbols.retain(|s| s.kind != SymbolKind::EnumVariant && s.kind != SymbolKind::Impl);

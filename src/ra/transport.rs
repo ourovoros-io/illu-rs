@@ -61,19 +61,21 @@ impl ServerState {
         Arc::clone(&self.readiness)
     }
 
-    #[must_use]
-    pub fn is_ready(&self) -> bool {
+    /// Acquire the inner mutex, transparently recovering from poisoning.
+    /// Centralises the `unwrap_or_else(PoisonError::into_inner)` idiom.
+    fn lock(&self) -> std::sync::MutexGuard<'_, ServerStateInner> {
         self.inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .ready
+    }
+
+    #[must_use]
+    pub fn is_ready(&self) -> bool {
+        self.lock().ready
     }
 
     pub fn set_ready(&self, ready: bool) {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .ready = ready;
+        self.lock().ready = ready;
         if ready {
             self.readiness.notify_waiters();
         }
@@ -81,35 +83,23 @@ impl ServerState {
 
     #[must_use]
     pub fn received_progress(&self) -> bool {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .received_progress
+        self.lock().received_progress
     }
 
     #[must_use]
     pub fn active_progress(&self) -> usize {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .active_progress
+        self.lock().active_progress
     }
 
     pub fn begin_progress(&self) {
-        let mut inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self.lock();
         inner.received_progress = true;
         inner.active_progress += 1;
     }
 
     pub fn end_progress(&self) {
         let went_idle = {
-            let mut inner = self
-                .inner
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut inner = self.lock();
             inner.active_progress = inner.active_progress.saturating_sub(1);
             inner.received_progress && inner.active_progress == 0
         };
@@ -119,18 +109,12 @@ impl ServerState {
     }
 
     pub fn set_diagnostics(&self, uri: String, diags: Vec<DiagnosticInfo>) {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .diagnostics
-            .insert(uri, diags);
+        self.lock().diagnostics.insert(uri, diags);
     }
 
     #[must_use]
     pub fn get_diagnostics(&self, uri: &str) -> Vec<DiagnosticInfo> {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.lock()
             .diagnostics
             .get(uri)
             .cloned()
@@ -139,11 +123,7 @@ impl ServerState {
 
     #[must_use]
     pub fn all_diagnostics(&self) -> HashMap<String, Vec<DiagnosticInfo>> {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .diagnostics
-            .clone()
+        self.lock().diagnostics.clone()
     }
 }
 
