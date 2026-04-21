@@ -239,11 +239,26 @@ impl RaClient {
     /// Wait for rust-analyzer to finish indexing. Driven by state-change
     /// notifications from the transport router rather than polling, so
     /// readiness is observed with minimal latency.
+    ///
+    /// The `Notified` future is registered *before* each state check: if
+    /// `set_ready(true)` fires between the check and the await, the
+    /// pre-registered waiter still observes the wake-up. Without this,
+    /// `notify_waiters` (which does not store a permit) could lose the
+    /// signal and the caller would wait up to `timeout` on a hung loop.
     pub async fn wait_for_ready(&self, timeout: Duration) -> Result<()> {
         const WARMUP: Duration = Duration::from_secs(2);
         let start = std::time::Instant::now();
+        let notify = self.server_state.readiness_notifier();
 
         loop {
+            // Register interest BEFORE reading state. `enable()` installs
+            // this future as a waiter immediately; any subsequent
+            // `notify_waiters` call will wake it, even if we're not yet
+            // `.await`-ing.
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
             if self.server_state.is_ready() {
                 info!("rust-analyzer is ready (token match)");
                 return Ok(());
@@ -257,9 +272,9 @@ impl RaClient {
                 return Ok(());
             }
 
-            // Re-check on every state change. The warmup window is bounded
-            // with a short timeout so the soft-readiness arm above can fire
-            // if RA goes silent before WARMUP elapses.
+            // Bound the wait: respect the overall deadline, and cap during
+            // WARMUP so the soft-readiness arm above fires promptly if RA
+            // goes silent without emitting a terminal progress event.
             let remaining = timeout
                 .checked_sub(start.elapsed())
                 .ok_or(RaError::Timeout(timeout))?;
@@ -269,11 +284,7 @@ impl RaClient {
             } else {
                 remaining.min(warmup_left)
             };
-            if tokio::time::timeout(wait, self.server_state.readiness_changed())
-                .await
-                .is_err()
-                && start.elapsed() >= timeout
-            {
+            if tokio::time::timeout(wait, notified).await.is_err() && start.elapsed() >= timeout {
                 return Err(RaError::Timeout(timeout));
             }
         }

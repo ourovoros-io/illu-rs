@@ -50,11 +50,15 @@ impl ServerState {
         }
     }
 
-    /// Resolves when the state changes in a way that could affect
-    /// readiness (a `set_ready(true)` or an `end_progress`). Callers
-    /// must re-check ready conditions after each await.
-    pub async fn readiness_changed(&self) {
-        self.readiness.notified().await;
+    /// Return the readiness notifier so callers can register their
+    /// interest with `notify.notified()` *before* checking state. Using
+    /// `readiness_changed().await` directly is race-prone: a notification
+    /// fired between the state check and the await would be missed
+    /// (`notify_waiters` wakes only currently-registered waiters, it does
+    /// not leave a permit).
+    #[must_use]
+    pub fn readiness_notifier(&self) -> Arc<Notify> {
+        Arc::clone(&self.readiness)
     }
 
     #[must_use]

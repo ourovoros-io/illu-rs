@@ -171,6 +171,10 @@ impl IlluServer {
     /// (subprocess invocations, blocking file I/O, long SQL) does not stall
     /// the reactor. The DB lock is acquired inside the blocking task, so no
     /// guard is held while the reactor schedules the work.
+    ///
+    /// `Box<dyn Error>` is not `Send`, so the error is flattened to a
+    /// caused-by chain via `format_error_chain` inside the blocking
+    /// closure — preserving information that plain `Display` drops.
     async fn run_blocking<F>(&self, f: F) -> Result<String, McpError>
     where
         F: FnOnce(&Database, &IndexConfig) -> Result<String, Box<dyn std::error::Error>>
@@ -181,7 +185,7 @@ impl IlluServer {
         let config = std::sync::Arc::clone(&self.config);
         tokio::task::spawn_blocking(move || -> Result<String, String> {
             let guard = db.lock().map_err(|e| e.to_string())?;
-            f(&guard, &config).map_err(|e| e.to_string())
+            f(&guard, &config).map_err(|e| format_error_chain(&*e))
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?
@@ -638,6 +642,21 @@ struct RaFileParams {
 
 fn to_mcp_err(e: impl std::fmt::Display) -> McpError {
     McpError::internal_error(e.to_string(), None)
+}
+
+/// Flatten an error and its `source()` chain to a multi-line string.
+/// Used when an error must cross a thread boundary (via `spawn_blocking`)
+/// where `Box<dyn Error>` is not `Send` — plain `Display` would drop the
+/// causal chain, so we walk it ourselves before serialising.
+fn format_error_chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(inner) = source {
+        out.push_str("\n  caused by: ");
+        out.push_str(&inner.to_string());
+        source = inner.source();
+    }
+    out
 }
 
 fn text_result(text: String) -> CallToolResult {
@@ -1412,7 +1431,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new("cross_deps");
         let registry = std::sync::Arc::clone(&self.registry);
         let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
-            tools::cross_deps::handle_cross_deps(&registry).map_err(|e| e.to_string())
+            tools::cross_deps::handle_cross_deps(&registry).map_err(|e| format_error_chain(&*e))
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?

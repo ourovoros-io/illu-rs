@@ -57,11 +57,15 @@ pub fn handle_axioms(query: &str) -> Result<String, Box<dyn std::error::Error>> 
                     score += 2;
                 }
             }
-            if axiom.category.to_lowercase().contains(&query_lower) {
+            // Exact-match boost: user typed a category or trigger name
+            // verbatim. `.contains` on the full query against single-word
+            // strings was unreachable for multi-word queries — this
+            // gives both single- and multi-word queries the same shot.
+            if axiom.category.eq_ignore_ascii_case(&query_lower) {
                 score += 20;
             }
             for trigger in &axiom.triggers {
-                if trigger.to_lowercase().contains(&query_lower) {
+                if trigger.eq_ignore_ascii_case(&query_lower) {
                     score += 30;
                 }
             }
