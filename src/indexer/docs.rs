@@ -23,12 +23,13 @@ async fn fetch_docs_rs(
 
 fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
-        .user_agent("illu-rs/0.1.0")
+        .user_agent(concat!("illu-rs/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(15))
         .connect_timeout(std::time::Duration::from_secs(5))
         .build()
 }
 
+#[non_exhaustive]
 pub struct PendingDoc {
     pub dep_id: crate::db::DepId,
     pub name: String,
@@ -61,6 +62,7 @@ pub fn pending_docs(
     Ok(pending)
 }
 
+#[non_exhaustive]
 pub struct FetchedDoc {
     pub dep_id: crate::db::DepId,
     pub source: &'static str,

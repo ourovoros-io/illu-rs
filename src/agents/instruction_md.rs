@@ -69,7 +69,14 @@ pub fn write_md_section(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let md_path = repo_path.join(file_name);
 
-    let content = std::fs::read_to_string(&md_path).unwrap_or_default();
+    // NotFound is the steady state (we're creating the file); any other
+    // error (permission denied, IO fault) must propagate rather than
+    // silently overwriting whatever exists on disk.
+    let content = match std::fs::read_to_string(&md_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
 
     // Skip write if section already exists and is identical
     if content.contains(ILLU_SECTION_START) && content.contains(section) {

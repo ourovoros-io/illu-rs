@@ -115,6 +115,7 @@ pub struct SetupFlags {
 
 /// One entry per agent we wrote to (or skipped).
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct AgentWriteReport {
     pub agent_id: &'static str,
     pub written_paths: Vec<PathBuf>,

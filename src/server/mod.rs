@@ -175,6 +175,15 @@ impl IlluServer {
     /// `Box<dyn Error>` is not `Send`, so the error is flattened to a
     /// caused-by chain via `format_error_chain` inside the blocking
     /// closure — preserving information that plain `Display` drops.
+    ///
+    /// **Trade-off:** every call pays a tokio blocking-pool dispatch
+    /// even when the handler only does in-memory SQL. Only migrate a
+    /// handler to this path when it shells out to git, touches `std::fs`,
+    /// or does genuinely long-running work. Purely-in-memory handlers
+    /// (`query`, `tree`, `impact`, …) are intentionally left on the
+    /// reactor — the cost of the thread hop outweighs the contention
+    /// win. If a handler does unpredictable long SQL (`neighborhood`
+    /// with huge graphs, etc.), pick `run_blocking`.
     async fn run_blocking<F>(&self, f: F) -> Result<String, McpError>
     where
         F: FnOnce(&Database, &IndexConfig) -> Result<String, Box<dyn std::error::Error>>
@@ -192,7 +201,13 @@ impl IlluServer {
         .map_err(|e| McpError::internal_error(e, None))
     }
 
-    fn refresh(&self) -> Result<(), McpError> {
+    /// Refresh the index if the cooldown has elapsed. Heavy work
+    /// (git-changed-file detection, SQL writes) runs on the blocking
+    /// pool so the reactor isn't stalled. The docs fetch is still kicked
+    /// off as a normal `tokio::spawn` task because that path is already
+    /// async (HTTP) and only touches the DB inside its own
+    /// `spawn_blocking`.
+    async fn refresh(&self) -> Result<(), McpError> {
         {
             let last = self
                 .last_refresh
@@ -204,20 +219,27 @@ impl IlluServer {
             }
         }
         tracing::debug!("Refresh: checking for changed files");
-        let pending_docs = {
-            let db = self.lock_db()?;
-            let refreshed = crate::indexer::refresh_index(&db, &self.config).map_err(to_mcp_err)?;
+
+        let db = std::sync::Arc::clone(&self.db);
+        let config = std::sync::Arc::clone(&self.config);
+        let pending_docs = tokio::task::spawn_blocking(move || -> Result<Vec<_>, String> {
+            let db = db.lock().map_err(|e| e.to_string())?;
+            let refreshed =
+                crate::indexer::refresh_index(&db, &config).map_err(|e| format_error_chain(&*e))?;
             if refreshed > 0 {
                 tracing::info!(count = refreshed, "Refreshed changed files");
             }
-            crate::indexer::docs::pending_docs(&db).map_err(to_mcp_err)?
-        }; // lock dropped
+            crate::indexer::docs::pending_docs(&db).map_err(|e| format_error_chain(&*e))
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e, None))?;
 
         if let Ok(mut last) = self.last_refresh.lock() {
             *last = std::time::Instant::now();
         }
 
-        // Fetch docs in background — don't block tool responses
+        // Fetch docs in background — don't block tool responses.
         if !pending_docs.is_empty() {
             let db = self.db.clone();
             let repo_path = self.config.repo_path.clone();
@@ -227,9 +249,19 @@ impl IlluServer {
                 crate::status::set(&format!("fetching docs ▸ 0/{total}"));
                 let fetched = crate::indexer::docs::fetch_docs(&pending_docs, &repo_path).await;
                 if !fetched.is_empty() {
-                    let Ok(db) = db.lock() else { return };
-                    tracing::info!(count = fetched.len(), "Storing fetched docs");
-                    let _ = crate::indexer::docs::store_fetched_docs(&db, &fetched);
+                    let fetched_count = fetched.len();
+                    // Acquire the std Mutex on the blocking pool so the
+                    // async reactor isn't parked on a lock held by a
+                    // sibling `spawn_blocking` task.
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let Ok(db) = db.lock() else {
+                            tracing::warn!("docs store: failed to acquire DB lock");
+                            return;
+                        };
+                        tracing::info!(count = fetched_count, "Storing fetched docs");
+                        let _ = crate::indexer::docs::store_fetched_docs(&db, &fetched);
+                    })
+                    .await;
                 }
                 crate::status::set(crate::status::READY);
             });
@@ -694,7 +726,7 @@ impl IlluServer {
             "Tool call: query"
         );
         let _guard = crate::status::StatusGuard::new(&format!("query ▸ {}", params.query));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::query::handle_query(
             &db,
@@ -720,7 +752,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(symbol = %params.symbol_name, file = ?params.file, "Tool call: context");
         let _guard = crate::status::StatusGuard::new(&format!("context ▸ {}", params.symbol_name));
-        self.refresh()?;
+        self.refresh().await?;
         let sym = params.symbol_name.clone();
         let file = params.file.clone();
         let sections = params.sections.clone();
@@ -756,7 +788,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(symbol = %params.symbol_name, "Tool call: impact");
         let _guard = crate::status::StatusGuard::new(&format!("impact ▸ {}", params.symbol_name));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let summary = params.summary.unwrap_or(true);
         let exclude_tests = params.exclude_tests.unwrap_or(false);
@@ -785,7 +817,7 @@ impl IlluServer {
             "Tool call: docs"
         );
         let _guard = crate::status::StatusGuard::new(&format!("docs ▸ {}", params.dependency));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::docs::handle_docs(&db, &params.dependency, params.topic.as_deref())
             .map_err(to_mcp_err)?;
@@ -802,7 +834,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = %params.path, "Tool call: overview");
         let _guard = crate::status::StatusGuard::new(&format!("overview ▸ {}", params.path));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::overview::handle_overview(
             &db,
@@ -824,7 +856,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = %params.path, "Tool call: tree");
         let _guard = crate::status::StatusGuard::new(&format!("tree ▸ {}", params.path));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::tree::handle_tree(&db, &params.path).map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -840,7 +872,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(git_ref = ?params.git_ref, "Tool call: diff_impact");
         let _guard = crate::status::StatusGuard::new("diff_impact");
-        self.refresh()?;
+        self.refresh().await?;
         let git_ref = params.git_ref.clone();
         let changes_only = params.changes_only.unwrap_or(false);
         let compact = params.compact.unwrap_or(false);
@@ -869,7 +901,7 @@ impl IlluServer {
         tracing::info!(from = %params.from, to = %params.to, all_paths = ?params.all_paths, "Tool call: callpath");
         let _guard =
             crate::status::StatusGuard::new(&format!("callpath ▸ {} → {}", params.from, params.to));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::callpath::handle_callpath(
             &db,
@@ -894,7 +926,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!("Tool call: freshness");
         let _guard = crate::status::StatusGuard::new("freshness");
-        self.refresh()?;
+        self.refresh().await?;
         let result = self
             .run_blocking(move |db, cfg| tools::freshness::handle_freshness(db, &cfg.repo_path))
             .await?;
@@ -911,7 +943,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(symbols = ?params.symbols, "Tool call: batch_context");
         let _guard = crate::status::StatusGuard::new("batch_context");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let full_body = params.full_body.unwrap_or(false);
         let sections: Option<Vec<&str>> = params
@@ -938,7 +970,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = ?params.path, kind = ?params.kind, untested = ?params.untested, "Tool call: unused");
         let _guard = crate::status::StatusGuard::new("unused");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::unused::handle_unused(
             &db,
@@ -961,7 +993,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(trait_name = ?params.trait_name, type_name = ?params.type_name, "Tool call: implements");
         let _guard = crate::status::StatusGuard::new("implements");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::implements::handle_implements(
             &db,
@@ -983,7 +1015,7 @@ impl IlluServer {
         tracing::info!(symbol = %params.symbol_name, depth = ?params.depth, "Tool call: neighborhood");
         let _guard =
             crate::status::StatusGuard::new(&format!("neighborhood ▸ {}", params.symbol_name));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::neighborhood::handle_neighborhood(
             &db,
@@ -1007,7 +1039,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(type_name = %params.type_name, "Tool call: type_usage");
         let _guard = crate::status::StatusGuard::new(&format!("type_usage ▸ {}", params.type_name));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::type_usage::handle_type_usage(
             &db,
@@ -1030,7 +1062,7 @@ impl IlluServer {
         tracing::info!(path = %params.path, "Tool call: file_graph");
         let _guard =
             crate::status::StatusGuard::new(&format!("file_graph \u{25b8} {}", params.path));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::file_graph::handle_file_graph(&db, &params.path).map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -1049,7 +1081,7 @@ impl IlluServer {
             "symbols_at \u{25b8} {}:{}",
             params.file, params.line
         ));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::symbols_at::handle_symbols_at(&db, &params.file, params.line)
             .map_err(to_mcp_err)?;
@@ -1066,7 +1098,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = ?params.path, "Tool call: hotspots");
         let _guard = crate::status::StatusGuard::new("hotspots");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::hotspots::handle_hotspots(
             &db,
@@ -1088,7 +1120,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = ?params.path, "Tool call: stats");
         let _guard = crate::status::StatusGuard::new("stats");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::stats::handle_stats(
             &db,
@@ -1112,7 +1144,7 @@ impl IlluServer {
             "rename_plan \u{25b8} {}",
             params.symbol_name
         ));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result =
             tools::rename_plan::handle_rename_plan(&db, &params.symbol_name).map_err(to_mcp_err)?;
@@ -1130,7 +1162,7 @@ impl IlluServer {
         tracing::info!(symbol = %params.symbol_name, "Tool call: similar");
         let _guard =
             crate::status::StatusGuard::new(&format!("similar \u{25b8} {}", params.symbol_name));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result =
             tools::similar::handle_similar(&db, &params.symbol_name, params.path.as_deref())
@@ -1149,7 +1181,7 @@ impl IlluServer {
         tracing::info!(symbol = %params.symbol_name, "Tool call: blame");
         let _guard =
             crate::status::StatusGuard::new(&format!("blame \u{25b8} {}", params.symbol_name));
-        self.refresh()?;
+        self.refresh().await?;
         let sym = params.symbol_name.clone();
         let result = self
             .run_blocking(move |db, cfg| tools::blame::handle_blame(db, &cfg.repo_path, &sym))
@@ -1168,7 +1200,7 @@ impl IlluServer {
         tracing::info!(symbol = %params.symbol_name, "Tool call: history");
         let _guard =
             crate::status::StatusGuard::new(&format!("history \u{25b8} {}", params.symbol_name));
-        self.refresh()?;
+        self.refresh().await?;
         let sym = params.symbol_name.clone();
         let max_commits = params.max_commits;
         let show_diff = params.show_diff.unwrap_or(false);
@@ -1191,7 +1223,7 @@ impl IlluServer {
         tracing::info!(symbol = %params.symbol_name, "Tool call: references");
         let _guard =
             crate::status::StatusGuard::new(&format!("references \u{25b8} {}", params.symbol_name));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::references::handle_references(
             &db,
@@ -1213,7 +1245,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = ?params.path, kind = ?params.kind, "Tool call: doc_coverage");
         let _guard = crate::status::StatusGuard::new("doc_coverage");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::doc_coverage::handle_doc_coverage(
             &db,
@@ -1235,7 +1267,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = %params.path, "Tool call: boundary");
         let _guard = crate::status::StatusGuard::new(&format!("boundary \u{25b8} {}", params.path));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::boundary::handle_boundary(&db, &params.path).map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -1251,7 +1283,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!("Tool call: health");
         let _guard = crate::status::StatusGuard::new("health");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::health::handle_health(&db).map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -1267,7 +1299,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!("Tool call: crate_graph");
         let _guard = crate::status::StatusGuard::new("crate_graph");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::crate_graph::handle_crate_graph(&db).map_err(to_mcp_err)?;
         Ok(text_result(result))
@@ -1286,7 +1318,7 @@ impl IlluServer {
             "crate_impact \u{25b8} {}",
             params.symbol_name
         ));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::crate_impact::handle_crate_impact(&db, &params.symbol_name)
             .map_err(to_mcp_err)?;
@@ -1303,7 +1335,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(symbol = ?params.symbol_name, path = ?params.path, format = ?params.format, "Tool call: graph_export");
         let _guard = crate::status::StatusGuard::new("graph_export");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::graph_export::handle_graph_export(
             &db,
@@ -1330,7 +1362,7 @@ impl IlluServer {
             "test_impact \u{25b8} {}",
             params.symbol_name
         ));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::test_impact::handle_test_impact(&db, &params.symbol_name, params.depth)
             .map_err(to_mcp_err)?;
@@ -1347,7 +1379,7 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!(path = ?params.path, kind = ?params.kind, "Tool call: orphaned");
         let _guard = crate::status::StatusGuard::new("orphaned");
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result =
             tools::orphaned::handle_orphaned(&db, params.path.as_deref(), params.kind.as_deref())
@@ -1452,7 +1484,7 @@ impl IlluServer {
             "cross_callpath \u{25b8} {} \u{2192} {}",
             params.from, params.to
         ));
-        self.refresh()?;
+        self.refresh().await?;
         let db = self.lock_db()?;
         let result = tools::cross_callpath::handle_cross_callpath(
             &db,
@@ -1860,7 +1892,7 @@ impl IlluServer {
                     let json = serde_json::to_string_pretty(&edit).unwrap_or_default();
                     Ok(text_result(format!("```json\n{json}\n```")))
                 } else {
-                    match crate::ra::ops::apply_workspace_edit(&edit) {
+                    match crate::ra::ops::apply_workspace_edit(&edit).await {
                         Ok(changed) => {
                             let mut out = String::from("## SSR Applied\nFiles changed:\n");
                             for f in &changed {

@@ -746,12 +746,14 @@ pub(crate) fn get_signature(node: &Node, source: &str) -> String {
 
 /// Resolved import path for a short name.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ImportInfo {
     pub qualified_path: String,
 }
 
 /// A reference from one symbol to another, identified by name.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SymbolRef {
     /// Name of the symbol that contains the reference
     pub source_name: String,
@@ -779,6 +781,7 @@ pub enum RefKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TraitImpl {
     pub type_name: String,
     pub trait_name: String,
@@ -1212,6 +1215,11 @@ fn collect_derive_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
 /// (the common case for data-container types) has zero entries in
 /// `symbol_refs` and is therefore invisible to `impact`, which filters on
 /// `high`-confidence refs.
+///
+/// The `seen` set is shared across the entire subtree walk (generics,
+/// nested `Vec<Option<T>>`, trait bounds, etc.), so each target symbol
+/// contributes at most one ref per source struct/enum — a struct that
+/// mentions the same type in three fields still emits one `TypeRef`.
 fn collect_field_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
     node: &Node,
     ctx: &RefContext<'_, S, S2>,
