@@ -74,11 +74,26 @@ impl RaClient {
     pub async fn ssr(&self, query: &str) -> Result<lsp_types::WorkspaceEdit> {
         let server = self.server().clone();
 
-        // Find a valid file in the workspace to serve as the context position
-        let fallback_uri = lsp_types::Url::from_file_path(self.root_path().join("Cargo.toml"))
-            .map_err(|()| RaError::RequestFailed("Invalid workspace root path".to_string()))?;
-        // Since ssr requires a valid rust file, we try to use Cargo.toml or just root
-        let uri = fallback_uri;
+        // SSR needs a `.rs` file as its resolution anchor — current
+        // rust-analyzer rejects non-Rust files with "no resolution scope
+        // for file". Cargo.toml does not qualify. Try the conventional
+        // entrypoints; error cleanly if neither exists so the caller
+        // doesn't get an opaque LSP error for a fixable problem.
+        let root = self.root_path();
+        let ssr_anchor = ["src/lib.rs", "src/main.rs"]
+            .iter()
+            .map(|p| root.join(p))
+            .find(|p| p.is_file())
+            .ok_or_else(|| {
+                RaError::RequestFailed(
+                    "ssr requires src/lib.rs or src/main.rs as a resolution anchor; \
+                     neither exists in the workspace"
+                        .to_string(),
+                )
+            })?;
+        let uri = lsp_types::Url::from_file_path(&ssr_anchor).map_err(|()| {
+            RaError::RequestFailed(format!("invalid ssr anchor path: {}", ssr_anchor.display()))
+        })?;
 
         let params = SsrParams {
             query: query.to_string(),
