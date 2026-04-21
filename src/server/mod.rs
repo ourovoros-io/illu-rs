@@ -2073,10 +2073,12 @@ impl IlluServer {
         let path = std::path::PathBuf::from(&params.file);
         match ra.syntax_tree(&path).await {
             Ok(tree) => {
-                // Syntax trees are S-expressions that can run 300KB+ for a
-                // 100-line file. Cap at ~60KB with a clear hint so the
-                // response fits in typical MCP tool-result budgets.
-                const MAX_BYTES: usize = 60_000;
+                // Syntax trees are S-expressions that can run 300 KB+ for a
+                // 100-line file. Cap well below the MCP client tool-result
+                // budget — empirically, a 60 KB response was still saved
+                // to a file instead of rendered inline, so ~16 KB is the
+                // safe ceiling for smooth interactive use.
+                const MAX_BYTES: usize = 16_000;
                 let out = if tree.len() > MAX_BYTES {
                     format!(
                         "{}\n\n…truncated ({} chars total, showing {} chars). \
