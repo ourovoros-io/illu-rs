@@ -394,12 +394,12 @@ async fn head_watcher(db: std::sync::Arc<std::sync::Mutex<Database>>, config: In
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 
     let repo_path = config.repo_path.clone();
-    let mut last_head = git_head(&repo_path);
+    let mut last_head = git_head_async(&repo_path).await;
 
     loop {
         tokio::time::sleep(POLL_INTERVAL).await;
 
-        let current = git_head(&repo_path);
+        let current = git_head_async(&repo_path).await;
         if current == last_head {
             continue;
         }
@@ -440,7 +440,7 @@ async fn head_watcher(db: std::sync::Arc<std::sync::Mutex<Database>>, config: In
             tracing::warn!("Background refresh task panicked: {e}");
         }
 
-        last_head = git_head(&repo_path);
+        last_head = git_head_async(&repo_path).await;
     }
 }
 
@@ -452,6 +452,16 @@ fn git_head(repo_path: &Path) -> Option<String> {
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+/// `git_head` wrapped for async callers: runs the blocking subprocess on
+/// tokio's blocking pool so polling HEAD doesn't stall the reactor.
+async fn git_head_async(repo_path: &Path) -> Option<String> {
+    let repo_path = repo_path.to_path_buf();
+    tokio::task::spawn_blocking(move || git_head(&repo_path))
+        .await
+        .ok()
+        .flatten()
 }
 
 #[expect(clippy::print_stdout, reason = "CLI output")]

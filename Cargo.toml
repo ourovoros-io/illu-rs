@@ -45,6 +45,7 @@ thiserror = "2"
 axum = { version = "0.8", optional = true }
 opener = { version = "0.7", optional = true }
 
+
 [features]
 default = ["dashboard"]
 dashboard = ["dep:axum", "dep:opener"]

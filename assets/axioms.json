@@ -1,0 +1,450 @@
+[
+  {
+    "id": "rust_book_ch04_01",
+    "category": "Ownership",
+    "triggers": [
+      "ownership",
+      "move",
+      "clone",
+      "String",
+      "assign"
+    ],
+    "rule_summary": "Assigning a value with heap-allocated data (like `String`) to another variable moves ownership. The original variable is invalidated. Use `.clone()` only if a deep copy is explicitly required.",
+    "prompt_injection": "MANDATORY RULE: When moving non-Copy types like `String` or `Vec`, remember the original variable can no longer be used. Do not default to `.clone()` to fix borrow checker errors; consider borrowing instead.",
+    "anti_pattern": "let s1 = String::from(\"hello\");\nlet s2 = s1;\nprintln!(\"{}\", s1); // Error: value borrowed here after move",
+    "good_pattern": "let s1 = String::from(\"hello\");\nlet s2 = &s1;\nprintln!(\"{}\", s1); // Valid"
+  },
+  {
+    "id": "rust_book_ch04_02",
+    "category": "Borrowing",
+    "triggers": [
+      "reference",
+      "&",
+      "&mut",
+      "borrow",
+      "mutable reference"
+    ],
+    "rule_summary": "You can have either one mutable reference or any number of immutable references to a particular piece of data in a particular scope, but never both.",
+    "prompt_injection": "MANDATORY RULE: Never create a mutable reference (`&mut T`) while an immutable reference (`&T`) to the same data is still in scope.",
+    "anti_pattern": "let mut s = String::from(\"hello\");\nlet r1 = &s;\nlet r2 = &mut s;\nprintln!(\"{} and {}\", r1, r2);",
+    "good_pattern": "let mut s = String::from(\"hello\");\n{\n    let r1 = &s;\n    println!(\"{}\", r1);\n}\nlet r2 = &mut s;\nprintln!(\"{}\", r2);"
+  },
+  {
+    "id": "rust_book_ch06_02",
+    "category": "Pattern Matching",
+    "triggers": [
+      "match",
+      "enum",
+      "Option",
+      "Result",
+      "exhaustive"
+    ],
+    "rule_summary": "Match expressions must be exhaustive. When matching an enum, ensure all variants are covered, or use a catch-all pattern `_` if explicitly desired.",
+    "prompt_injection": "MANDATORY RULE: Always handle all possible enum variants in a `match` statement. For `Option`, explicitly handle both `Some` and `None`.",
+    "anti_pattern": "let some_value = Some(3);\nmatch some_value {\n    Some(3) => println!(\"three\"),\n}",
+    "good_pattern": "let some_value = Some(3);\nmatch some_value {\n    Some(3) => println!(\"three\"),\n    _ => (),\n}"
+  },
+  {
+    "id": "rust_book_ch06_03",
+    "category": "Control Flow",
+    "triggers": [
+      "if let",
+      "match",
+      "Option",
+      "Some"
+    ],
+    "rule_summary": "Use `if let` for concise control flow when you only care about matching one specific pattern and want to ignore the rest, instead of writing a full `match` with a `_ => ()` arm.",
+    "prompt_injection": "MANDATORY RULE: Replace single-arm `match` statements that ignore all other variants with `if let`.",
+    "anti_pattern": "match config_max {\n    Some(max) => println!(\"The maximum is configured to be {}\", max),\n    _ => (),\n}",
+    "good_pattern": "if let Some(max) = config_max {\n    println!(\"The maximum is configured to be {}\", max);\n}"
+  },
+  {
+    "id": "rust_book_ch09_02",
+    "category": "Error Handling",
+    "triggers": [
+      "Result",
+      "?",
+      "unwrap",
+      "expect",
+      "error propagation"
+    ],
+    "rule_summary": "Use the `?` operator to cleanly propagate errors from functions returning `Result`. Avoid `unwrap()` and `expect()` unless a failure represents an unrecoverable bug.",
+    "prompt_injection": "MANDATORY RULE: Propagate errors using the `?` operator. Never use `unwrap()` in business logic unless you are absolutely certain it cannot fail.",
+    "anti_pattern": "fn read_username() -> String {\n    let mut f = File::open(\"hello.txt\").unwrap();\n    let mut s = String::new();\n    f.read_to_string(&mut s).unwrap();\n    s\n}",
+    "good_pattern": "fn read_username() -> Result<String, io::Error> {\n    let mut s = String::new();\n    File::open(\"hello.txt\")?.read_to_string(&mut s)?;\n    Ok(s)\n}"
+  },
+  {
+    "id": "rust_book_ch10_02",
+    "category": "Traits",
+    "triggers": [
+      "trait",
+      "impl Trait",
+      "generic",
+      "bounds",
+      "T:"
+    ],
+    "rule_summary": "Use `impl Trait` for simple generic parameters, and trait bounds (`T: Trait`) when you need to enforce multiple parameters to be the exact same type.",
+    "prompt_injection": "MANDATORY RULE: Prefer `impl Trait` in function signatures for readability unless trait bounds are strictly required for complex type relationships.",
+    "anti_pattern": "fn notify<T: Summary, U: Summary>(item1: &T, item2: &U) {}",
+    "good_pattern": "fn notify(item1: &impl Summary, item2: &impl Summary) {}"
+  },
+  {
+    "id": "rust_book_ch10_03",
+    "category": "Lifetimes",
+    "triggers": [
+      "lifetime",
+      "&'a",
+      "borrow",
+      "struct reference"
+    ],
+    "rule_summary": "When a struct holds a reference, it must include a lifetime annotation to ensure the data it references outlives the struct itself.",
+    "prompt_injection": "MANDATORY RULE: Annotate structs holding references with named lifetimes (e.g., `<'a>`). Avoid storing references in structs if possible; prefer owning the data.",
+    "anti_pattern": "struct ImportantExcerpt {\n    part: &str,\n}",
+    "good_pattern": "struct ImportantExcerpt<'a> {\n    part: &'a str,\n}"
+  },
+  {
+    "id": "rust_book_ch13_02",
+    "category": "Iterators",
+    "triggers": [
+      "iter",
+      "loop",
+      "for",
+      "map",
+      "filter",
+      "collect"
+    ],
+    "rule_summary": "Prefer iterator adapters (`map`, `filter`, `fold`) over manual `for` loops for transforming or filtering collections. They are often faster and more idiomatic.",
+    "prompt_injection": "MANDATORY RULE: Use iterator methods like `.map()`, `.filter()`, and `.collect()` instead of mutable vectors and manual `for` loops where possible.",
+    "anti_pattern": "let mut v2 = Vec::new();\nfor i in &v1 {\n    v2.push(i + 1);\n}",
+    "good_pattern": "let v2: Vec<_> = v1.iter().map(|x| x + 1).collect();"
+  },
+  {
+    "id": "rust_book_ch15_04",
+    "category": "Smart Pointers",
+    "triggers": [
+      "Rc",
+      "Arc",
+      "multiple owners",
+      "shared ownership"
+    ],
+    "rule_summary": "Use `Rc<T>` to enable multiple ownership of data on the heap in single-threaded contexts. Use `Arc<T>` for multi-threaded contexts. Data inside `Rc` or `Arc` is immutable by default.",
+    "prompt_injection": "MANDATORY RULE: Use `Rc<T>` or `Arc<T>` only when shared ownership is strictly required (e.g., graph structures).",
+    "anti_pattern": "let a = Box::new(List::Cons(5, Box::new(List::Nil)));\nlet b = List::Cons(3, a); // 'a' moved here\nlet c = List::Cons(4, a); // Error: use of moved value",
+    "good_pattern": "let a = Rc::new(List::Cons(5, Rc::new(List::Nil)));\nlet b = List::Cons(3, Rc::clone(&a));\nlet c = List::Cons(4, Rc::clone(&a));"
+  },
+  {
+    "id": "rust_book_ch15_05",
+    "category": "Interior Mutability",
+    "triggers": [
+      "RefCell",
+      "Mutex",
+      "Rc<RefCell",
+      "interior mutability"
+    ],
+    "rule_summary": "Use `RefCell<T>` (or `Mutex<T>`) to mutate data even when there are immutable references to that data. This enforces borrowing rules at runtime rather than compile time.",
+    "prompt_injection": "MANDATORY RULE: Combine `Rc<T>` with `RefCell<T>` (`Rc<RefCell<T>>`) to have multiple owners of mutable data in single-threaded scenarios. Be aware of runtime panics if borrow rules are violated.",
+    "anti_pattern": "let value = Rc::new(5);\n*value += 1; // Error: cannot mutate Rc",
+    "good_pattern": "let value = Rc::new(RefCell::new(5));\n*value.borrow_mut() += 1;"
+  },
+  {
+    "id": "rust_book_ch16_02",
+    "category": "Concurrency",
+    "triggers": [
+      "mpsc",
+      "channel",
+      "thread",
+      "send",
+      "recv"
+    ],
+    "rule_summary": "Do not communicate by sharing memory; instead, share memory by communicating. Use `mpsc` channels to send data between threads.",
+    "prompt_injection": "MANDATORY RULE: Prefer message passing (`mpsc::channel`) over shared state (`Mutex`) for communicating between threads when possible.",
+    "anti_pattern": "let mut val = String::from(\"hi\");\nthread::spawn(move || { val.push_str(\" there\"); });\nprintln!(\"{}\", val);",
+    "good_pattern": "let (tx, rx) = mpsc::channel();\nthread::spawn(move || { tx.send(String::from(\"hi\")).unwrap(); });\nlet val = rx.recv().unwrap();"
+  },
+  {
+    "id": "rust_book_ch16_03",
+    "category": "Concurrency",
+    "triggers": [
+      "Mutex",
+      "Arc<Mutex",
+      "lock",
+      "shared state"
+    ],
+    "rule_summary": "When shared mutable state is unavoidable across threads, wrap the data in a `Mutex` and wrap the `Mutex` in an `Arc` to allow multiple thread ownership.",
+    "prompt_injection": "MANDATORY RULE: Use `Arc<Mutex<T>>` to share mutable state across threads. Ensure locks are dropped as quickly as possible to avoid deadlocks.",
+    "anti_pattern": "let counter = Rc::new(Mutex::new(0));\nthread::spawn(move || { *counter.lock().unwrap() += 1; }); // Error: Rc is not Send",
+    "good_pattern": "let counter = Arc::new(Mutex::new(0));\nlet counter_clone = Arc::clone(&counter);\nthread::spawn(move || { *counter_clone.lock().unwrap() += 1; });"
+  },
+  {
+    "id": "rust_book_ch18_02",
+    "category": "Trait Objects",
+    "triggers": [
+      "dyn",
+      "Box<dyn",
+      "Trait Object",
+      "dynamic dispatch"
+    ],
+    "rule_summary": "Use trait objects (`Box<dyn Trait>`) when you need a collection of varying types that implement the same trait. Trait objects use dynamic dispatch, which incurs a slight runtime cost.",
+    "prompt_injection": "MANDATORY RULE: Use `dyn Trait` only when heterogeneous collections are required. For homogeneous collections, use generics (`impl Trait` or `T: Trait`).",
+    "anti_pattern": "struct Screen<T: Draw> {\n    components: Vec<T>,\n} // Forces all components to be of the exact same type",
+    "good_pattern": "struct Screen {\n    components: Vec<Box<dyn Draw>>,\n} // Allows mixed types (e.g., Button, TextField)"
+  },
+  {
+    "id": "rust_book_ch20_01",
+    "category": "Unsafe Rust",
+    "triggers": [
+      "unsafe",
+      "raw pointer",
+      "ffi",
+      "mut static"
+    ],
+    "rule_summary": "Use `unsafe` blocks sparingly. Unsafe Rust exists to dereference raw pointers, call unsafe functions (like C FFI), and mutate static variables. It does NOT disable the borrow checker.",
+    "prompt_injection": "MANDATORY RULE: Encapsulate `unsafe` code within safe abstractions. Never expose an API that requires the caller to guarantee memory safety if it can be avoided.",
+    "anti_pattern": "unsafe fn dangerous() {}\ndangerous(); // Error: requires unsafe block",
+    "good_pattern": "unsafe fn dangerous() {}\nunsafe {\n    dangerous();\n}"
+  },
+  {
+    "id": "r4r_ch01_01",
+    "category": "Foundations",
+    "triggers": [
+      "Pin",
+      "Pin<",
+      "Unpin",
+      "self: Pin"
+    ],
+    "rule_summary": "Use `Pin<&mut T>` when you have a self-referential struct or an async future that relies on its memory location remaining stable. Types that implement `Unpin` can be moved even when pinned.",
+    "prompt_injection": "MANDATORY RULE: If a type contains self-references or relies on a stable memory address, you must pin it. Never implement `Unpin` for types that are structurally pinned.",
+    "anti_pattern": "let mut future = async { ... };\nlet pinned = Pin::new(&mut future); // Fails if future is !Unpin",
+    "good_pattern": "let mut future = Box::pin(async { ... }); // Correctly pins on the heap"
+  },
+  {
+    "id": "r4r_ch02_01",
+    "category": "Types",
+    "triggers": [
+      "PhantomData",
+      "variance",
+      "lifetime parameter",
+      "generic"
+    ],
+    "rule_summary": "Use `PhantomData` to signal to the compiler that a generic struct logically owns a type or lifetime parameter that isn't directly stored in its fields. This ensures correct variance and drop-checking.",
+    "prompt_injection": "MANDATORY RULE: Always use `PhantomData<T>` when defining safe abstractions over raw pointers or FFI structs that conceptually own a generic `T`.",
+    "anti_pattern": "struct Slice<'a, T> {\n    start: *const T,\n    end: *const T,\n} // Error: unused parameter 'a",
+    "good_pattern": "struct Slice<'a, T> {\n    start: *const T,\n    end: *const T,\n    _marker: std::marker::PhantomData<&'a T>,\n}"
+  },
+  {
+    "id": "r4r_ch05_01",
+    "category": "Macros",
+    "triggers": [
+      "macro_rules!",
+      "macro",
+      "tt",
+      "expr",
+      "hygiene"
+    ],
+    "rule_summary": "When writing declarative macros, understand that `expr` and `stmt` capture complete syntactic constructs. Use `$crate::` to ensure absolute paths to dependencies so the macro works from any crate.",
+    "prompt_injection": "MANDATORY RULE: Prefix all types, traits, and functions inside macros with `$crate::` to prevent scope resolution errors when the macro is invoked externally.",
+    "anti_pattern": "macro_rules! log { () => { println!(\"log\") } } // Assumes println is in scope",
+    "good_pattern": "macro_rules! log { () => { $crate::println!(\"log\") } }"
+  },
+  {
+    "id": "r4r_ch06_01",
+    "category": "Unsafe Rust",
+    "triggers": [
+      "unsafe",
+      "raw pointer",
+      "Drop",
+      "forget",
+      "ManuallyDrop"
+    ],
+    "rule_summary": "Do not rely on `Drop` running for memory safety. Functions like `std::mem::forget` and `Rc::clone` cycles can leak memory. Unsafe code must be sound even if destructors never run.",
+    "prompt_injection": "MANDATORY RULE: Never assume that `Drop` will run. If your unsafe abstraction relies on a destructor executing to maintain memory safety (e.g., scoped threads), use a closure or `ManuallyDrop` to enforce invariants.",
+    "anti_pattern": "struct Guard;\nimpl Drop for Guard { fn drop(&mut self) { /* vital safety logic */ } }",
+    "good_pattern": "fn with_guard<F: FnOnce()>(f: F) {\n    /* vital setup */\n    let _res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));\n    /* vital teardown guaranteed */\n}"
+  },
+  {
+    "id": "r4r_ch09_01",
+    "category": "Concurrency",
+    "triggers": [
+      "Atomic",
+      "Ordering",
+      "SeqCst",
+      "Acquire",
+      "Release"
+    ],
+    "rule_summary": "When working with atomics, `Ordering::SeqCst` is the safest but slowest. Use `Release` when storing to indicate you are done mutating shared state, and `Acquire` when loading to ensure you see those mutations.",
+    "prompt_injection": "MANDATORY RULE: Use `Ordering::Acquire` for loads and `Ordering::Release` for stores when synchronizing memory access. Default to `Ordering::SeqCst` only if unsure or required.",
+    "anti_pattern": "FLAG.store(true, Ordering::Relaxed);\n// Other threads might not see previous memory writes",
+    "good_pattern": "FLAG.store(true, Ordering::Release);\n// Other threads loading with Acquire will see all preceding writes"
+  },
+  {
+    "id": "r4r_ch10_01",
+    "category": "Asynchronous Rust",
+    "triggers": [
+      "async",
+      "await",
+      "Future",
+      "block_on",
+      "executor"
+    ],
+    "rule_summary": "Do not block the executor thread in async code. Long-running CPU-bound tasks or synchronous I/O will starve other futures on the same thread.",
+    "prompt_injection": "MANDATORY RULE: Never call blocking functions like `std::thread::sleep` or standard File I/O inside an async block. Use `tokio::task::spawn_blocking` or the async equivalents.",
+    "anti_pattern": "async fn handle() {\n    std::thread::sleep(std::time::Duration::from_secs(5)); // Blocks the entire executor\n}",
+    "good_pattern": "async fn handle() {\n    tokio::time::sleep(std::time::Duration::from_secs(5)).await; // Yields control\n}"
+  },
+  {
+    "id": "r4r_ch02_02",
+    "category": "Traits",
+    "triggers": [
+      "impl",
+      "orphan rule",
+      "blanket impl",
+      "foreign trait"
+    ],
+    "rule_summary": "You can only implement a trait for a type if either the trait or the type is defined in your crate (the Orphan Rule). Use the Newtype pattern (a tuple struct wrapper) to bypass this if necessary.",
+    "prompt_injection": "MANDATORY RULE: If you encounter the Orphan Rule when implementing a foreign trait on a foreign type, wrap the type in a local tuple struct (e.g., `struct MyVec(Vec<T>)`) instead of trying to bypass it.",
+    "anti_pattern": "impl std::fmt::Display for std::vec::Vec<i32> { ... } // Error: orphan rule",
+    "good_pattern": "struct MyVec(Vec<i32>);\nimpl std::fmt::Display for MyVec { ... }"
+  },
+  {
+    "id": "r4r_ch03_01",
+    "category": "API Design",
+    "triggers": [
+      "builder",
+      "typestate",
+      "compile-time state",
+      "API"
+    ],
+    "rule_summary": "Use the Typestate pattern by encoding state transitions as generic parameters in structs. This allows the compiler to enforce API state machines (e.g., preventing a connection from sending data before being authenticated).",
+    "prompt_injection": "MANDATORY RULE: For complex APIs with state machines, use the Typestate pattern (generic marker types) so invalid states are unrepresentable at compile time.",
+    "anti_pattern": "struct Connection { is_auth: bool }\nimpl Connection { fn send(&self) { if !self.is_auth { panic!(); } } }",
+    "good_pattern": "struct Connection<State> { _state: PhantomData<State> }\nimpl Connection<Authenticated> { fn send(&self) {} }"
+  },
+  {
+    "id": "r4r_ch03_02",
+    "category": "API Design",
+    "triggers": [
+      "public struct",
+      "enum",
+      "future compatibility",
+      "non_exhaustive"
+    ],
+    "rule_summary": "Use `#[non_exhaustive]` on public structs with public fields or public enums if you anticipate adding fields or variants in the future. This prevents downstream crates from breaking when you update the library.",
+    "prompt_injection": "MANDATORY RULE: Always apply `#[non_exhaustive]` to public enums and structs in a library crate if they are subject to future additions.",
+    "anti_pattern": "pub enum Error { Io, Parse } // Downstream crates will break if you add 'Network'",
+    "good_pattern": "#[non_exhaustive]\npub enum Error { Io, Parse }"
+  },
+  {
+    "id": "r4r_ch04_01",
+    "category": "Error Handling",
+    "triggers": [
+      "Error",
+      "thiserror",
+      "anyhow",
+      "source()"
+    ],
+    "rule_summary": "Implement `std::error::Error` for your error types and override the `source()` method to return the underlying cause. In applications, use `anyhow` for flexibility; in libraries, use `thiserror` for strict type definitions.",
+    "prompt_injection": "MANDATORY RULE: Library crates must define custom error types implementing `std::error::Error`. Never use `anyhow::Error` or `Box<dyn Error>` in a library's public API.",
+    "anti_pattern": "pub fn do_work() -> Result<(), Box<dyn std::error::Error>> { ... }",
+    "good_pattern": "pub fn do_work() -> Result<(), MyLibError> { ... }"
+  },
+  {
+    "id": "r4r_ch05_02",
+    "category": "Project Structure",
+    "triggers": [
+      "features",
+      "Cargo.toml",
+      "cfg",
+      "additive"
+    ],
+    "rule_summary": "Cargo features must be strictly additive. Enabling a feature should never break existing code or remove functionality. Never use features to swap mutually exclusive implementations.",
+    "prompt_injection": "MANDATORY RULE: Never create mutually exclusive Cargo features. If you need exclusive backends, use runtime configuration or trait dispatch, not `#[cfg(feature)]`.",
+    "anti_pattern": "#[cfg(feature = \"backend_a\")] fn run() {}\n#[cfg(feature = \"backend_b\")] fn run() {}",
+    "good_pattern": "pub trait Backend { fn run(&self); }"
+  },
+  {
+    "id": "r4r_ch07_01",
+    "category": "Macros",
+    "triggers": [
+      "proc_macro",
+      "TokenStream",
+      "quote!",
+      "syn"
+    ],
+    "rule_summary": "Procedural macros operate on token streams. Always use `syn` for parsing and `quote` for generation. Ensure that spans from the original input are properly preserved in the output for accurate compiler error messages.",
+    "prompt_injection": "MANDATORY RULE: When writing procedural macros, assign the `.span()` of the input tokens to the generated output tokens so IDEs and compiler errors point to the user's code, not the macro definition.",
+    "anti_pattern": "let generated = quote! { println!(\"error\"); }; // Missing span tracking",
+    "good_pattern": "let span = input_ident.span();\nlet generated = quote_spanned! { span => println!(\"error\"); };"
+  },
+  {
+    "id": "r4r_ch08_02",
+    "category": "Asynchronous Rust",
+    "triggers": [
+      "Waker",
+      "poll",
+      "Context",
+      "Future",
+      "Wake"
+    ],
+    "rule_summary": "When manually implementing `Future`, you must call `cx.waker().wake_by_ref()` when the future can make progress. If you return `Poll::Pending` without registering a waker, the executor will sleep forever.",
+    "prompt_injection": "MANDATORY RULE: If you return `Poll::Pending` from a custom `Future::poll` implementation, you MUST ensure that the waker from the context (`cx.waker().clone()`) is saved and eventually awoken.",
+    "anti_pattern": "fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {\n    Poll::Pending\n}",
+    "good_pattern": "fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {\n    self.state.waker = Some(cx.waker().clone());\n    Poll::Pending\n}"
+  },
+  {
+    "id": "r4r_ch09_02",
+    "category": "Unsafe Rust",
+    "triggers": [
+      "pointer provenance",
+      "Strict Provenance",
+      "as",
+      "ptr::from_exposed_addr"
+    ],
+    "rule_summary": "Rust assumes pointers have provenance (which allocation they belong to). Do not cast between integers and pointers indiscriminately. Use Strict Provenance APIs like `ptr::with_addr` instead of `as` casts.",
+    "prompt_injection": "MANDATORY RULE: Avoid casting pointers to integers and back using `as`. Use the strict provenance APIs (`.expose_addr()`, `.with_addr()`) to maintain valid memory access.",
+    "anti_pattern": "let addr = ptr as usize;\nlet new_ptr = addr as *mut T;",
+    "good_pattern": "let addr = ptr.expose_addr();\nlet new_ptr = ptr.with_addr(addr);"
+  },
+  {
+    "id": "r4r_ch10_02",
+    "category": "Concurrency",
+    "triggers": [
+      "Send",
+      "Sync",
+      "thread boundary",
+      "Mutex",
+      "Cell"
+    ],
+    "rule_summary": "`Send` means a type can be moved to another thread. `Sync` means it's safe to share between threads (`&T` is `Send`). Types with interior mutability like `Cell` and `RefCell` are not `Sync`.",
+    "prompt_injection": "MANDATORY RULE: If you are building a custom data structure intended for cross-thread use, explicitly test `Send` and `Sync` bounds using a static assertion.",
+    "anti_pattern": "struct SharedData { value: RefCell<i32> } // Implicitly !Sync, silently fails across threads",
+    "good_pattern": "struct SharedData { value: Mutex<i32> } // Automatically Sync\nfn assert_sync<T: Sync>() {}\nassert_sync::<SharedData>();"
+  },
+  {
+    "id": "r4r_ch11_01",
+    "category": "FFI",
+    "triggers": [
+      "FFI",
+      "#[repr(C)]",
+      "extern \"C\"",
+      "C strings"
+    ],
+    "rule_summary": "When interoperating with C, structs must be `#[repr(C)]` to guarantee layout. C strings are null-terminated; Rust strings are not. Always use `CString` or `CStr` to pass string data across the FFI boundary.",
+    "prompt_injection": "MANDATORY RULE: Never pass a Rust `&str` directly to a C function expecting `*const c_char`. Always convert it using `std::ffi::CString`.",
+    "anti_pattern": "extern \"C\" { fn c_print(s: *const i8); }\nlet s = \"hello\";\nunsafe { c_print(s.as_ptr() as *const i8) } // Missing null terminator!",
+    "good_pattern": "let s = CString::new(\"hello\").unwrap();\nunsafe { c_print(s.as_ptr()) }"
+  },
+  {
+    "id": "r4r_ch12_01",
+    "category": "no_std",
+    "triggers": [
+      "no_std",
+      "core",
+      "alloc",
+      "embedded"
+    ],
+    "rule_summary": "In `no_std` environments, you cannot use the `std` prelude (like `String` or `Vec`). You must import from `core` (or `alloc` if an allocator is configured).",
+    "prompt_injection": "MANDATORY RULE: If writing a `no_std` crate, prefix standard library types with `core::` instead of `std::`. Do not assume heap allocation is available unless `alloc` is imported.",
+    "anti_pattern": "use std::cmp::Ordering;\nfn compare(a: i32, b: i32) -> Ordering { a.cmp(&b) }",
+    "good_pattern": "#![no_std]\nuse core::cmp::Ordering;\nfn compare(a: i32, b: i32) -> Ordering { a.cmp(&b) }"
+  }
+]

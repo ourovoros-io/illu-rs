@@ -6,6 +6,7 @@ use async_lsp::router::Router;
 use lsp_types::notification::{Progress, PublishDiagnostics, ShowMessage};
 use lsp_types::request::{RegisterCapability, WorkDoneProgressCreate};
 use lsp_types::{DiagnosticSeverity, NumberOrString, ProgressParamsValue, WorkDoneProgress};
+use tokio::sync::Notify;
 use tracing::{debug, info, warn};
 
 use super::types::DiagnosticInfo;
@@ -20,6 +21,10 @@ const RA_INDEXING_TOKENS: &[&str] = &["rustAnalyzer/Indexing", "rustAnalyzer/cac
 #[derive(Debug, Clone)]
 pub struct ServerState {
     inner: Arc<Mutex<ServerStateInner>>,
+    /// Signalled whenever a state change could make `wait_for_ready`
+    /// resolve — specifically `set_ready(true)` and `end_progress`.
+    /// Lets callers await readiness instead of polling.
+    readiness: Arc<Notify>,
 }
 
 #[derive(Debug, Default)]
@@ -41,7 +46,15 @@ impl ServerState {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(ServerStateInner::default())),
+            readiness: Arc::new(Notify::new()),
         }
+    }
+
+    /// Resolves when the state changes in a way that could affect
+    /// readiness (a `set_ready(true)` or an `end_progress`). Callers
+    /// must re-check ready conditions after each await.
+    pub async fn readiness_changed(&self) {
+        self.readiness.notified().await;
     }
 
     #[must_use]
@@ -57,6 +70,9 @@ impl ServerState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .ready = ready;
+        if ready {
+            self.readiness.notify_waiters();
+        }
     }
 
     #[must_use]
@@ -85,11 +101,17 @@ impl ServerState {
     }
 
     pub fn end_progress(&self) {
-        let mut inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        inner.active_progress = inner.active_progress.saturating_sub(1);
+        let went_idle = {
+            let mut inner = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            inner.active_progress = inner.active_progress.saturating_sub(1);
+            inner.received_progress && inner.active_progress == 0
+        };
+        if went_idle {
+            self.readiness.notify_waiters();
+        }
     }
 
     pub fn set_diagnostics(&self, uri: String, diags: Vec<DiagnosticInfo>) {

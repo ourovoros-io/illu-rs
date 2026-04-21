@@ -151,9 +151,11 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std
     }
 
     if !has_cargo && !has_ts && !has_python {
-        return Err(
-            "No Cargo.toml, tsconfig.json, package.json, or Python project file found".into(),
-        );
+        return Err(format!(
+            "No Cargo.toml, tsconfig.json, package.json, or Python project file found in {}",
+            config.repo_path.display()
+        )
+        .into());
     }
 
     tracing::info!("Phase 2: extracting symbol references");

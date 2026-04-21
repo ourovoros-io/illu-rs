@@ -167,6 +167,27 @@ impl IlluServer {
             .map_err(|e| McpError::internal_error(e.to_string(), None))
     }
 
+    /// Run a sync tool handler on the tokio blocking pool so its work
+    /// (subprocess invocations, blocking file I/O, long SQL) does not stall
+    /// the reactor. The DB lock is acquired inside the blocking task, so no
+    /// guard is held while the reactor schedules the work.
+    async fn run_blocking<F>(&self, f: F) -> Result<String, McpError>
+    where
+        F: FnOnce(&Database, &IndexConfig) -> Result<String, Box<dyn std::error::Error>>
+            + Send
+            + 'static,
+    {
+        let db = std::sync::Arc::clone(&self.db);
+        let config = std::sync::Arc::clone(&self.config);
+        tokio::task::spawn_blocking(move || -> Result<String, String> {
+            let guard = db.lock().map_err(|e| e.to_string())?;
+            f(&guard, &config).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e, None))
+    }
+
     fn refresh(&self) -> Result<(), McpError> {
         {
             let last = self
@@ -549,6 +570,12 @@ struct CrossCallpathParams {
     target_repo: Option<String>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct AxiomsParams {
+    /// Search term for axioms
+    query: String,
+}
+
 // ── RA (rust-analyzer) tool parameter structs ──────────────────────────
 
 #[derive(Deserialize, JsonSchema)]
@@ -620,6 +647,20 @@ fn text_result(text: String) -> CallToolResult {
 #[tool_router]
 impl IlluServer {
     #[tool(
+        name = "axioms",
+        description = "Query the Rust Axioms database for core rules, safety constraints, and best practices. Use this when unsure about Rust architecture or idioms."
+    )]
+    async fn axioms(
+        &self,
+        Parameters(params): Parameters<AxiomsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(query = %params.query, "Tool call: axioms");
+        let _guard = crate::status::StatusGuard::new(&format!("axioms ▸ {}", params.query));
+        let result = tools::axioms::handle_axioms(&params.query).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
         name = "query",
         description = "Search the codebase for symbols, documentation, or files. Scope: symbols (default), docs, files, all, doc_comments, bodies, strings. Kind: function, struct, enum, enum_variant, trait, impl, const, static, type_alias, macro (filters symbol results). Use query='*' with signature/path/attribute filters to search without a name."
     )]
@@ -661,22 +702,28 @@ impl IlluServer {
         tracing::info!(symbol = %params.symbol_name, file = ?params.file, "Tool call: context");
         let _guard = crate::status::StatusGuard::new(&format!("context ▸ {}", params.symbol_name));
         self.refresh()?;
-        let db = self.lock_db()?;
+        let sym = params.symbol_name.clone();
+        let file = params.file.clone();
+        let sections = params.sections.clone();
+        let callers_path = params.callers_path.clone();
         let full_body = params.full_body.unwrap_or(false);
-        let sections: Option<Vec<&str>> = params
-            .sections
-            .as_ref()
-            .map(|v| v.iter().map(String::as_str).collect());
-        let result = tools::context::handle_context(
-            &db,
-            &params.symbol_name,
-            full_body,
-            params.file.as_deref(),
-            sections.as_deref(),
-            params.callers_path.as_deref(),
-            params.exclude_tests.unwrap_or(false),
-        )
-        .map_err(to_mcp_err)?;
+        let exclude_tests = params.exclude_tests.unwrap_or(false);
+        let result = self
+            .run_blocking(move |db, _cfg| {
+                let sections_slice: Option<Vec<&str>> = sections
+                    .as_ref()
+                    .map(|v| v.iter().map(String::as_str).collect());
+                tools::context::handle_context(
+                    db,
+                    &sym,
+                    full_body,
+                    file.as_deref(),
+                    sections_slice.as_deref(),
+                    callers_path.as_deref(),
+                    exclude_tests,
+                )
+            })
+            .await?;
         Ok(text_result(result))
     }
 
@@ -775,16 +822,20 @@ impl IlluServer {
         tracing::info!(git_ref = ?params.git_ref, "Tool call: diff_impact");
         let _guard = crate::status::StatusGuard::new("diff_impact");
         self.refresh()?;
-        let db = self.lock_db()?;
-        let repo_path = &self.config.repo_path;
-        let result = tools::diff_impact::handle_diff_impact(
-            &db,
-            repo_path,
-            params.git_ref.as_deref(),
-            params.changes_only.unwrap_or(false),
-            params.compact.unwrap_or(false),
-        )
-        .map_err(to_mcp_err)?;
+        let git_ref = params.git_ref.clone();
+        let changes_only = params.changes_only.unwrap_or(false);
+        let compact = params.compact.unwrap_or(false);
+        let result = self
+            .run_blocking(move |db, cfg| {
+                tools::diff_impact::handle_diff_impact(
+                    db,
+                    &cfg.repo_path,
+                    git_ref.as_deref(),
+                    changes_only,
+                    compact,
+                )
+            })
+            .await?;
         Ok(text_result(result))
     }
 
@@ -825,9 +876,9 @@ impl IlluServer {
         tracing::info!("Tool call: freshness");
         let _guard = crate::status::StatusGuard::new("freshness");
         self.refresh()?;
-        let db = self.lock_db()?;
-        let repo_path = &self.config.repo_path;
-        let result = tools::freshness::handle_freshness(&db, repo_path).map_err(to_mcp_err)?;
+        let result = self
+            .run_blocking(move |db, cfg| tools::freshness::handle_freshness(db, &cfg.repo_path))
+            .await?;
         Ok(text_result(result))
     }
 
@@ -1080,10 +1131,10 @@ impl IlluServer {
         let _guard =
             crate::status::StatusGuard::new(&format!("blame \u{25b8} {}", params.symbol_name));
         self.refresh()?;
-        let db = self.lock_db()?;
-        let repo_path = &self.config.repo_path;
-        let result =
-            tools::blame::handle_blame(&db, repo_path, &params.symbol_name).map_err(to_mcp_err)?;
+        let sym = params.symbol_name.clone();
+        let result = self
+            .run_blocking(move |db, cfg| tools::blame::handle_blame(db, &cfg.repo_path, &sym))
+            .await?;
         Ok(text_result(result))
     }
 
@@ -1099,16 +1150,14 @@ impl IlluServer {
         let _guard =
             crate::status::StatusGuard::new(&format!("history \u{25b8} {}", params.symbol_name));
         self.refresh()?;
-        let db = self.lock_db()?;
-        let repo_path = &self.config.repo_path;
-        let result = tools::history::handle_history(
-            &db,
-            repo_path,
-            &params.symbol_name,
-            params.max_commits,
-            params.show_diff.unwrap_or(false),
-        )
-        .map_err(to_mcp_err)?;
+        let sym = params.symbol_name.clone();
+        let max_commits = params.max_commits;
+        let show_diff = params.show_diff.unwrap_or(false);
+        let result = self
+            .run_blocking(move |db, cfg| {
+                tools::history::handle_history(db, &cfg.repo_path, &sym, max_commits, show_diff)
+            })
+            .await?;
         Ok(text_result(result))
     }
 
@@ -1361,7 +1410,13 @@ impl IlluServer {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!("Tool call: cross_deps");
         let _guard = crate::status::StatusGuard::new("cross_deps");
-        let result = tools::cross_deps::handle_cross_deps(&self.registry).map_err(to_mcp_err)?;
+        let registry = std::sync::Arc::clone(&self.registry);
+        let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+            tools::cross_deps::handle_cross_deps(&registry).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(e, None))?;
         Ok(text_result(result))
     }
 

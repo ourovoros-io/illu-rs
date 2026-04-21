@@ -236,33 +236,46 @@ impl RaClient {
         })
     }
 
-    /// Wait for rust-analyzer to finish indexing. Polls with timeout.
+    /// Wait for rust-analyzer to finish indexing. Driven by state-change
+    /// notifications from the transport router rather than polling, so
+    /// readiness is observed with minimal latency.
     pub async fn wait_for_ready(&self, timeout: Duration) -> Result<()> {
+        const WARMUP: Duration = Duration::from_secs(2);
         let start = std::time::Instant::now();
-        let poll_interval = Duration::from_millis(200);
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
 
         loop {
             if self.server_state.is_ready() {
                 info!("rust-analyzer is ready (token match)");
                 return Ok(());
             }
-
             if self.server_state.received_progress()
                 && self.server_state.active_progress() == 0
-                && start.elapsed() > Duration::from_secs(2)
+                && start.elapsed() > WARMUP
             {
                 info!("rust-analyzer is ready (all progress completed)");
                 self.server_state.set_ready(true);
                 return Ok(());
             }
 
-            if start.elapsed() > timeout {
+            // Re-check on every state change. The warmup window is bounded
+            // with a short timeout so the soft-readiness arm above can fire
+            // if RA goes silent before WARMUP elapses.
+            let remaining = timeout
+                .checked_sub(start.elapsed())
+                .ok_or(RaError::Timeout(timeout))?;
+            let warmup_left = WARMUP.checked_sub(start.elapsed()).unwrap_or_default();
+            let wait = if warmup_left.is_zero() {
+                remaining
+            } else {
+                remaining.min(warmup_left)
+            };
+            if tokio::time::timeout(wait, self.server_state.readiness_changed())
+                .await
+                .is_err()
+                && start.elapsed() >= timeout
+            {
                 return Err(RaError::Timeout(timeout));
             }
-
-            tokio::time::sleep(poll_interval).await;
         }
     }
 

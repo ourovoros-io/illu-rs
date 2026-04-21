@@ -51,6 +51,7 @@ pub struct GlobalConfig {
 
 /// Platform-sensitive path kind used in global configs.
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub enum GlobalPath {
     /// Path relative to `$HOME` on all platforms.
     Home(&'static str),
@@ -66,6 +67,7 @@ pub enum GlobalPath {
 
 /// One entry per distinct on-disk config file schema.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[non_exhaustive]
 pub enum McpFormat {
     ClaudeCodeJson,
     GeminiJson,
@@ -78,6 +80,7 @@ pub enum McpFormat {
 
 /// Detection strength for a single agent.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[non_exhaustive]
 pub enum DetectionLevel {
     Active,
     Installed,

@@ -32,7 +32,9 @@ impl RaClient {
             RichLocation::from_location,
         );
 
-        let def_location = enrich_location(def_location);
+        let def_location = tokio::task::spawn_blocking(move || enrich_location(def_location))
+            .await
+            .map_err(|e| RaError::RequestFailed(format!("enrich_location task failed: {e}")))?;
 
         let hover = self.hover(spec).await.unwrap_or(None);
         let refs = self.references(spec, false).await.unwrap_or_default();
@@ -211,8 +213,12 @@ impl RaClient {
             ));
         };
 
-        let files_changed = apply_workspace_edit(&edit)?;
         let total_edits = count_edits(&edit);
+        let files_changed = tokio::task::spawn_blocking(move || apply_workspace_edit(&edit))
+            .await
+            .map_err(|e| {
+                RaError::RequestFailed(format!("apply_workspace_edit task failed: {e}"))
+            })??;
 
         for file in &files_changed {
             let path = std::path::Path::new(file);
