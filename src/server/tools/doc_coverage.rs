@@ -19,10 +19,7 @@ pub fn handle_doc_coverage(
             && s.kind != SymbolKind::EnumVariant
     });
 
-    if let Some(k) = kind {
-        let k_lower = k.to_lowercase();
-        symbols.retain(|s| s.kind.to_string().to_lowercase() == k_lower);
-    }
+    super::retain_kind(&mut symbols, kind);
 
     let total = symbols.len();
     let documented: Vec<_> = symbols.iter().filter(|s| s.doc_comment.is_some()).collect();

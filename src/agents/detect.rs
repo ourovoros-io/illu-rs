@@ -63,6 +63,16 @@ pub struct RealContext {
     os: TargetOs,
 }
 
+/// Derive the target-OS enum from `std::env::consts::OS`, collapsing
+/// everything that isn't macOS or Windows to Linux.
+fn current_os() -> TargetOs {
+    match std::env::consts::OS {
+        "macos" => TargetOs::MacOs,
+        "windows" => TargetOs::Windows,
+        _ => TargetOs::Linux,
+    }
+}
+
 impl RealContext {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let home = std::env::var("HOME")
@@ -71,12 +81,10 @@ impl RealContext {
             .filter(|s| !s.is_empty())
             .map(PathBuf::from)
             .ok_or("neither HOME nor USERPROFILE set")?;
-        let os = match std::env::consts::OS {
-            "macos" => TargetOs::MacOs,
-            "windows" => TargetOs::Windows,
-            _ => TargetOs::Linux,
-        };
-        Ok(Self { home, os })
+        Ok(Self {
+            home,
+            os: current_os(),
+        })
     }
 
     /// Create a `RealContext` with a caller-supplied `home`, picking up
@@ -84,12 +92,10 @@ impl RealContext {
     /// for callers that already know HOME (e.g. `configure_global`).
     #[must_use]
     pub fn with_home(home: PathBuf) -> Self {
-        let os = match std::env::consts::OS {
-            "macos" => TargetOs::MacOs,
-            "windows" => TargetOs::Windows,
-            _ => TargetOs::Linux,
-        };
-        Self { home, os }
+        Self {
+            home,
+            os: current_os(),
+        }
     }
 }
 

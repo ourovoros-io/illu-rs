@@ -163,10 +163,7 @@ fn init_repo(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let repo_path = repo_path.canonicalize()?;
 
-    let has_cargo = repo_path.join("Cargo.toml").exists();
-    let has_ts =
-        repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
-    let has_python = illu_rs::indexer::has_python_project(&repo_path);
+    let (has_cargo, has_ts, has_python) = detect_project_kind(&repo_path);
     if !has_cargo && !has_ts && !has_python {
         return Err(format!(
             "No Cargo.toml, tsconfig.json, package.json, or Python project found in {}",
@@ -270,9 +267,7 @@ fn register_repo(repo_path: &Path) {
     let git_common_dir =
         illu_rs::git::git_common_dir(repo_path).unwrap_or_else(|_| repo_path.join(".git"));
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or_else(|_| "0".into(), |d| d.as_secs().to_string());
+    let now = now_unix_secs().to_string();
 
     registry.register(illu_rs::registry::RepoEntry {
         name,
@@ -464,6 +459,25 @@ async fn git_head_async(repo_path: &Path) -> Option<String> {
         .flatten()
 }
 
+/// Detect which language manifests exist at the repo root. Shared by
+/// `init_repo` and the `Serve` entrypoint so they agree on what counts
+/// as an indexable project.
+fn detect_project_kind(repo_path: &Path) -> (bool, bool, bool) {
+    let has_cargo = repo_path.join("Cargo.toml").exists();
+    let has_ts =
+        repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
+    let has_python = illu_rs::indexer::has_python_project(repo_path);
+    (has_cargo, has_ts, has_python)
+}
+
+/// Unix seconds since epoch, or 0 if the clock is before the epoch.
+/// Used by registry timestamps where sub-second precision is irrelevant.
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 #[expect(clippy::print_stdout, reason = "CLI output")]
 fn handle_repo_command(command: RepoCommand) -> Result<(), Box<dyn std::error::Error>> {
     let registry_path = illu_rs::registry::Registry::default_path()
@@ -486,9 +500,7 @@ fn handle_repo_command(command: RepoCommand) -> Result<(), Box<dyn std::error::E
             println!("{:<20} | {:<50} | Last Indexed", "Name", "Path");
             println!("{:-<20}-+-{:-<50}-+-{:-<20}", "", "", "");
 
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs());
+            let now = now_unix_secs();
 
             for repo in &registry.repos {
                 let ts: u64 = repo.last_indexed.parse().unwrap_or(0);
@@ -611,10 +623,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         None | Some(Command::Serve) => {
             tracing::info!(repo = %repo_path.display(), "Starting illu server");
-            let has_cargo = repo_path.join("Cargo.toml").exists();
-            let has_ts =
-                repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
-            let has_python = illu_rs::indexer::has_python_project(repo_path);
+            let (has_cargo, has_ts, has_python) = detect_project_kind(repo_path);
             let has_project = has_cargo || has_ts || has_python;
 
             let home = std::env::var("HOME").ok().map(PathBuf::from);

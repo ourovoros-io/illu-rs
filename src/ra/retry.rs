@@ -36,6 +36,9 @@ where
                 warn!("content modified after {MAX_RETRIES} retries, giving up");
                 return Err(RaError::ContentModified);
             }
+            Err(Error::Response(resp)) if resp.code == ErrorCode::METHOD_NOT_FOUND => {
+                return Err(RaError::MethodNotSupported(resp.message.clone()));
+            }
             Err(err) => {
                 return Err(RaError::RequestFailed(format!("LSP error: {err}")));
             }

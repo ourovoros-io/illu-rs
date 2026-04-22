@@ -100,6 +100,16 @@ pub struct Database {
     repo_root: Option<std::path::PathBuf>,
 }
 
+/// Derive the repo root from an index-db path of the shape `{repo}/.illu/index.db`.
+/// Returns `None` if the parent isn't literally named `.illu`.
+fn derive_repo_root(db_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    db_path
+        .parent()
+        .filter(|p| p.file_name().is_some_and(|n| n == ".illu"))
+        .and_then(|p| p.parent())
+        .map(std::path::Path::to_path_buf)
+}
+
 impl Database {
     pub fn open_in_memory() -> SqlResult<Self> {
         let conn = Connection::open_in_memory()?;
@@ -122,13 +132,10 @@ impl Database {
              PRAGMA temp_store = MEMORY;
              PRAGMA foreign_keys = ON;",
         )?;
-        // DB path is {repo}/.illu/index.db — derive repo root
-        let repo_root = path
-            .parent()
-            .filter(|p| p.file_name().is_some_and(|n| n == ".illu"))
-            .and_then(|p| p.parent())
-            .map(std::path::Path::to_path_buf);
-        let db = Self { conn, repo_root };
+        let db = Self {
+            conn,
+            repo_root: derive_repo_root(path),
+        };
         db.migrate()?;
         Ok(db)
     }
@@ -139,12 +146,10 @@ impl Database {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         conn.execute_batch("PRAGMA busy_timeout = 5000;")?;
-        let repo_root = path
-            .parent()
-            .filter(|p| p.file_name().is_some_and(|n| n == ".illu"))
-            .and_then(|p| p.parent())
-            .map(std::path::Path::to_path_buf);
-        Ok(Self { conn, repo_root })
+        Ok(Self {
+            conn,
+            repo_root: derive_repo_root(path),
+        })
     }
 
     pub fn repo_root(&self) -> Option<&std::path::Path> {
@@ -372,15 +377,22 @@ impl Database {
         Ok(())
     }
 
+    /// Return true if `table` has a column named `column`. Used by the
+    /// schema migrations to make ALTER TABLE idempotent on older DBs.
+    ///
+    /// Both parameters are `&'static str` rather than `&str` so the
+    /// compiler refuses runtime-constructed identifiers — the SQL is
+    /// interpolated via `format!`, and we don't want to leave that
+    /// door open to injection by a future caller wiring in user input.
+    fn has_column(&self, table: &'static str, column: &'static str) -> bool {
+        self.conn
+            .prepare(&format!("SELECT {column} FROM {table} LIMIT 0"))
+            .is_ok()
+    }
+
     /// Add `module` column to docs table if missing (existing DBs).
     fn migrate_docs_module_column(&self) -> SqlResult<()> {
-        let sql: String = self.conn.query_row(
-            "SELECT sql FROM sqlite_master \
-             WHERE type='table' AND name='docs'",
-            [],
-            |row| row.get(0),
-        )?;
-        if !sql.contains("module") {
+        if !self.has_column("docs", "module") {
             self.conn
                 .execute_batch("ALTER TABLE docs ADD COLUMN module TEXT NOT NULL DEFAULT ''")?;
         }
@@ -389,13 +401,7 @@ impl Database {
 
     /// Add `impl_type` column to symbols table if missing (existing DBs).
     fn migrate_symbols_impl_type_column(&self) -> SqlResult<()> {
-        let sql: String = self.conn.query_row(
-            "SELECT sql FROM sqlite_master \
-             WHERE type='table' AND name='symbols'",
-            [],
-            |row| row.get(0),
-        )?;
-        if !sql.contains("impl_type") {
+        if !self.has_column("symbols", "impl_type") {
             self.conn
                 .execute_batch("ALTER TABLE symbols ADD COLUMN impl_type TEXT")?;
         }
@@ -404,11 +410,7 @@ impl Database {
 
     /// Add `confidence` column to `symbol_refs` table if missing (existing DBs).
     fn migrate_symbol_refs_confidence_column(&self) -> SqlResult<()> {
-        let has_confidence = self
-            .conn
-            .prepare("SELECT confidence FROM symbol_refs LIMIT 0")
-            .is_ok();
-        if !has_confidence {
+        if !self.has_column("symbol_refs", "confidence") {
             self.conn.execute_batch(
                 "ALTER TABLE symbol_refs ADD COLUMN confidence TEXT NOT NULL DEFAULT 'high'",
             )?;
@@ -418,11 +420,7 @@ impl Database {
 
     /// Add `ref_line` column to `symbol_refs` table if missing (existing DBs).
     fn migrate_symbol_refs_ref_line_column(&self) -> SqlResult<()> {
-        let has_col = self
-            .conn
-            .prepare("SELECT ref_line FROM symbol_refs LIMIT 0")
-            .is_ok();
-        if !has_col {
+        if !self.has_column("symbol_refs", "ref_line") {
             self.conn
                 .execute_batch("ALTER TABLE symbol_refs ADD COLUMN ref_line INTEGER")?;
         }
@@ -431,11 +429,7 @@ impl Database {
 
     /// Add `is_test` column to `symbols` table if missing, then backfill from attributes.
     fn migrate_symbols_is_test_column(&self) -> SqlResult<()> {
-        let has_is_test = self
-            .conn
-            .prepare("SELECT is_test FROM symbols LIMIT 0")
-            .is_ok();
-        if !has_is_test {
+        if !self.has_column("symbols", "is_test") {
             self.conn.execute_batch(
                 "ALTER TABLE symbols ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
             )?;
@@ -2320,6 +2314,20 @@ mod tests {
     use super::*;
     use crate::indexer::parser::Symbol;
     use crate::indexer::store::store_symbols;
+
+    #[test]
+    fn has_column_reports_existing_and_missing_columns() {
+        let db = Database::open_in_memory().unwrap();
+        // Columns created by migrate() up front — probe should find them.
+        assert!(db.has_column("symbols", "impl_type"));
+        assert!(db.has_column("symbols", "is_test"));
+        assert!(db.has_column("symbol_refs", "confidence"));
+        assert!(db.has_column("symbol_refs", "ref_line"));
+        assert!(db.has_column("docs", "module"));
+        // Obviously-missing columns return false.
+        assert!(!db.has_column("symbols", "nonexistent_column"));
+        assert!(!db.has_column("docs", "nonexistent_column"));
+    }
 
     #[test]
     fn test_creates_schema() {
