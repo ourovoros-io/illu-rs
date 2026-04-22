@@ -95,10 +95,32 @@ pub struct IlluCommand {
 }
 
 impl IlluCommand {
+    /// Bare-name invocation, suitable for per-repo configs that may be shared
+    /// via version control and consumed from PATH on teammates' machines.
     #[must_use]
     pub fn serve() -> Self {
         Self {
             command: "illu-rs".to_string(),
+            args: vec!["serve".to_string()],
+        }
+    }
+
+    /// Absolute-path invocation, suitable for user-global configs. GUI-launched
+    /// agents (Claude Desktop, Cursor, VS Code, Antigravity) do not inherit
+    /// shell PATH on macOS, so a bare name yields `spawn illu-rs ENOENT`.
+    ///
+    /// Resolves the running binary via `std::env::current_exe` and canonicalizes
+    /// it to dereference symlinks. Falls back to the bare name if resolution
+    /// fails or the path contains non-UTF-8 bytes.
+    #[must_use]
+    pub fn serve_resolved() -> Self {
+        let command = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.canonicalize().ok())
+            .and_then(|p| p.into_os_string().into_string().ok())
+            .unwrap_or_else(|| "illu-rs".to_string());
+        Self {
+            command,
             args: vec!["serve".to_string()],
         }
     }
@@ -141,7 +163,11 @@ pub static AGENTS: &[Agent] = &[
             allow_list_path: Some(".claude/settings.local.json"),
         }),
         global_config: Some(GlobalConfig {
-            mcp_config_path: GlobalPath::Home(".claude/settings.json"),
+            // User-scope MCP servers live in `~/.claude.json` per Claude Code
+            // docs. `~/.claude/settings.json` holds permissions/hooks/env and
+            // does NOT accept `mcpServers` — writing MCP there is silently
+            // ignored by Claude Code's loader.
+            mcp_config_path: GlobalPath::Home(".claude.json"),
             mcp_format: McpFormat::ClaudeCodeJson,
             instruction_file: Some(GlobalPath::Home(".claude/CLAUDE.md")),
             agents_dir: Some(GlobalPath::Home(".claude/agents")),
@@ -286,12 +312,16 @@ pub static AGENTS: &[Agent] = &[
         detection: Detection {
             env_vars: &[],
             binaries: &["antigravity"],
-            config_dirs: &[".antigravity"],
+            // Antigravity stores its MCP config under `.gemini/antigravity/`
+            // rather than a dedicated top-level dir. Using the nested subdir
+            // as the detection signal avoids falsely firing on `.gemini`,
+            // which is shared with the Gemini CLI.
+            config_dirs: &[".gemini/antigravity"],
             app_bundles: &["/Applications/Antigravity.app"],
         },
         repo_config: None,
         global_config: Some(GlobalConfig {
-            mcp_config_path: GlobalPath::Home(".antigravity/mcp.json"),
+            mcp_config_path: GlobalPath::Home(".gemini/antigravity/mcp_config.json"),
             mcp_format: McpFormat::AntigravityJson,
             instruction_file: None,
             agents_dir: None,
@@ -367,7 +397,7 @@ pub fn configure_global(
         .collect();
     let detection = detect_scoped(&ctx, |a| a.global_config.is_some());
     let chosen = resolve_selection(&scoped, &detection, flags)?;
-    let cmd = IlluCommand::serve();
+    let cmd = IlluCommand::serve_resolved();
     let mut reports = Vec::with_capacity(chosen.len());
     for agent in chosen {
         let report = write_global_for(agent, home, ctx.os(), &cmd, flags.dry_run)?;
@@ -383,18 +413,19 @@ pub fn self_heal_on_serve(
     home: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ctx = detect::RealContext::new()?;
-    let cmd = IlluCommand::serve();
+    let repo_cmd = IlluCommand::serve();
+    let global_cmd = IlluCommand::serve_resolved();
     for agent in AGENTS {
         if detect::detect_level(agent, &ctx) != DetectionLevel::Active {
             continue;
         }
         if let (Some(repo), Some(_)) = (repo_path, &agent.repo_config)
-            && let Err(e) = write_repo_for(agent, repo, &cmd, false)
+            && let Err(e) = write_repo_for(agent, repo, &repo_cmd, false)
         {
             tracing::warn!(agent = agent.id, "self-heal repo write failed: {e}");
         }
         if agent.global_config.is_some()
-            && let Err(e) = write_global_for(agent, home, ctx.os(), &cmd, false)
+            && let Err(e) = write_global_for(agent, home, ctx.os(), &global_cmd, false)
         {
             tracing::warn!(agent = agent.id, "self-heal global write failed: {e}");
         }
