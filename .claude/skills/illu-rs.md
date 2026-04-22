@@ -81,6 +81,7 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 - axum
 - clap
 - dialoguer
+- dunce
 - futures
 - lsp-types
 - opener

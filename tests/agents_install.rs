@@ -1,6 +1,6 @@
-#![expect(clippy::unwrap_used, reason = "integration tests")]
+#![expect(clippy::unwrap_used, clippy::expect_used, reason = "integration tests")]
 
-use illu_rs::agents::{SetupFlags, configure_global};
+use illu_rs::agents::{SetupFlags, configure_global, self_heal_on_serve};
 use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;
@@ -123,5 +123,140 @@ fn install_antigravity_writes_under_gemini_subdir() {
     assert!(
         !dir.path().join(".antigravity/mcp.json").exists(),
         "legacy ~/.antigravity/mcp.json should no longer be written",
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn install_claude_desktop_writes_absolute_command_under_app_support() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let dir = tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+    }
+    let flags = SetupFlags {
+        explicit_agents: vec!["claude-desktop".into()],
+        ..SetupFlags::default()
+    };
+    configure_global(dir.path(), &flags).unwrap();
+
+    let cfg = dir
+        .path()
+        .join("Library/Application Support/Claude/claude_desktop_config.json");
+    assert!(
+        cfg.exists(),
+        "claude_desktop_config.json not written: {cfg:?}"
+    );
+    let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&cfg).unwrap()).unwrap();
+    let cmd = v["mcpServers"]["illu"]["command"]
+        .as_str()
+        .expect("command field must be a string");
+    assert!(
+        std::path::Path::new(cmd).is_absolute(),
+        "Claude Desktop command must be absolute (GUI apps lack shell PATH), got: {cmd}",
+    );
+    assert_eq!(v["mcpServers"]["illu"]["args"][0], "serve");
+}
+
+#[test]
+fn install_strips_legacy_mcp_entry_from_settings_json() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let dir = tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+    }
+    // Seed a pre-patch settings.json with the now-ineffective `mcpServers.illu`
+    // plus another server a third-party tool might have added plus an unrelated
+    // permissions block. Only `mcpServers.illu` should disappear after install.
+    let settings_path = dir.path().join(".claude/settings.json");
+    fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
+    let seeded = serde_json::json!({
+        "permissions": { "deny": ["Bash(rm -rf *)"] },
+        "mcpServers": {
+            "illu": { "command": "illu-rs", "args": ["serve"] },
+            "other": { "command": "keep-me", "args": [] },
+        },
+    });
+    fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&seeded).unwrap(),
+    )
+    .unwrap();
+
+    let flags = SetupFlags {
+        explicit_agents: vec!["claude-code".into()],
+        ..SetupFlags::default()
+    };
+    configure_global(dir.path(), &flags).unwrap();
+
+    let after: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).unwrap()).unwrap();
+    assert!(
+        after["mcpServers"].get("illu").is_none(),
+        "legacy mcpServers.illu should be migrated out of settings.json: {after}",
+    );
+    assert_eq!(
+        after["mcpServers"]["other"]["command"], "keep-me",
+        "sibling server entry must be preserved",
+    );
+    assert_eq!(
+        after["permissions"]["deny"][0], "Bash(rm -rf *)",
+        "unrelated permissions must be preserved",
+    );
+    // And the canonical user-scope MCP target should now hold illu.
+    let claude_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join(".claude.json")).unwrap())
+            .unwrap();
+    assert!(claude_json["mcpServers"]["illu"].is_object());
+}
+
+/// Unset a process env var on drop so test panics can't leak the var into
+/// sibling tests serialized by the same lock.
+struct EnvVarGuard(&'static str);
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        unsafe {
+            std::env::remove_var(self.0);
+        }
+    }
+}
+
+#[test]
+fn self_heal_uses_resolved_command_for_global_but_bare_for_repo() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let home = tempdir().unwrap();
+    let repo = tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", home.path());
+        // Claude Code is detected as `Active` via its env var, matching how
+        // `illu-rs serve` is actually launched by the CLI in practice.
+        std::env::set_var("CLAUDECODE", "1");
+    }
+    let _claudecode = EnvVarGuard("CLAUDECODE");
+
+    self_heal_on_serve(Some(repo.path()), home.path()).unwrap();
+
+    // Per-repo write: bare name, portable across teammates.
+    let repo_cfg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(repo.path().join(".mcp.json")).unwrap()).unwrap();
+    assert_eq!(
+        repo_cfg["mcpServers"]["illu"]["command"], "illu-rs",
+        "per-repo command must stay bare for portability",
+    );
+
+    // Global write: resolved absolute path, survives GUI launch without PATH.
+    let global_cfg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.path().join(".claude.json")).unwrap())
+            .unwrap();
+    let global_cmd = global_cfg["mcpServers"]["illu"]["command"]
+        .as_str()
+        .expect("global command must be a string");
+    assert_ne!(
+        global_cmd, "illu-rs",
+        "global command must be resolved, not bare",
+    );
+    assert!(
+        std::path::Path::new(global_cmd).is_absolute(),
+        "global command must be an absolute path, got: {global_cmd}",
     );
 }

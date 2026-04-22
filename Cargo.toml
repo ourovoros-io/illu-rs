@@ -40,6 +40,9 @@ async-process = "2"
 futures = "0.3"
 url = "2"
 thiserror = "2"
+# Cross-platform canonicalize without Windows `\\?\` extended-length prefix,
+# which some downstream MCP clients mishandle.
+dunce = "1"
 
 # Web dashboard (optional, gated behind `dashboard` feature)
 axum = { version = "0.8", optional = true }

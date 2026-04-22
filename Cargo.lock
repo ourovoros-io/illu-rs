@@ -1222,6 +1222,7 @@ dependencies = [
  "clap",
  "criterion",
  "dialoguer",
+ "dunce",
  "futures",
  "lsp-types",
  "opener",
