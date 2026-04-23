@@ -115,9 +115,13 @@ pub fn handle_axioms(query: &str) -> Result<String, Box<dyn std::error::Error>> 
 
     scored.sort_by_key(|&(_, score)| Reverse(score));
 
-    // Design-time guidance is as important as low-level language mechanics, so
-    // return a slightly wider top-N set to surface both kinds of rules.
-    let top: Vec<&Axiom> = scored.into_iter().take(5).map(|(a, _)| a).collect();
+    // The top-N is sized to the number of design-category axioms in
+    // `assets/axioms.json` (Design Workflow, Data Modeling, Documentation,
+    // Comments, Idiomatic Rust, Verification Sources, Performance Discipline)
+    // so the baseline quality query returns every design rule alongside
+    // whichever language-mechanics rules also score. Bump in lockstep when a
+    // new design category is added.
+    let top: Vec<&Axiom> = scored.into_iter().take(7).map(|(a, _)| a).collect();
 
     let mut output = String::new();
     let _ = writeln!(output, "## Rust Axioms matching '{query}'\n");
@@ -175,13 +179,13 @@ mod tests {
 
     #[test]
     fn test_quality_query_returns_design_axioms() {
-        let result =
-            handle_axioms("planning data structures documentation comments idiomatic rust")
-                .unwrap();
+        let result = handle_axioms(crate::agents::instruction_md::RUST_QUALITY_QUERY).unwrap();
         assert!(result.contains("Design Workflow"));
         assert!(result.contains("Data Modeling"));
         assert!(result.contains("Documentation"));
         assert!(result.contains("Comments"));
         assert!(result.contains("Idiomatic Rust"));
+        assert!(result.contains("Verification Sources"));
+        assert!(result.contains("Performance Discipline"));
     }
 }

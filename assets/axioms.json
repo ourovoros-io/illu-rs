@@ -529,5 +529,46 @@
     "prompt_injection": "MANDATORY RULE: Follow Rust Book and Rust for Rustaceans idioms. Prefer native Rust representations and control flow over porting non-Rust patterns into the codebase.",
     "anti_pattern": "let mut output = Vec::new();\nfor item in items {\n    if item.is_valid() {\n        output.push(item.render());\n    }\n}",
     "good_pattern": "let output: Vec<_> = items\n    .into_iter()\n    .filter(|item| item.is_valid())\n    .map(|item| item.render())\n    .collect();"
+  },
+  {
+    "id": "illu_verify_01",
+    "category": "Verification Sources",
+    "triggers": [
+      "verify",
+      "verification",
+      "verification sources",
+      "cite",
+      "cited",
+      "rejected",
+      "alternatives",
+      "design note",
+      "decision rationale"
+    ],
+    "rule_summary": "When you record a design decision, reject an option, or assert how an API behaves, name the source you used to verify the claim. Memory and intuition are not sources; a documentation URL, a file:line reference, a verifying test, or experimental output are. Citing the source is how you avoid producing confidently wrong reasoning that compiles and ships.",
+    "prompt_injection": "MANDATORY RULE: Every load-bearing claim about API, library, or language behavior in your design notes, comments, and rejection rationales must be backed by a named source — a documentation URL, a `file:line` reference, or a verifying experiment. 'I recall', 'as is well known', and 'obviously' are not sources; they are how confident wrong answers reach production.",
+    "anti_pattern": "// Rejected `WHERE name IN (?, ?)` because it silently dedupes results.\n// (No source cited. The claim is also wrong: SQLite `IN` does not dedupe;\n//  it returns one row per match. Verifiable in the SQLite SELECT docs\n//  the design note never consulted.)\nfor name in names {\n    run_one(name)?;\n}",
+    "good_pattern": "// Choosing BTreeMap over HashMap: the dashboard requires deterministic\n// iteration order. Source: std::collections::HashMap::iter docs say\n// \"the iteration order is unspecified ... and may change ...\";\n// BTreeMap iterates in sorted key order (verified at\n// doc.rust-lang.org/std/collections/struct.BTreeMap.html#method.iter).\nlet entries: BTreeMap<Lang, usize> = build_entries();"
+  },
+  {
+    "id": "illu_perf_01",
+    "category": "Performance Discipline",
+    "triggers": [
+      "performance",
+      "optimize",
+      "optimization",
+      "slow",
+      "fast",
+      "latency",
+      "benchmark",
+      "profile",
+      "hotspot",
+      "measure",
+      "speedup",
+      "premature optimization"
+    ],
+    "rule_summary": "Do not change code for performance without a baseline number, a profile that identifies the dominant phase, and a benchmark you can re-run after the change to confirm the improvement. Optimization without measurement is guessing — even when the hypothesis is plausible.",
+    "prompt_injection": "MANDATORY RULE: Before changing any code for performance, capture (a) a baseline timing of the operation, (b) a profile or per-phase breakdown identifying the actual hotspot, and (c) a benchmark harness that can verify the post-change improvement. State each source in your design note. 'It must be the SQL' or 'this looks N+1' is a hypothesis, not a measurement; ship the measurement first or push back on the brief.",
+    "anti_pattern": "// Tool feels slow (~500ms). Refactored callee lookup from per-symbol SQL\n// to one bulk query — that's clearly the N+1 hotspot.\n// (No baseline. No profile. No post-change measurement. The diagnosis\n//  is plausible but unverified; the bottleneck might equally be stdio\n//  serialisation, in which case this refactor is 0% faster.)\nlet rows = db.get_same_file_callees_under(path)?;",
+    "good_pattern": "// Baseline: 482ms median over 20 runs (Instant harness, benches/overview.rs).\n// Per-phase: SQL 412ms (85%), filter 8ms, render 62ms.\n// Source: cargo flamegraph output at docs/perf/overview-2026-04-23.svg.\n// Hypothesis: SQL N+1 from per-symbol get_callees. Verified by collapsing\n// the loop to one query and re-measuring: 73ms median.\n// Speedup: 6.6x. New dominant phase: render (62ms of 73ms).\nlet rows = db.get_same_file_callees_under(path)?;"
   }
 ]
