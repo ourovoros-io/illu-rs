@@ -46,11 +46,17 @@ pub fn generate_cargo_docs(
     loop {
         match child.try_wait()? {
             Some(status) if status.success() => break,
-            Some(_) => return Err("cargo +nightly doc failed".into()),
+            Some(_) => {
+                return Err(crate::IlluError::Docs(
+                    "cargo +nightly doc failed".to_string(),
+                ));
+            }
             None if std::time::Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("cargo +nightly doc timed out (>60s)".into());
+                return Err(crate::IlluError::Docs(
+                    "cargo +nightly doc timed out (>60s)".to_string(),
+                ));
             }
             None => {
                 let elapsed = start.elapsed().as_secs();

@@ -165,11 +165,10 @@ fn init_repo(
 
     let kinds = detect_project_kind(&repo_path);
     if !kinds.any() {
-        return Err(format!(
+        return Err(illu_rs::IlluError::Workspace(format!(
             "No Cargo.toml, tsconfig.json, package.json, or Python project found in {}",
             repo_path.display()
-        )
-        .into());
+        )));
     }
 
     println!("Setting up illu in {}", repo_path.display());
@@ -191,12 +190,11 @@ fn init_repo(
                 .filter(|a| a.repo_config.is_some())
                 .map(|a| a.id)
                 .collect();
-            return Err(format!(
+            return Err(illu_rs::IlluError::Agent(format!(
                 "no agents detected. Pass --agent <id> to configure one explicitly. \
                  Supported per-repo agents: {}",
                 scoped_ids.join(", ")
-            )
-            .into());
+            )));
         }
         println!("  no agents configured (nothing selected)");
     }
@@ -361,12 +359,11 @@ fn install_global(flags: &illu_rs::agents::SetupFlags) -> Result<(), illu_rs::Il
                 .filter(|a| a.global_config.is_some())
                 .map(|a| a.id)
                 .collect();
-            return Err(format!(
+            return Err(illu_rs::IlluError::Agent(format!(
                 "no agents detected. Pass --agent <id> to configure one explicitly. \
                  Supported global agents: {}",
                 scoped_ids.join(", ")
-            )
-            .into());
+            )));
         }
         println!("  no agents configured (nothing selected)");
     }
@@ -629,9 +626,16 @@ async fn main() -> Result<(), illu_rs::IlluError> {
     } else if cli.repo.exists() {
         cli.repo.clone()
     } else {
-        tracing::warn!(
+        // Demoted from `warn!` to `info!`: when a teammate pulls a `.mcp.json`
+        // that embeds another developer's absolute path, this fires on every
+        // start. It's real information (config is stale) but not a per-run
+        // emergency — operators see it once and can run `illu init` to
+        // regenerate the file with their own path.
+        tracing::info!(
             path = %cli.repo.display(),
-            "Specified --repo path does not exist, detecting from CWD"
+            "Specified --repo path does not exist, detecting from CWD; \
+             run `illu init` inside the repo to regenerate `.mcp.json` \
+             with the current machine's absolute path"
         );
         detect_from_cwd()
     };
