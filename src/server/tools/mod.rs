@@ -196,8 +196,9 @@ pub(crate) fn qualified_name(sym: &StoredSymbol) -> String {
 }
 
 /// Check if a `SymbolKind` matches a user-provided kind filter string.
+/// Case-insensitive; uses the canonical `as_str` form so no allocation occurs.
 pub(crate) fn kind_matches(kind: SymbolKind, filter: &str) -> bool {
-    kind.to_string().eq_ignore_ascii_case(filter)
+    kind.as_str().eq_ignore_ascii_case(filter)
 }
 
 /// Retain only symbols whose kind matches `filter` (case-insensitive).

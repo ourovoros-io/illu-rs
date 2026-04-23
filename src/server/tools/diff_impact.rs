@@ -67,23 +67,20 @@ pub fn run_git_diff(
     repo_path: &Path,
     git_ref: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let mut cmd = std::process::Command::new("git");
-    cmd.current_dir(repo_path).arg("diff").arg("--unified=0");
-
-    if let Some(r) = git_ref {
+    // `Cow` keeps the zero-alloc path when the caller already supplies a
+    // `..`-range; only the bare-ref case (`HEAD~1`) needs an owned string.
+    let ref_arg: Option<std::borrow::Cow<'_, str>> = git_ref.map(|r| {
         if r.contains("..") {
-            cmd.arg(r);
+            std::borrow::Cow::Borrowed(r)
         } else {
-            cmd.arg(format!("{r}..HEAD"));
+            std::borrow::Cow::Owned(format!("{r}..HEAD"))
         }
+    });
+    let mut args: Vec<&str> = vec!["diff", "--unified=0"];
+    if let Some(r) = ref_arg.as_deref() {
+        args.push(r);
     }
-
-    let output = cmd.output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git diff failed: {stderr}").into());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    crate::git::run_git(repo_path, &args)
 }
 
 const MAX_DIFF_OUTPUT: usize = 8000;
@@ -139,21 +136,16 @@ pub fn handle_diff_impact(
 fn check_staleness(db: &Database, repo_path: &Path) -> String {
     let repo_str = repo_path.to_string_lossy();
     let indexed = db.get_commit_hash(&repo_str).ok().flatten();
-    let head = std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(repo_path)
-        .output()
+    let head = crate::git::run_git(repo_path, &["rev-parse", "HEAD"])
         .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        .map(|s| s.trim().to_string());
 
     match (indexed.as_deref(), head.as_deref()) {
         (Some(idx), Some(hd)) if idx != hd => {
-            let changed = std::process::Command::new("git")
-                .args(["diff", "--name-only", idx, hd, "--", "*.rs"])
-                .current_dir(repo_path)
-                .output()
-                .ok()
-                .map(|o| String::from_utf8_lossy(&o.stdout).lines().count());
+            let changed =
+                crate::git::run_git(repo_path, &["diff", "--name-only", idx, hd, "--", "*.rs"])
+                    .ok()
+                    .map(|s| s.lines().count());
             let files_note = changed
                 .filter(|&n| n > 0)
                 .map_or(String::new(), |n| format!(", {n} .rs files changed"));

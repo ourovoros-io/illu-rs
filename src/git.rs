@@ -1,6 +1,27 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Run a `git` subcommand in `repo_path`, returning its stdout on success.
+///
+/// On non-zero exit, returns `"git {args[0]} failed: {stderr}"`. Stdout is
+/// decoded via `from_utf8_lossy` because git porcelain output (blame, log -L)
+/// can contain source bytes that are not valid UTF-8.
+pub(crate) fn run_git(
+    repo_path: &Path,
+    args: &[&str],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(args)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let subcommand = args.first().copied().unwrap_or("?");
+        return Err(format!("git {subcommand} failed: {stderr}").into());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 /// Detect the repo root from a directory using `git rev-parse --show-toplevel`.
 /// Works for both regular repos and worktrees.
 pub fn detect_repo_root(from: &Path) -> Result<PathBuf, String> {

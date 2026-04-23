@@ -84,21 +84,8 @@ fn run_git_blame(
     line_start: i64,
     line_end: i64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let output = std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args([
-            "blame",
-            "--porcelain",
-            &format!("-L{line_start},{line_end}"),
-            file_path,
-        ])
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git blame failed: {stderr}").into());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    let range = format!("-L{line_start},{line_end}");
+    crate::git::run_git(repo_path, &["blame", "--porcelain", &range, file_path])
 }
 
 fn parse_blame_output(output: &str) -> Vec<BlameEntry> {

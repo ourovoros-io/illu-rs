@@ -163,8 +163,8 @@ fn init_repo(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let repo_path = repo_path.canonicalize()?;
 
-    let (has_cargo, has_ts, has_python) = detect_project_kind(&repo_path);
-    if !has_cargo && !has_ts && !has_python {
+    let kinds = detect_project_kind(&repo_path);
+    if !kinds.any() {
         return Err(format!(
             "No Cargo.toml, tsconfig.json, package.json, or Python project found in {}",
             repo_path.display()
@@ -459,15 +459,32 @@ async fn git_head_async(repo_path: &Path) -> Option<String> {
         .flatten()
 }
 
+/// Which language manifests were detected at the repo root. Field order is not
+/// semantically meaningful — callers access by name, so adding new languages
+/// later is non-breaking.
+struct ProjectKinds {
+    cargo: bool,
+    typescript: bool,
+    python: bool,
+}
+
+impl ProjectKinds {
+    /// True when any supported manifest was detected.
+    const fn any(&self) -> bool {
+        self.cargo || self.typescript || self.python
+    }
+}
+
 /// Detect which language manifests exist at the repo root. Shared by
 /// `init_repo` and the `Serve` entrypoint so they agree on what counts
 /// as an indexable project.
-fn detect_project_kind(repo_path: &Path) -> (bool, bool, bool) {
-    let has_cargo = repo_path.join("Cargo.toml").exists();
-    let has_ts =
-        repo_path.join("tsconfig.json").exists() || repo_path.join("package.json").exists();
-    let has_python = illu_rs::indexer::has_python_project(repo_path);
-    (has_cargo, has_ts, has_python)
+fn detect_project_kind(repo_path: &Path) -> ProjectKinds {
+    ProjectKinds {
+        cargo: repo_path.join("Cargo.toml").exists(),
+        typescript: repo_path.join("tsconfig.json").exists()
+            || repo_path.join("package.json").exists(),
+        python: illu_rs::indexer::has_python_project(repo_path),
+    }
 }
 
 /// Unix seconds since epoch, or 0 if the clock is before the epoch.
@@ -623,8 +640,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         None | Some(Command::Serve) => {
             tracing::info!(repo = %repo_path.display(), "Starting illu server");
-            let (has_cargo, has_ts, has_python) = detect_project_kind(repo_path);
-            let has_project = has_cargo || has_ts || has_python;
+            let kinds = detect_project_kind(repo_path);
+            let has_project = kinds.any();
 
             let home = std::env::var("HOME").ok().map(PathBuf::from);
             if let Some(home) = &home
@@ -680,7 +697,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             // Check for pending docs before handing DB to the server
-            let pending_docs = if has_cargo {
+            let pending_docs = if kinds.cargo {
                 illu_rs::indexer::docs::pending_docs(&db)?
             } else {
                 Vec::new()
@@ -689,7 +706,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut server = IlluServer::new(db, config.clone(), registry);
 
             // Start rust-analyzer in the background if available
-            if !cli.no_ra && has_cargo {
+            if !cli.no_ra && kinds.cargo {
                 match illu_rs::ra::RaClient::start(repo_path).await {
                     Ok(ra) => {
                         let ra = std::sync::Arc::new(ra);

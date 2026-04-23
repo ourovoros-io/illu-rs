@@ -20,9 +20,13 @@ pub enum SymbolKind {
     Class,
 }
 
-impl std::fmt::Display for SymbolKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
+impl SymbolKind {
+    /// Canonical lowercase string form. Matches `Display` and is the
+    /// input accepted by `FromStr`. Returned as `&'static str` so callers
+    /// can compare without allocating.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
             Self::Function => "function",
             Self::Struct => "struct",
             Self::Enum => "enum",
@@ -38,8 +42,13 @@ impl std::fmt::Display for SymbolKind {
             Self::Union => "union",
             Self::Interface => "interface",
             Self::Class => "class",
-        };
-        f.write_str(s)
+        }
+    }
+}
+
+impl std::fmt::Display for SymbolKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -1798,6 +1807,41 @@ fn collect_body_refs<S: std::hash::BuildHasher, S2: std::hash::BuildHasher>(
 #[expect(clippy::expect_used, reason = "tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn symbol_kind_as_str_roundtrips_through_from_str() {
+        // Guards against drift when a new variant is added: every `as_str`
+        // output must parse back to the same variant. `non_exhaustive` means
+        // the compiler won't force us to list variants here, so keep the
+        // list explicit.
+        let variants = [
+            SymbolKind::Function,
+            SymbolKind::Struct,
+            SymbolKind::Enum,
+            SymbolKind::EnumVariant,
+            SymbolKind::Trait,
+            SymbolKind::Impl,
+            SymbolKind::Use,
+            SymbolKind::Mod,
+            SymbolKind::Const,
+            SymbolKind::Static,
+            SymbolKind::TypeAlias,
+            SymbolKind::Macro,
+            SymbolKind::Union,
+            SymbolKind::Interface,
+            SymbolKind::Class,
+        ];
+        for kind in variants {
+            let s = kind.as_str();
+            assert_eq!(
+                s,
+                kind.to_string(),
+                "Display must match as_str for {kind:?}"
+            );
+            let parsed: SymbolKind = s.parse().unwrap();
+            assert_eq!(parsed, kind, "FromStr round-trip failed for {kind:?}");
+        }
+    }
 
     #[test]
     fn test_extract_function() {
