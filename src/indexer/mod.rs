@@ -151,11 +151,10 @@ pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), crate::Illu
     }
 
     if !has_cargo && !has_ts && !has_python {
-        return Err(format!(
+        return Err(crate::IlluError::Workspace(format!(
             "No Cargo.toml, tsconfig.json, package.json, or Python project file found in {}",
             config.repo_path.display()
-        )
-        .into());
+        )));
     }
 
     tracing::info!("Phase 2: extracting symbol references");
@@ -1347,7 +1346,7 @@ fn get_current_commit_hash(repo_path: &std::path::Path) -> Result<String, crate:
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        Err("git rev-parse HEAD failed".into())
+        Err(crate::IlluError::Git("rev-parse HEAD failed".to_string()))
     }
 }
 

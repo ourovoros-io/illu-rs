@@ -437,17 +437,32 @@ pub fn configure_global(
 
 /// Detect via env vars only and write configs for any `Active` agent.
 /// Called by `illu serve` on startup.
+///
+/// When `repo_path` is `None` (no manifest detected at spawn CWD), the
+/// per-repo self-heal leg is skipped and a `warn!` is emitted so operators
+/// see the degraded mode explicitly instead of silently running without
+/// per-repo config fixes. Global self-heal runs regardless because
+/// `serve_resolved` needs no repo context.
 pub fn self_heal_on_serve(repo_path: Option<&Path>, home: &Path) -> Result<(), crate::IlluError> {
     let ctx = detect::RealContext::new()?;
-    // Repo command is only well-defined when we have a repo path; global
-    // command stands on its own because `serve_resolved` never takes a repo.
+    // `repo_cmd` is `Some` iff `repo_path` is `Some` — bound by construction.
     let repo_cmd = repo_path.map(IlluCommand::serve);
+    if repo_path.is_none() {
+        tracing::warn!(
+            "self-heal: no project manifest detected at spawn CWD; \
+             skipping per-repo config writes. Per-repo .mcp.json files \
+             will not be refreshed this run — run `illu init` inside a \
+             project to regenerate them."
+        );
+    }
     let global_cmd = IlluCommand::serve_resolved();
     for agent in AGENTS {
         if detect::detect_level(agent, &ctx) != DetectionLevel::Active {
             continue;
         }
-        if let (Some(repo), Some(_), Some(cmd)) = (repo_path, &agent.repo_config, repo_cmd.as_ref())
+        if let Some(repo) = repo_path
+            && let Some(cmd) = &repo_cmd
+            && agent.repo_config.is_some()
             && let Err(e) = write_repo_for(agent, repo, cmd, false)
         {
             tracing::warn!(agent = agent.id, "self-heal repo write failed: {e}");
@@ -469,9 +484,9 @@ fn resolve_selection<'a>(
     let pairs: Vec<(&Agent, DetectionLevel)> = detection.iter().map(|(a, l, _)| (*a, *l)).collect();
     match selection::select_from_flags(scoped_agents, flags, &pairs, prompt::has_tty()) {
         Ok(picked) => Ok(picked),
-        Err(selection::SelectionError::UnknownId(id)) => {
-            Err(format!("unknown agent id for this scope: {id}").into())
-        }
+        Err(selection::SelectionError::UnknownId(id)) => Err(crate::IlluError::Agent(format!(
+            "unknown agent id for this scope: {id}"
+        ))),
         Err(selection::SelectionError::NeedsPrompt) => prompt::prompt_agents(detection),
     }
 }

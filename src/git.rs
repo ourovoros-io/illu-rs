@@ -14,7 +14,9 @@ pub(crate) fn run_git(repo_path: &Path, args: &[&str]) -> Result<String, crate::
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let subcommand = args.first().copied().unwrap_or("?");
-        return Err(format!("git {subcommand} failed: {stderr}").into());
+        return Err(crate::IlluError::Git(format!(
+            "{subcommand} failed: {stderr}"
+        )));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
