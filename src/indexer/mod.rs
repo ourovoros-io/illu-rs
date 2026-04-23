@@ -376,11 +376,14 @@ fn rebuild_refs_for_universe_change(
         }
         db.delete_refs_from_file(relative)?;
         let refs = if is_ts_file(relative) {
-            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)?
+            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)
+                .map_err(crate::IlluError::Indexing)?
         } else if is_py_file(relative) {
-            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)?
+            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)
+                .map_err(crate::IlluError::Indexing)?
         } else {
-            parser::extract_refs(&source, relative, &known_symbols, &crate_map)?
+            parser::extract_refs(&source, relative, &known_symbols, &crate_map)
+                .map_err(crate::IlluError::Indexing)?
         };
         db.store_symbol_refs_fast(&refs, &symbol_map)?;
         touched += 1;
@@ -410,15 +413,18 @@ fn reindex_dirty_files(
             db.insert_file(&df.relative_path, &df.hash)?
         };
         let (symbols, trait_impls) = if is_ts_file(&df.relative_path) {
-            let (mut syms, ti) = ts_parser::parse_ts_source(&df.source, &df.relative_path)?;
+            let (mut syms, ti) = ts_parser::parse_ts_source(&df.source, &df.relative_path)
+                .map_err(crate::IlluError::Indexing)?;
             mark_ts_test_symbols(&mut syms, &df.relative_path);
             (syms, ti)
         } else if is_py_file(&df.relative_path) {
-            let (mut syms, ti) = py_parser::parse_py_source(&df.source, &df.relative_path)?;
+            let (mut syms, ti) = py_parser::parse_py_source(&df.source, &df.relative_path)
+                .map_err(crate::IlluError::Indexing)?;
             mark_py_test_symbols(&mut syms, &df.relative_path);
             (syms, ti)
         } else {
-            parser::parse_rust_source(&df.source, &df.relative_path)?
+            parser::parse_rust_source(&df.source, &df.relative_path)
+                .map_err(crate::IlluError::Indexing)?
         };
         store::store_symbols(db, file_id, &symbols)?;
         store::store_trait_impls(db, file_id, &trait_impls)?;
@@ -449,11 +455,14 @@ fn rebuild_refs_for_files(
     db.begin_transaction()?;
     for df in dirty_files {
         let refs = if is_ts_file(&df.relative_path) {
-            ts_parser::extract_ts_refs(&df.source, &df.relative_path, &known_symbols, repo_path)?
+            ts_parser::extract_ts_refs(&df.source, &df.relative_path, &known_symbols, repo_path)
+                .map_err(crate::IlluError::Indexing)?
         } else if is_py_file(&df.relative_path) {
-            py_parser::extract_py_refs(&df.source, &df.relative_path, &known_symbols, repo_path)?
+            py_parser::extract_py_refs(&df.source, &df.relative_path, &known_symbols, repo_path)
+                .map_err(crate::IlluError::Indexing)?
         } else {
-            parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)?
+            parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
+                .map_err(crate::IlluError::Indexing)?
         };
         db.store_symbol_refs_fast(&refs, &symbol_map)?;
     }
@@ -681,7 +690,8 @@ fn index_ts_files(
         tracing::debug!("[{}/{}] Parsing TS {relative}", i + 1, total);
         let hash = content_hash(&source);
         let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
-        let (mut symbols, trait_impls) = ts_parser::parse_ts_source(&source, &relative)?;
+        let (mut symbols, trait_impls) =
+            ts_parser::parse_ts_source(&source, &relative).map_err(crate::IlluError::Indexing)?;
 
         mark_ts_test_symbols(&mut symbols, &relative);
 
@@ -800,7 +810,8 @@ fn index_crate_sources(
         tracing::debug!("[{}/{}] Parsing {relative}", i + 1, total);
         let hash = content_hash(&source);
         let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
-        let (symbols, trait_impls) = parser::parse_rust_source(&source, &relative)?;
+        let (symbols, trait_impls) =
+            parser::parse_rust_source(&source, &relative).map_err(crate::IlluError::Indexing)?;
         store::store_symbols(db, file_id, &symbols)?;
         store::store_trait_impls(db, file_id, &trait_impls)?;
     }
@@ -847,11 +858,14 @@ fn extract_all_symbol_refs(db: &Database, config: &IndexConfig) -> Result<(), cr
             }
         };
         let refs = if is_ts_file(relative) {
-            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)?
+            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)
+                .map_err(crate::IlluError::Indexing)?
         } else if is_py_file(relative) {
-            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)?
+            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)
+                .map_err(crate::IlluError::Indexing)?
         } else {
-            parser::extract_refs(&source, relative, &known_symbols, &crate_map)?
+            parser::extract_refs(&source, relative, &known_symbols, &crate_map)
+                .map_err(crate::IlluError::Indexing)?
         };
         ref_count += db.store_symbol_refs_fast(&refs, &symbol_map)?;
     }

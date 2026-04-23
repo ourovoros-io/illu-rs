@@ -67,10 +67,14 @@ fn axioms() -> Result<&'static [Axiom], crate::IlluError> {
     let parsed: Vec<Axiom> = raw.into_iter().map(Axiom::from).collect();
     // Lost-race set is fine — the winner's Vec is equivalent to ours.
     let _ = AXIOMS.set(parsed);
-    AXIOMS
-        .get()
-        .map(Vec::as_slice)
-        .ok_or_else(|| "axioms cache not initialised after set".into())
+    AXIOMS.get().map(Vec::as_slice).ok_or_else(|| {
+        // Invariant: the `AXIOMS.set(parsed)` above succeeded (or a parallel
+        // caller's did) before we reach this branch, so `AXIOMS.get()` must
+        // be `Some`. If it isn't, `OnceLock` has violated its own contract —
+        // surface as `Other` because this is a genuine should-never-happen
+        // rather than any domain category.
+        crate::IlluError::Other("axioms cache not initialised after set".to_string())
+    })
 }
 
 pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {

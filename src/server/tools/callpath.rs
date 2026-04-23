@@ -150,7 +150,10 @@ fn find_all_paths(
 
     let current = current_path
         .last()
-        .ok_or("current_path must not be empty")?
+        // Invariant violation: `dfs` is only called after pushing the source
+        // symbol onto `current_path`, so `last()` is `Some` for every call.
+        // A `None` here means upstream popped the vec without returning.
+        .ok_or_else(|| crate::IlluError::Other("current_path must not be empty".to_string()))?
         .clone();
 
     let callees = db.get_callees(&current.0, &current.1, cfg.exclude_tests)?;

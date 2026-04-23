@@ -50,10 +50,9 @@ pub fn handle_query(
         "bodies" => format_body_search(db, query, kind, path, limit, &mut output)?,
         "strings" => format_string_search(db, query, kind, path, limit, &mut output)?,
         other => {
-            return Err(format!(
+            return Err(crate::IlluError::Parse(format!(
                 "Unknown scope: '{other}'. Valid: symbols, docs, files, doc_comments, bodies, strings, all"
-            )
-            .into());
+            )));
         }
     }
 

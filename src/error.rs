@@ -21,11 +21,15 @@
 //! attribute and we want to surface the offending text, not a lower-level
 //! rusqlite error).
 //!
-//! `Other(String)` is the escape hatch used during the migration from the
-//! prior `Box<dyn std::error::Error>` scheme; prefer a domain variant when
-//! adding new error sites. Several domain variants are defined but not yet
-//! plumbed through every call site — follow-up work will route them (see
-//! the tracking memo in user memory).
+//! `Other(String)` is the last-resort escape hatch for string errors that
+//! genuinely lack a typed source and don't fit an existing domain variant —
+//! e.g. `tokio::task::JoinError` payloads from `spawn_blocking` panics and a
+//! handful of `From<ForeignError>` impls whose upstream types are not
+//! `Error + Send + Sync` on every version (see `toml_edit::TomlError` and
+//! `regex_lite::Error` below). There is intentionally **no blanket
+//! `impl From<String>`** — callers must write `IlluError::Other(...)` (or a
+//! domain variant) explicitly so the escape hatch is visible in `git diff`
+//! rather than silently absorbing `format!(...).into()` at call sites.
 //!
 //! ## Axioms
 //!
@@ -124,18 +128,6 @@ pub enum IlluError {
     /// otherwise need a variant per call.
     #[error("{0}")]
     Other(String),
-}
-
-impl From<String> for IlluError {
-    fn from(s: String) -> Self {
-        IlluError::Other(s)
-    }
-}
-
-impl From<&str> for IlluError {
-    fn from(s: &str) -> Self {
-        IlluError::Other(s.to_string())
-    }
 }
 
 impl From<rmcp::service::ServerInitializeError> for IlluError {

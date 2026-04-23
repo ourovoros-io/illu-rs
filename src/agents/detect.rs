@@ -80,7 +80,9 @@ impl RealContext {
             .or_else(|| std::env::var("USERPROFILE").ok())
             .filter(|s| !s.is_empty())
             .map(PathBuf::from)
-            .ok_or("neither HOME nor USERPROFILE set")?;
+            .ok_or_else(|| {
+                crate::IlluError::Agent("neither HOME nor USERPROFILE set".to_string())
+            })?;
         Ok(Self {
             home,
             os: current_os(),

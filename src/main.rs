@@ -337,7 +337,8 @@ fn ensure_global_gitignore(home: &Path) -> Result<(), illu_rs::IlluError> {
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
 fn install_global(flags: &illu_rs::agents::SetupFlags) -> Result<(), illu_rs::IlluError> {
-    let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set")?;
+    let home = std::env::var("HOME")
+        .map_err(|_| illu_rs::IlluError::Agent("HOME environment variable not set".to_string()))?;
     let home = PathBuf::from(home);
 
     println!("Installing illu globally...");
@@ -494,10 +495,11 @@ fn now_unix_secs() -> u64 {
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
 fn handle_repo_command(command: RepoCommand) -> Result<(), illu_rs::IlluError> {
-    let registry_path = illu_rs::registry::Registry::default_path()
-        .map_err(|e| format!("Could not get default registry path: {e}"))?;
+    let registry_path = illu_rs::registry::Registry::default_path().map_err(|e| {
+        illu_rs::IlluError::Other(format!("could not get default registry path: {e}"))
+    })?;
     let mut registry = illu_rs::registry::Registry::load(&registry_path)
-        .map_err(|e| format!("Could not load registry: {e}"))?;
+        .map_err(|e| illu_rs::IlluError::Other(format!("could not load registry: {e}")))?;
 
     match command {
         RepoCommand::List => {

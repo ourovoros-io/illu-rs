@@ -35,7 +35,13 @@ fn install_codex_cli_writes_toml_under_home() {
     // the resolved path is the test binary, so only assert a command field
     // was written — not the literal "illu-rs" string.
     assert!(content.contains("command = \""));
-    assert!(content.contains("args = [\"serve\"]"));
+    // Global `serve_resolved()` emits bare `["serve"]` — no `--repo` prefix,
+    // because global configs have no repo context at write time. Assert the
+    // token is present without pinning the exact `args = [...]` spelling, so
+    // a future global-scope flag insertion (e.g. `--log-level`) doesn't fail
+    // this assertion spuriously. The repo-scope shape is pinned exactly by
+    // `self_heal_emits_repo_arg_for_repo_and_resolved_command_for_global`.
+    assert!(content.contains("\"serve\""));
 }
 
 #[test]
