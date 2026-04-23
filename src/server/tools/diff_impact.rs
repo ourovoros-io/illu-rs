@@ -67,15 +67,17 @@ pub fn run_git_diff(
     repo_path: &Path,
     git_ref: Option<&str>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let ref_arg = git_ref.map(|r| {
+    // `Cow` keeps the zero-alloc path when the caller already supplies a
+    // `..`-range; only the bare-ref case (`HEAD~1`) needs an owned string.
+    let ref_arg: Option<std::borrow::Cow<'_, str>> = git_ref.map(|r| {
         if r.contains("..") {
-            r.to_string()
+            std::borrow::Cow::Borrowed(r)
         } else {
-            format!("{r}..HEAD")
+            std::borrow::Cow::Owned(format!("{r}..HEAD"))
         }
     });
     let mut args: Vec<&str> = vec!["diff", "--unified=0"];
-    if let Some(r) = &ref_arg {
+    if let Some(r) = ref_arg.as_deref() {
         args.push(r);
     }
     crate::git::run_git(repo_path, &args)

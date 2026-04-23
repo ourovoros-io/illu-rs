@@ -459,7 +459,6 @@ async fn git_head_async(repo_path: &Path) -> Option<String> {
         .flatten()
 }
 
-/// Detect which language manifests exist at the repo root. Shared by
 /// Which language manifests were detected at the repo root. Field order is not
 /// semantically meaningful — callers access by name, so adding new languages
 /// later is non-breaking.
@@ -476,6 +475,7 @@ impl ProjectKinds {
     }
 }
 
+/// Detect which language manifests exist at the repo root. Shared by
 /// `init_repo` and the `Serve` entrypoint so they agree on what counts
 /// as an indexable project.
 fn detect_project_kind(repo_path: &Path) -> ProjectKinds {

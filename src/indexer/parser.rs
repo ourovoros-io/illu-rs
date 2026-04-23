@@ -1809,6 +1809,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn symbol_kind_as_str_roundtrips_through_from_str() {
+        // Guards against drift when a new variant is added: every `as_str`
+        // output must parse back to the same variant. `non_exhaustive` means
+        // the compiler won't force us to list variants here, so keep the
+        // list explicit.
+        let variants = [
+            SymbolKind::Function,
+            SymbolKind::Struct,
+            SymbolKind::Enum,
+            SymbolKind::EnumVariant,
+            SymbolKind::Trait,
+            SymbolKind::Impl,
+            SymbolKind::Use,
+            SymbolKind::Mod,
+            SymbolKind::Const,
+            SymbolKind::Static,
+            SymbolKind::TypeAlias,
+            SymbolKind::Macro,
+            SymbolKind::Union,
+            SymbolKind::Interface,
+            SymbolKind::Class,
+        ];
+        for kind in variants {
+            let s = kind.as_str();
+            assert_eq!(
+                s,
+                kind.to_string(),
+                "Display must match as_str for {kind:?}"
+            );
+            let parsed: SymbolKind = s.parse().unwrap();
+            assert_eq!(parsed, kind, "FromStr round-trip failed for {kind:?}");
+        }
+    }
+
+    #[test]
     fn test_extract_function() {
         let source = r#"
 pub fn hello(name: &str) -> String {
