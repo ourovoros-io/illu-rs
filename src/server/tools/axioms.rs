@@ -115,7 +115,9 @@ pub fn handle_axioms(query: &str) -> Result<String, Box<dyn std::error::Error>> 
 
     scored.sort_by_key(|&(_, score)| Reverse(score));
 
-    let top: Vec<&Axiom> = scored.into_iter().take(3).map(|(a, _)| a).collect();
+    // Design-time guidance is as important as low-level language mechanics, so
+    // return a slightly wider top-N set to surface both kinds of rules.
+    let top: Vec<&Axiom> = scored.into_iter().take(5).map(|(a, _)| a).collect();
 
     let mut output = String::new();
     let _ = writeln!(output, "## Rust Axioms matching '{query}'\n");
@@ -169,5 +171,17 @@ mod tests {
         // An exact trigger match should outrank a mere substring hit.
         let result = handle_axioms("ownership").unwrap();
         assert!(result.contains("Ownership"));
+    }
+
+    #[test]
+    fn test_quality_query_returns_design_axioms() {
+        let result =
+            handle_axioms("planning data structures documentation comments idiomatic rust")
+                .unwrap();
+        assert!(result.contains("Design Workflow"));
+        assert!(result.contains("Data Modeling"));
+        assert!(result.contains("Documentation"));
+        assert!(result.contains("Comments"));
+        assert!(result.contains("Idiomatic Rust"));
     }
 }

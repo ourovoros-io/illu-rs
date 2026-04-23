@@ -446,5 +446,88 @@
     "prompt_injection": "MANDATORY RULE: If writing a `no_std` crate, prefix standard library types with `core::` instead of `std::`. Do not assume heap allocation is available unless `alloc` is imported.",
     "anti_pattern": "use std::cmp::Ordering;\nfn compare(a: i32, b: i32) -> Ordering { a.cmp(&b) }",
     "good_pattern": "#![no_std]\nuse core::cmp::Ordering;\nfn compare(a: i32, b: i32) -> Ordering { a.cmp(&b) }"
+  },
+  {
+    "id": "illu_design_01",
+    "category": "Design Workflow",
+    "triggers": [
+      "plan",
+      "planning",
+      "design first",
+      "data flow",
+      "invariant",
+      "ownership model"
+    ],
+    "rule_summary": "Before implementing Rust, write a short design plan that names the data flow, invariants, failure modes, and the specific structs, enums, newtypes, and collections you intend to use.",
+    "prompt_injection": "MANDATORY RULE: Before writing meaningful Rust, produce a brief plan that lists the core data structures, why they were chosen, and the ownership and mutability model.",
+    "anti_pattern": "fn run(tasks: Vec<Task>) {\n    let mut state = Vec::new();\n    for task in tasks {\n        state.push(task);\n    }\n} // Starts coding before the representation and invariants are designed",
+    "good_pattern": "struct SchedulerPlan {\n    ready: std::collections::VecDeque<TaskId>,\n    in_flight: std::collections::HashSet<TaskId>,\n    results: std::collections::BTreeMap<TaskId, TaskResult>,\n}\n// ready preserves FIFO order; results use stable ordering for deterministic output"
+  },
+  {
+    "id": "illu_design_02",
+    "category": "Data Modeling",
+    "triggers": [
+      "data structure",
+      "data structures",
+      "data modeling",
+      "planning",
+      "state",
+      "enum",
+      "bool flag",
+      "stringly typed",
+      "newtype"
+    ],
+    "rule_summary": "Model domain state explicitly with structs, enums, and newtypes. Avoid boolean flags, stringly typed state, parallel vectors, or catch-all maps when a richer type can make invalid states unrepresentable.",
+    "prompt_injection": "MANDATORY RULE: Choose data structures that encode the domain correctly. Prefer enums, structs, and newtypes over bool flags, string states, or loosely typed maps.",
+    "anti_pattern": "struct Connection {\n    authenticated: bool,\n    state: String,\n}",
+    "good_pattern": "struct Connection {\n    state: ConnectionState,\n}\n\nenum ConnectionState {\n    Connected,\n    Authenticated { user_id: UserId },\n    Closed,\n}"
+  },
+  {
+    "id": "illu_docs_01",
+    "category": "Documentation",
+    "triggers": [
+      "docs",
+      "documentation",
+      "std",
+      "standard library",
+      "assume",
+      "api behavior"
+    ],
+    "rule_summary": "Never infer the behavior of a type, trait, method, or macro from memory or its name alone. Verify the actual semantics in documentation, including standard-library APIs, before depending on them in code or design decisions.",
+    "prompt_injection": "MANDATORY RULE: Read the documentation before relying on a non-trivial API. Standard-library types and methods are not exempt from verification.",
+    "anti_pattern": "let first = map.iter().next(); // assumes HashMap iteration order is stable",
+    "good_pattern": "let first = ordered.iter().next(); // use BTreeMap when sorted iteration order is required"
+  },
+  {
+    "id": "illu_comments_01",
+    "category": "Comments",
+    "triggers": [
+      "comment",
+      "comments",
+      "why",
+      "safety",
+      "invariant",
+      "ownership rationale"
+    ],
+    "rule_summary": "Comments are part of the design, not lint filler. Use them to explain invariants, safety assumptions, ownership rationale, concurrency contracts, and non-obvious tradeoffs. Do not narrate obvious syntax.",
+    "prompt_injection": "MANDATORY RULE: Write comments only when they explain why the code exists, what invariant must hold, or what safety/concurrency assumption the reader must preserve.",
+    "anti_pattern": "let bytes = input.as_bytes(); // Convert the string to bytes",
+    "good_pattern": "// Keep newest-first ordering because callers consume the first successful match.\nentries.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));"
+  },
+  {
+    "id": "illu_idioms_01",
+    "category": "Idiomatic Rust",
+    "triggers": [
+      "idiomatic",
+      "rust book",
+      "rust for rustaceans",
+      "iterator",
+      "ownership",
+      "result"
+    ],
+    "rule_summary": "Write Rust as Rust, not as transliterated Java, C++, or Python. Prefer ownership and borrowing, enums, iterators, `Result`, and compile-time modeling over object-heavy or stringly typed runtime patterns.",
+    "prompt_injection": "MANDATORY RULE: Follow Rust Book and Rust for Rustaceans idioms. Prefer native Rust representations and control flow over porting non-Rust patterns into the codebase.",
+    "anti_pattern": "let mut output = Vec::new();\nfor item in items {\n    if item.is_valid() {\n        output.push(item.render());\n    }\n}",
+    "good_pattern": "let output: Vec<_> = items\n    .into_iter()\n    .filter(|item| item.is_valid())\n    .map(|item| item.render())\n    .collect();"
   }
 ]

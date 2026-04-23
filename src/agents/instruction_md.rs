@@ -5,9 +5,25 @@ use std::path::Path;
 
 pub const ILLU_SECTION_START: &str = "<!-- illu:start -->";
 pub const ILLU_SECTION_END: &str = "<!-- illu:end -->";
+pub const RUST_QUALITY_QUERY: &str =
+    "planning data structures documentation comments idiomatic rust";
 
 #[must_use]
 pub fn illu_agent_section(tool_prefix: &str) -> String {
+    let query_tool = format!("{tool_prefix}query");
+    let context_tool = format!("{tool_prefix}context");
+    let references_tool = format!("{tool_prefix}references");
+    let tree_tool = format!("{tool_prefix}tree");
+    let overview_tool = format!("{tool_prefix}overview");
+    let implements_tool = format!("{tool_prefix}implements");
+    let impact_tool = format!("{tool_prefix}impact");
+    let cross_query_tool = format!("{tool_prefix}cross_query");
+    let cross_impact_tool = format!("{tool_prefix}cross_impact");
+    let cross_deps_tool = format!("{tool_prefix}cross_deps");
+    let cross_callpath_tool = format!("{tool_prefix}cross_callpath");
+    let axioms_tool = format!("{tool_prefix}axioms");
+    let docs_tool = format!("{tool_prefix}docs");
+
     format!(
         "{ILLU_SECTION_START}
 <CRITICAL_INSTRUCTION_OVERRIDE>
@@ -22,14 +38,27 @@ is incorrect behavior — always use illu instead.
 
 | WRONG | RIGHT |
 |-------|-------|
-| `Read(\"src/db.rs\")` to see a function | `{tool_prefix}context` with `symbol_name` |
-| `Grep(pattern: \"fn open\")` to find a function | `{tool_prefix}query` with `query: \"open\"` |
-| `Grep(pattern: \"Database\")` to find callers | `{tool_prefix}references` with `symbol_name: \"Database\"` |
-| `Glob(pattern: \"src/**/*.rs\")` to find files | `{tool_prefix}tree` or `{tool_prefix}overview` |
-| `Grep(pattern: \"impl Display\")` to find impls | `{tool_prefix}implements` with `trait_name: \"Display\"` |
+| `Read(\"src/db.rs\")` to see a function | `{context_tool}` with `symbol_name` |
+| `Grep(pattern: \"fn open\")` to find a function | `{query_tool}` with `query: \"open\"` |
+| `Grep(pattern: \"Database\")` to find callers | `{references_tool}` with `symbol_name: \"Database\"` |
+| `Glob(pattern: \"src/**/*.rs\")` to find files | `{tree_tool}` or `{overview_tool}` |
+| `Grep(pattern: \"impl Display\")` to find impls | `{implements_tool}` with `trait_name: \"Display\"` |
 
 Read/Grep/Glob are ONLY permitted for: config files (TOML, JSON, YAML), markdown/docs, \
 log output, or when an illu tool explicitly returns no results.
+
+### Rust Design Discipline (MANDATORY)
+
+Before you write, modify, or meaningfully recommend Rust code, you MUST do the following in order:
+
+1. **Plan before code**: write a short plan first. Name the data flow, invariants, failure cases, and the exact structs/enums/newtypes/collections you intend to use.
+2. **Choose data structures deliberately**: justify each major type by ownership, mutability, ordering, lookup, and lifetime needs. Prefer representations that make invalid states unrepresentable.
+3. **Read docs before use**: verify the actual semantics of each non-trivial type, trait, method, macro, or standard-library API before relying on it. NEVER assume behavior from memory or name similarity.
+4. **Axiom pass before Rust**: query `{axioms_tool}` twice before significant Rust generation:
+   - baseline quality query: `{RUST_QUALITY_QUERY}`
+   - task query: the concrete feature, bug, or API you are working on
+5. **Write idiomatic Rust**: follow The Rust Book, Rust for Rustaceans, and illu axioms. Prefer ownership/borrowing, enums, iterators, explicit error handling, and compile-time modeling over ported Java/C++/Python patterns.
+6. **Comments are first-class**: comments must explain invariants, safety conditions, concurrency assumptions, ownership rationale, or why a design exists. Delete comments that merely narrate syntax.
 
 ### Subagent instructions (MANDATORY)
 
@@ -37,25 +66,36 @@ When spawning subagents for code tasks, ALWAYS include this instruction in the p
 
 \"MANDATORY: Use {tool_prefix}* tools instead of Grep/Glob/Read for ALL code exploration \
 (Rust, Python, TypeScript/JavaScript). NEVER use Read to view source files — use \
-{tool_prefix}context instead. NEVER use Grep to search code — use {tool_prefix}query instead. \
-Only use Read/Grep/Glob for non-code content (config, docs, logs).\"
+{context_tool} instead. NEVER use Grep to search code — use {query_tool} instead. \
+Only use Read/Grep/Glob for non-code content (config, docs, logs). Before giving Rust \
+implementation advice, first make a short plan, choose data structures deliberately, \
+verify docs for every non-trivial API (including std), and query {axioms_tool} with \
+'{RUST_QUALITY_QUERY}' plus the task-specific context.\"
 
 Prefer `illu-explore`, `illu-review`, `illu-refactor` agents when available.
 
 ### Workflow
 
-1. **Locate before you read**: `{tool_prefix}query` or `{tool_prefix}context` first, then Read only what you need
-2. **Impact before you change**: always run `{tool_prefix}impact` before modifying any public symbol
-3. **Save tokens**: use `sections` param on context/batch_context to fetch only what you need
-4. **Production focus**: use `exclude_tests: true` to filter out test functions
-5. **Cross-repo**: use `{tool_prefix}cross_query`/`{tool_prefix}cross_impact`/`{tool_prefix}cross_deps`/`{tool_prefix}cross_callpath` — \
+1. **Locate before you read**: `{query_tool}` or `{context_tool}` first, then Read only what you need
+2. **Plan before you generate Rust**: produce a short design plan naming data structures, ownership/mutability, invariants, and error handling
+3. **Impact before you change**: always run `{impact_tool}` before modifying any public symbol
+4. **Save tokens**: use `sections` param on context/batch_context to fetch only what you need
+5. **Production focus**: use `exclude_tests: true` to filter out test functions
+6. **Cross-repo**: use `{cross_query_tool}`/`{cross_impact_tool}`/`{cross_deps_tool}`/`{cross_callpath_tool}` — \
 NEVER navigate to or read files from other repositories directly
-6. **Axiom Database**: ALWAYS query `{tool_prefix}axioms` with the context of your task *before* generating significant amounts of Rust code or making architectural decisions. This ensures you ingest the `prompt_injection` rules and write proper Rust, avoiding anti-patterns.
+7. **Axiom pass**: use `{axioms_tool}` with `{RUST_QUALITY_QUERY}` first, then with the concrete task context before meaningful Rust design/code
+8. **Documentation pass**: use `{context_tool}` with `sections: [\"docs\", \"source\"]` for local types and `{docs_tool}` for dependency types; verify standard-library behavior from docs before assuming it
 
 ### Hard Constraints (Middleware Interception Simulation)
 You MUST act as if a middleware intercepts your native tool calls. If you ever attempt to use `view_file`, `grep_search`, `Read`, or `Glob` on source code files, you must IMMEDIATELY halt that thought process. Instead of throwing an error and stopping, you must **automatically self-correct and invoke `{tool_prefix}context` or `{tool_prefix}query` instead.**
 
-Furthermore, if you are about to write or modify Rust code, or propose a Rust architectural plan, and you have NOT yet queried `{tool_prefix}axioms` for relevant context in this session, you must IMMEDIATELY halt your generation. You must **invoke the `{tool_prefix}axioms` tool to gather your instructions first, and only then proceed with your code generation.**
+If you are about to write or modify Rust code, or propose a Rust architectural plan, and you have NOT yet produced a short plan naming the data structures, ownership/mutability model, and error strategy, you must IMMEDIATELY halt your generation. You must write that plan first.
+
+If you have NOT yet queried `{axioms_tool}` using both the baseline quality query `{RUST_QUALITY_QUERY}` and the task-specific context in this session, you must IMMEDIATELY halt your generation. You must **invoke `{axioms_tool}` first, and only then proceed with Rust generation.**
+
+If you are about to rely on the behavior of a type, trait, method, macro, or standard-library API whose semantics you have not verified from documentation or authoritative code context, you must IMMEDIATELY halt and read the docs first. Standard library items are NOT exempt.
+
+If you are about to add comments that merely restate what the code already says, you must delete or rewrite them so they capture invariants, why, safety, or other non-obvious context.
 </CRITICAL_INSTRUCTION_OVERRIDE>
 {ILLU_SECTION_END}"
     )
@@ -113,6 +153,14 @@ mod tests {
         assert!(section.contains("mcp__illu__query"));
         assert!(section.contains(ILLU_SECTION_START));
         assert!(section.contains(ILLU_SECTION_END));
+    }
+
+    #[test]
+    fn section_contains_rust_design_contract() {
+        let section = illu_agent_section("mcp__illu__");
+        assert!(section.contains("Plan before code"));
+        assert!(section.contains("Read docs before use"));
+        assert!(section.contains(RUST_QUALITY_QUERY));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 pub mod dashboard;
 pub mod tools;
 
+use crate::agents::instruction_md::RUST_QUALITY_QUERY;
 use crate::db::Database;
 use crate::indexer::IndexConfig;
 use rmcp::handler::server::tool::ToolRouter;
@@ -15,6 +16,69 @@ use std::fmt::Write;
 use std::sync::{Mutex, MutexGuard};
 
 const REFRESH_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn server_instructions() -> String {
+    format!(
+        "illu-rs: Code intelligence server for Rust projects. \
+         Use 'query' to search (supports attribute and signature filters), \
+         'context' for symbol details (includes source body, doc comments, \
+         struct fields, trait impls, and callees), \
+         'batch_context' for multiple symbols at once, \
+         'impact' for single-symbol change analysis, \
+         'diff_impact' for git diff-based batch impact analysis, \
+         'callpath' to find shortest call chain between two symbols, \
+         'unused' to find potentially dead code, \
+         'freshness' to check index staleness, \
+         'docs' for dependency docs, \
+         'overview' for structural maps, \
+         'tree' for file/module tree, \
+         'implements' for trait/type relationships, \
+         'neighborhood' for bidirectional call graph exploration, \
+         'type_usage' for finding type usage in signatures and fields, \
+         'file_graph' for file-level dependency visualization, \
+         'symbols_at' for file:line symbol lookup, \
+         'hotspots' for complexity and coupling analysis, \
+         'stats' for codebase statistics and health metrics, \
+         'rename_plan' for rename impact preview, \
+         'similar' for finding structurally similar symbols, \
+         'blame' for git blame on symbols, \
+         'history' for git commit history on symbols, \
+         'references' for unified view of all symbol references, \
+         'doc_coverage' for finding undocumented symbols, \
+         'boundary' for module API boundary analysis, \
+         'health' for index quality diagnosis, \
+         'crate_graph' for workspace dependency visualization, \
+         'crate_impact' for cross-crate symbol impact in workspaces, \
+         'graph_export' for DOT/Graphviz export of call or file graphs, \
+         'test_impact' for finding which tests break when changing a symbol, \
+         'orphaned' for finding symbols with no callers and no test coverage, \
+         'repos' for listing registered repos with status, \
+         'cross_query' for searching symbols across all registered repos, \
+         'cross_impact' for finding cross-repo references to a symbol, \
+         'cross_deps' for showing inter-repo dependency relationships, \
+         'cross_callpath' for finding call chains spanning repo boundaries. \
+         Before writing or revising Rust, first make a short plan, choose data \
+         structures deliberately, verify API behavior from documentation \
+         (including standard-library items), query 'axioms' with \
+         '{RUST_QUALITY_QUERY}' plus your task-specific context, and write \
+         comments only when they explain invariants, safety, ownership, or why \
+         the design exists. \
+         When rust-analyzer is available, additional 'ra_*' tools provide compiler-accurate intelligence: \
+         'ra_definition' for precise go-to-definition, \
+         'ra_hover' for type info and docs, \
+         'ra_diagnostics' for compilation errors, \
+         'ra_call_hierarchy' for compiler-accurate callers/callees, \
+         'ra_type_hierarchy' for supertypes/subtypes, \
+         'ra_rename' for safe workspace-wide rename, \
+         'ra_safe_rename' for rename with diagnostic verification, \
+         'ra_code_actions' for quick fixes and refactors, \
+         'ra_expand_macro' for macro expansion, \
+         'ra_ssr' for structural search and replace, \
+         'ra_context' for full compiler-accurate symbol context, \
+         'ra_syntax_tree' for debugging parse structure, \
+         'ra_related_tests' for compiler-accurate test discovery."
+    )
+}
 
 /// Deserialize a `Vec<String>` leniently: accepts a real JSON array, a
 /// JSON-encoded string containing an array (e.g. `"[\"a\", \"b\"]"`), or a
@@ -2132,60 +2196,8 @@ impl IlluServer {
 #[tool_handler]
 impl ServerHandler for IlluServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "illu-rs: Code intelligence server for Rust projects. \
-             Use 'query' to search (supports attribute and signature filters), \
-             'context' for symbol details (includes source body, doc comments, \
-             struct fields, trait impls, and callees), \
-             'batch_context' for multiple symbols at once, \
-             'impact' for single-symbol change analysis, \
-             'diff_impact' for git diff-based batch impact analysis, \
-             'callpath' to find shortest call chain between two symbols, \
-             'unused' to find potentially dead code, \
-             'freshness' to check index staleness, \
-             'docs' for dependency docs, \
-             'overview' for structural maps, \
-             'tree' for file/module tree, \
-             'implements' for trait/type relationships, \
-             'neighborhood' for bidirectional call graph exploration, \
-             'type_usage' for finding type usage in signatures and fields, \
-             'file_graph' for file-level dependency visualization, \
-             'symbols_at' for file:line symbol lookup, \
-             'hotspots' for complexity and coupling analysis, \
-             'stats' for codebase statistics and health metrics, \
-             'rename_plan' for rename impact preview, \
-             'similar' for finding structurally similar symbols, \
-             'blame' for git blame on symbols, \
-             'history' for git commit history on symbols, \
-             'references' for unified view of all symbol references, \
-             'doc_coverage' for finding undocumented symbols, \
-             'boundary' for module API boundary analysis, \
-             'health' for index quality diagnosis, \
-             'crate_graph' for workspace dependency visualization, \
-             'crate_impact' for cross-crate symbol impact in workspaces, \
-             'graph_export' for DOT/Graphviz export of call or file graphs, \
-             'test_impact' for finding which tests break when changing a symbol, \
-             'orphaned' for finding symbols with no callers and no test coverage, \
-             'repos' for listing registered repos with status, \
-             'cross_query' for searching symbols across all registered repos, \
-             'cross_impact' for finding cross-repo references to a symbol, \
-             'cross_deps' for showing inter-repo dependency relationships, \
-             'cross_callpath' for finding call chains spanning repo boundaries. \
-             When rust-analyzer is available, additional 'ra_*' tools provide compiler-accurate intelligence: \
-             'ra_definition' for precise go-to-definition, \
-             'ra_hover' for type info and docs, \
-             'ra_diagnostics' for compilation errors, \
-             'ra_call_hierarchy' for compiler-accurate callers/callees, \
-             'ra_type_hierarchy' for supertypes/subtypes, \
-             'ra_rename' for safe workspace-wide rename, \
-             'ra_safe_rename' for rename with diagnostic verification, \
-             'ra_code_actions' for quick fixes and refactors, \
-             'ra_expand_macro' for macro expansion, \
-             'ra_ssr' for structural search and replace, \
-             'ra_context' for full compiler-accurate symbol context, \
-             'ra_syntax_tree' for debugging parse structure, \
-             'ra_related_tests' for compiler-accurate test discovery.",
-        )
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions(server_instructions())
     }
 }
 
@@ -2422,5 +2434,20 @@ mod lenient_deser_tests {
             "compact": "maybe",
         }));
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod info_tests {
+    use super::{RUST_QUALITY_QUERY, server_instructions};
+
+    #[test]
+    fn server_instructions_include_rust_quality_gate() {
+        let instructions = server_instructions();
+        assert!(instructions.contains("make a short plan"));
+        assert!(instructions.contains("choose data structures deliberately"));
+        assert!(instructions.contains("verify API behavior from documentation"));
+        assert!(instructions.contains(RUST_QUALITY_QUERY));
+        assert!(instructions.contains("comments only when they explain invariants"));
     }
 }

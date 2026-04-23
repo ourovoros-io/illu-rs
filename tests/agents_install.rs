@@ -68,4 +68,9 @@ fn install_claude_code_writes_global_settings() {
     assert!(dir.path().join(".claude/settings.json").exists());
     assert!(dir.path().join(".claude/CLAUDE.md").exists());
     assert!(dir.path().join(".claude/agents").is_dir());
+
+    let claude_md = fs::read_to_string(dir.path().join(".claude/CLAUDE.md")).unwrap();
+    assert!(claude_md.contains("Plan before code"));
+    assert!(claude_md.contains("Read docs before use"));
+    assert!(claude_md.contains("planning data structures documentation comments idiomatic rust"));
 }
