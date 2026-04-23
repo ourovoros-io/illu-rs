@@ -560,12 +560,16 @@ impl ResolvedTargets {
         written.push(mcp_path);
         if let Some((md_path, heading)) = self.instruction {
             if !dry_run {
-                let parent = md_path.parent().ok_or("instruction file has no parent")?;
+                let parent = md_path.parent().ok_or_else(|| {
+                    crate::IlluError::Agent("instruction file has no parent".to_string())
+                })?;
                 std::fs::create_dir_all(parent)?;
                 let file_name = md_path
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .ok_or("instruction file has no name")?;
+                    .ok_or_else(|| {
+                        crate::IlluError::Agent("instruction file has no name".to_string())
+                    })?;
                 instruction_md::write_md_section(
                     parent,
                     file_name,

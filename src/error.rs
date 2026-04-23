@@ -21,11 +21,15 @@
 //! attribute and we want to surface the offending text, not a lower-level
 //! rusqlite error).
 //!
-//! `Other(String)` is the escape hatch used during the migration from the
-//! prior `Box<dyn std::error::Error>` scheme; prefer a domain variant when
-//! adding new error sites. Several domain variants are defined but not yet
-//! plumbed through every call site — follow-up work will route them (see
-//! the tracking memo in user memory).
+//! `Other(String)` is the last-resort escape hatch for string errors that
+//! genuinely lack a typed source and don't fit an existing domain variant —
+//! e.g. `tokio::task::JoinError` payloads from `spawn_blocking` panics and a
+//! handful of `From<ForeignError>` impls whose upstream types are not
+//! `Error + Send + Sync` on every version (see `toml_edit::TomlError` and
+//! `regex_lite::Error` below). There is intentionally **no blanket
+//! `impl From<String>`** — callers must write `IlluError::Other(...)` (or a
+//! domain variant) explicitly so the escape hatch is visible in `git diff`
+//! rather than silently absorbing `format!(...).into()` at call sites.
 //!
 //! ## Axioms
 //!
@@ -90,8 +94,11 @@ pub enum IlluError {
     #[error(transparent)]
     Ra(#[from] crate::ra::error::RaError),
 
-    /// Indexing pipeline failure (tree-sitter parse failed, workspace layout
-    /// rejected, file skipped for a non-IO reason).
+    /// Indexing pipeline failure: tree-sitter parse failed, workspace layout
+    /// rejected, file skipped for a non-IO reason, or any other failure at
+    /// the indexer-orchestrator boundary that wraps a parser-internal
+    /// `Result<_, String>`. All parser-layer errors (Rust / TS / Python)
+    /// flow through this variant — there is no separate `Parse` category.
     #[error("indexing: {0}")]
     Indexing(String),
 
@@ -99,9 +106,13 @@ pub enum IlluError {
     #[error("workspace: {0}")]
     Workspace(String),
 
-    /// Generic parser-layer error that lacks a typed source.
-    #[error("parser: {0}")]
-    Parse(String),
+    /// User-supplied argument to a CLI command or MCP tool is invalid
+    /// (e.g. unknown enum value, out-of-range number, missing required
+    /// field). Distinct from `Indexing` (parser errors on source code) and
+    /// from `Agent` (agent detection / config-file issues). Use when the
+    /// caller passed something the tool refuses to process.
+    #[error("invalid argument: {0}")]
+    Invalid(String),
 
     /// Agent detection, selection, or file-writing error.
     #[error("agent: {0}")]
@@ -121,21 +132,10 @@ pub enum IlluError {
 
     /// Untyped escape hatch. Prefer a domain variant when adding new sites;
     /// this is retained for the one-shot string-error sites that would
-    /// otherwise need a variant per call.
+    /// otherwise need a variant per call. See the module-level doc for the
+    /// legitimate sources; new call sites should use a domain variant.
     #[error("{0}")]
     Other(String),
-}
-
-impl From<String> for IlluError {
-    fn from(s: String) -> Self {
-        IlluError::Other(s)
-    }
-}
-
-impl From<&str> for IlluError {
-    fn from(s: &str) -> Self {
-        IlluError::Other(s.to_string())
-    }
 }
 
 impl From<rmcp::service::ServerInitializeError> for IlluError {

@@ -114,7 +114,7 @@ fn parse_rustdoc_json(json_str: &str, crate_name: &str) -> Result<String, crate:
     let index = doc
         .get("index")
         .and_then(|v| v.as_object())
-        .ok_or("missing index")?;
+        .ok_or_else(|| crate::IlluError::Docs("rustdoc JSON missing `index` object".to_string()))?;
 
     let mut output = String::new();
     let _ = writeln!(output, "# {crate_name} {version}\n");
@@ -382,14 +382,16 @@ pub fn parse_rustdoc_json_modules(
     let index = doc
         .get("index")
         .and_then(|v| v.as_object())
-        .ok_or("missing index")?;
+        .ok_or_else(|| crate::IlluError::Docs("rustdoc JSON missing `index` object".to_string()))?;
 
     let root_id = doc
         .get("root")
-        .ok_or("missing root")?
+        .ok_or_else(|| crate::IlluError::Docs("rustdoc JSON missing `root` key".to_string()))?
         .to_string()
         .replace('"', "");
-    let root_item = index.get(&root_id).ok_or("root item not in index")?;
+    let root_item = index.get(&root_id).ok_or_else(|| {
+        crate::IlluError::Docs(format!("rustdoc JSON `root` ({root_id}) not in `index`"))
+    })?;
     let root_items = root_item
         .get("inner")
         .and_then(|i| i.get("module"))

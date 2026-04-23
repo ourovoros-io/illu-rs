@@ -71,14 +71,14 @@ fn write_codex_toml(path: &Path, cmd: &IlluCommand) -> Result<(), crate::IlluErr
         .entry("mcp_servers")
         .or_insert_with(|| Item::Table(Table::new()))
         .as_table_mut()
-        .ok_or("mcp_servers is not a table")?;
+        .ok_or_else(|| crate::IlluError::Agent("mcp_servers is not a table".to_string()))?;
     mcp_servers.set_implicit(true);
 
     let illu = mcp_servers
         .entry("illu")
         .or_insert_with(|| Item::Table(Table::new()))
         .as_table_mut()
-        .ok_or("mcp_servers.illu is not a table")?;
+        .ok_or_else(|| crate::IlluError::Agent("mcp_servers.illu is not a table".to_string()))?;
 
     illu.insert("command", Item::Value(Value::from(cmd.command.clone())));
     let mut args = Array::new();

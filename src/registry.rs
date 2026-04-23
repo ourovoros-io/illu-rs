@@ -24,14 +24,17 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// Load registry from a TOML file, or create empty if it
-    /// doesn't exist.
-    pub fn load(path: &Path) -> Result<Self, String> {
+    /// Load registry from a TOML file, or create empty if it doesn't exist.
+    ///
+    /// IO errors propagate via `IlluError::Io`; TOML parse errors propagate
+    /// via `IlluError::TomlDe`. Both carry their own `source()` chain — the
+    /// registry path is visible in the error either through the OS-level
+    /// error message or through the `toml::de::Error` span, so we don't
+    /// add a redundant string wrapper here.
+    pub fn load(path: &Path) -> Result<Self, crate::IlluError> {
         if path.exists() {
-            let content = std::fs::read_to_string(path)
-                .map_err(|e| format!("failed to read registry: {e}"))?;
-            let file: RegistryFile =
-                toml::from_str(&content).map_err(|e| format!("failed to parse registry: {e}"))?;
+            let content = std::fs::read_to_string(path)?;
+            let file: RegistryFile = toml::from_str(&content)?;
             Ok(Self {
                 file_path: path.to_path_buf(),
                 repos: file.repos,
@@ -85,18 +88,23 @@ impl Registry {
     }
 
     /// Write registry to disk, creating parent directories as needed.
-    pub fn save(&self) -> Result<(), String> {
+    ///
+    /// Filesystem errors propagate via `IlluError::Io`. `toml` serialization
+    /// failure is wrapped as `IlluError::Other` because `toml::ser::Error`
+    /// does not have a dedicated `IlluError` variant and serialization only
+    /// fails for schemas that cannot be represented — the registry schema
+    /// is fixed in this module, so a failure here is effectively a bug in
+    /// this crate rather than a domain-categorized error.
+    pub fn save(&self) -> Result<(), crate::IlluError> {
         if let Some(parent) = self.file_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create registry dir: {e}"))?;
+            std::fs::create_dir_all(parent)?;
         }
         let file = RegistryFile {
             repos: self.repos.clone(),
         };
         let content = toml::to_string_pretty(&file)
-            .map_err(|e| format!("failed to serialize registry: {e}"))?;
-        std::fs::write(&self.file_path, content)
-            .map_err(|e| format!("failed to write registry: {e}"))?;
+            .map_err(|e| crate::IlluError::Other(format!("registry serialization failed: {e}")))?;
+        std::fs::write(&self.file_path, content)?;
         Ok(())
     }
 
@@ -159,9 +167,15 @@ impl Registry {
     }
 
     /// Default registry path: `~/.illu/registry.toml`.
-    pub fn default_path() -> Result<PathBuf, String> {
-        let home =
-            std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+    ///
+    /// Fails with `IlluError::Agent` when neither `HOME` nor `USERPROFILE`
+    /// is set — matching the sibling routing in `agents::detect::RealContext::new`
+    /// and `main::install_global`, where the same environment-detection
+    /// failure is the root cause.
+    pub fn default_path() -> Result<PathBuf, crate::IlluError> {
+        let home = std::env::var("HOME").map_err(|_| {
+            crate::IlluError::Agent("HOME environment variable not set".to_string())
+        })?;
         Ok(PathBuf::from(home).join(".illu").join("registry.toml"))
     }
 }
