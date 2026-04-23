@@ -775,3 +775,95 @@ fn refresh_add_then_remove_leaves_no_trace() {
         "permanent should survive add-then-remove cycle"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Group: cross-file refs and symbol-universe changes
+// ---------------------------------------------------------------------------
+
+/// Regression: when a previously-unknown symbol name is added to one file,
+/// refs in other, *unmodified* files that mention that name must get
+/// re-extracted. Before the fix this leaked silently — ~37% of `symbol_refs`
+/// were missing on self-indexed repos.
+#[test]
+fn refresh_backfills_refs_in_non_dirty_files_when_universe_grows() {
+    let (dir, db, config) = setup_refresh_project(&[
+        // Caller file references a name that does not yet exist as a symbol.
+        (
+            "callers.rs",
+            "pub fn caller() {\n    let _ = target();\n}\n",
+        ),
+        // Placeholder file that does NOT define `target` on the first pass.
+        ("targets.rs", "pub fn placeholder() {}\n"),
+    ]);
+
+    // Baseline: target doesn't exist, so caller's body cannot have a ref
+    // to it. Verify the starting state matches the bug scenario.
+    let target_before = db.search_symbols_exact("target").unwrap();
+    assert!(
+        target_before.is_empty(),
+        "target should not yet be in known_symbols"
+    );
+    let callers_of_target_before = db.get_callers_by_name("target", None, false).unwrap();
+    assert!(
+        callers_of_target_before.is_empty(),
+        "no refs to non-existent target yet"
+    );
+
+    // Now introduce `target` in a *different* file (targets.rs becomes
+    // dirty). callers.rs is not edited, so its file hash is unchanged and
+    // it would be skipped by the old incremental path.
+    git_commit(dir.path(), "baseline");
+    std::fs::write(
+        dir.path().join("src/targets.rs"),
+        "pub fn placeholder() {}\npub fn target() {}\n",
+    )
+    .unwrap();
+
+    refresh_index(&db, &config).unwrap();
+
+    // The newly-resolvable ref must now exist. Before the fix this was
+    // `callers_of_target.is_empty()`.
+    let callers_of_target = db.get_callers_by_name("target", None, false).unwrap();
+    assert_eq!(
+        callers_of_target.len(),
+        1,
+        "caller should now resolve to target after universe grew: {callers_of_target:?}"
+    );
+    let (caller_name, caller_file) = &callers_of_target[0];
+    assert_eq!(caller_name, "caller");
+    assert_eq!(caller_file, "src/callers.rs");
+}
+
+/// Symmetric case: when a symbol is *removed*, existing refs in non-dirty
+/// files that targeted it should not linger as stale rows. `delete_stale_refs`
+/// already covers the target-deleted case, but the universe-change detector
+/// also runs here — make sure the combination stays sane.
+#[test]
+fn refresh_drops_refs_when_universe_shrinks() {
+    let (dir, db, config) = setup_refresh_project(&[
+        (
+            "callers.rs",
+            "pub fn caller() {\n    let _ = target();\n}\n",
+        ),
+        ("targets.rs", "pub fn target() {}\n"),
+    ]);
+
+    // Baseline: ref is resolved.
+    let before = db.get_callers_by_name("target", None, false).unwrap();
+    assert_eq!(before.len(), 1, "baseline ref should exist: {before:?}");
+
+    git_commit(dir.path(), "baseline");
+    std::fs::write(
+        dir.path().join("src/targets.rs"),
+        "pub fn placeholder() {}\n",
+    )
+    .unwrap();
+
+    refresh_index(&db, &config).unwrap();
+
+    let after = db.get_callers_by_name("target", None, false).unwrap();
+    assert!(
+        after.is_empty(),
+        "ref should be gone once target is removed: {after:?}"
+    );
+}

@@ -850,6 +850,28 @@ impl Database {
         Ok(u64::try_from(deleted).unwrap_or(0))
     }
 
+    /// Delete every `symbol_refs` row whose *source* symbol lives in `file_path`.
+    ///
+    /// Used by the incremental reindex path when a non-dirty file needs its
+    /// outgoing refs re-extracted because the symbol universe changed under
+    /// it (new cross-file targets became resolvable). Unlike `delete_file_data`,
+    /// this is surgical: it does not touch `symbols`, `trait_impls`, `docs`,
+    /// or the `files` row itself — only the *outgoing* edges so they can be
+    /// rebuilt against the fresh `SymbolIdMap`. Returns the number of rows
+    /// removed, mirroring `delete_stale_refs`.
+    pub fn delete_refs_from_file(&self, file_path: &str) -> SqlResult<u64> {
+        let deleted = self.conn.execute(
+            "DELETE FROM symbol_refs \
+             WHERE source_symbol_id IN ( \
+                 SELECT s.id FROM symbols s \
+                 JOIN files f ON f.id = s.file_id \
+                 WHERE f.path = ?1 \
+             )",
+            params![file_path],
+        )?;
+        Ok(u64::try_from(deleted).unwrap_or(0))
+    }
+
     pub fn file_count(&self) -> SqlResult<i64> {
         self.conn
             .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
