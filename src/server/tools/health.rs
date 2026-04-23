@@ -1,7 +1,7 @@
 use crate::db::Database;
 use std::fmt::Write;
 
-pub fn handle_health(db: &Database) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_health(db: &Database) -> Result<String, crate::IlluError> {
     let mut output = String::new();
     let _ = writeln!(output, "## Index Health\n");
 

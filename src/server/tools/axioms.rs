@@ -58,7 +58,7 @@ const AXIOMS_JSON: &str = include_str!("../../../assets/axioms.json");
 
 /// Parse once, cache forever. Parse failure is returned to the caller on
 /// first call; later calls will retry until one succeeds.
-fn axioms() -> Result<&'static [Axiom], Box<dyn std::error::Error>> {
+fn axioms() -> Result<&'static [Axiom], crate::IlluError> {
     static AXIOMS: OnceLock<Vec<Axiom>> = OnceLock::new();
     if let Some(cached) = AXIOMS.get() {
         return Ok(cached);
@@ -73,7 +73,7 @@ fn axioms() -> Result<&'static [Axiom], Box<dyn std::error::Error>> {
         .ok_or_else(|| "axioms cache not initialised after set".into())
 }
 
-pub fn handle_axioms(query: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
     let axioms = axioms()?;
 
     let query_lower = query.to_lowercase();

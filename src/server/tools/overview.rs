@@ -7,7 +7,7 @@ pub fn handle_overview(
     path: &str,
     include_private: bool,
     limit: Option<i64>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let mut symbols = db.get_symbols_by_path_prefix_filtered(path, include_private)?;
 
     // Filter out structural items (mod/use) — overview shows API surface

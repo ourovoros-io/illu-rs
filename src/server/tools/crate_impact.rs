@@ -2,10 +2,7 @@ use crate::db::Database;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub fn handle_crate_impact(
-    db: &Database,
-    symbol_name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_crate_impact(db: &Database, symbol_name: &str) -> Result<String, crate::IlluError> {
     let crate_count = db.get_crate_count()?;
     if crate_count <= 1 {
         return Ok("Crate impact analysis requires a workspace with multiple crates.".into());

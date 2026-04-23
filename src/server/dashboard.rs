@@ -305,10 +305,7 @@ async fn validate_host(
     }
 }
 
-pub async fn start_dashboard(
-    registry: Registry,
-    port: u16,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_dashboard(registry: Registry, port: u16) -> Result<(), crate::IlluError> {
     let state = Arc::new(DashboardState {
         registry: Arc::new(RwLock::new(registry)),
         port,

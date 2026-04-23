@@ -6,7 +6,7 @@ pub fn handle_hotspots(
     path: Option<&str>,
     limit: Option<i64>,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let prefix = path.unwrap_or("");
     let max = limit.unwrap_or(10);
     let mut output = String::new();

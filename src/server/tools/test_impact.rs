@@ -5,7 +5,7 @@ pub fn handle_test_impact(
     db: &Database,
     symbol_name: &str,
     depth: Option<i64>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let max_depth = depth.unwrap_or(5);
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {

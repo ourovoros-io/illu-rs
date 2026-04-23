@@ -38,9 +38,7 @@ pub struct PendingDoc {
 }
 
 /// Determine which dependencies need docs fetched (sync, needs DB).
-pub fn pending_docs(
-    db: &crate::db::Database,
-) -> Result<Vec<PendingDoc>, Box<dyn std::error::Error>> {
+pub fn pending_docs(db: &crate::db::Database) -> Result<Vec<PendingDoc>, crate::IlluError> {
     let deps = db.get_direct_dependencies()?;
     let mut pending = Vec::new();
 
@@ -221,10 +219,8 @@ pub async fn fetch_docs(pending: &[PendingDoc], repo_path: &std::path::Path) -> 
         crate::status::set(&format!("fetching docs ▸ cargo doc [0/{total}]"));
         let dep_names: Vec<String> = pending.iter().map(|p| p.name.clone()).collect();
         let repo_pb = repo_path.to_path_buf();
-        // `generate_cargo_docs` returns `Box<dyn Error>` which is not `Send`;
-        // stringify inside the blocking task so the JoinHandle is Send.
         let cargo_result = tokio::task::spawn_blocking(move || {
-            super::cargo_doc::generate_cargo_docs(&repo_pb, &dep_names).map_err(|e| e.to_string())
+            super::cargo_doc::generate_cargo_docs(&repo_pb, &dep_names)
         })
         .await;
         match cargo_result {
@@ -318,7 +314,7 @@ async fn fetch_docs_network(pending: &[&PendingDoc]) -> Vec<FetchedDoc> {
 pub fn store_fetched_docs(
     db: &crate::db::Database,
     docs: &[FetchedDoc],
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     for doc in docs {
         db.store_doc_with_module(doc.dep_id, doc.source, &doc.content, &doc.module)?;
     }

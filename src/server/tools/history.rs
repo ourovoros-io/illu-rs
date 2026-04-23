@@ -11,7 +11,7 @@ pub fn handle_history(
     symbol_name: &str,
     max_commits: Option<i64>,
     show_diff: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
         return Ok(super::symbol_not_found(db, symbol_name));
@@ -77,7 +77,7 @@ fn format_diff_history(
     line_start: i64,
     line_end: i64,
     limit: i64,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let raw = run_git_log_with_diff(repo_path, file_path, line_start, line_end, limit)?;
 
     let commits = parse_diff_log_output(&raw);
@@ -115,7 +115,7 @@ fn run_git_log_with_diff(
     line_start: i64,
     line_end: i64,
     limit: i64,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let range_arg = format!("-L{line_start},{line_end}:{file}");
     let limit_arg = format!("-n{limit}");
     crate::git::run_git(repo_path, &["log", &range_arg, &limit_arg, "--no-color"])
@@ -250,7 +250,7 @@ fn run_git_log(
     line_start: i64,
     line_end: i64,
     limit: i64,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let limit_arg = format!("-{limit}");
     let range_arg = format!("-L{line_start},{line_end}:{file_path}");
     crate::git::run_git(

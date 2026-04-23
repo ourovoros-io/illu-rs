@@ -8,7 +8,7 @@ pub fn handle_type_usage(
     type_name: &str,
     path: Option<&str>,
     compact: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let mut sig_matches = db.search_symbols_by_signature(type_name)?;
 
     // Remove the type's own definition, use imports, and substring false positives

@@ -4,10 +4,7 @@ use crate::registry::Registry;
 use std::fmt::Write;
 use std::path::Path;
 
-pub fn handle_repos(
-    registry: &Registry,
-    primary_path: &Path,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_repos(registry: &Registry, primary_path: &Path) -> Result<String, crate::IlluError> {
     if registry.repos.is_empty() {
         return Ok("No repos registered. Start illu in a repo to auto-register it.".into());
     }

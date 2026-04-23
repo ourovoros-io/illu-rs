@@ -111,7 +111,7 @@ pub fn write_md_section(
     file_name: &str,
     heading: &str,
     section: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let md_path = repo_path.join(file_name);
 
     // NotFound is the steady state (we're creating the file); any other

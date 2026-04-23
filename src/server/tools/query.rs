@@ -14,7 +14,7 @@ pub fn handle_query(
     signature: Option<&str>,
     path: Option<&str>,
     limit: Option<i64>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let scope = scope.unwrap_or("symbols");
     let mut output = String::new();
 
@@ -77,7 +77,7 @@ fn format_symbols(
     path: Option<&str>,
     limit: Option<i64>,
     output: &mut String,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let is_wildcard = query.is_empty() || query == "*";
     let mut all_symbols = if let Some(attr) = attribute {
         db.search_symbols_by_attribute(attr)?
@@ -150,7 +150,7 @@ fn format_symbols(
 fn sort_by_ref_count(
     db: &Database,
     symbols: &mut Vec<crate::db::StoredSymbol>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     if symbols.len() <= 1 {
         return Ok(());
     }
@@ -164,11 +164,7 @@ fn sort_by_ref_count(
     Ok(())
 }
 
-fn format_docs(
-    db: &Database,
-    query: &str,
-    output: &mut String,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn format_docs(db: &Database, query: &str, output: &mut String) -> Result<(), crate::IlluError> {
     let docs = db.search_docs(query)?;
     if !docs.is_empty() {
         output.push_str("## Documentation\n\n");
@@ -191,7 +187,7 @@ fn format_files(
     path: Option<&str>,
     limit: Option<i64>,
     output: &mut String,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let all_paths = db.get_all_file_paths()?;
     let query_lower = query.to_lowercase();
     let mut files: Vec<&str> = all_paths
@@ -223,7 +219,7 @@ fn format_doc_comments(
     path: Option<&str>,
     limit: Option<i64>,
     output: &mut String,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let mut symbols = db.search_symbols_by_doc_comment(query)?;
     if let Some(p) = path {
         symbols.retain(|s| s.file_path.starts_with(p));
@@ -267,7 +263,7 @@ fn format_body_search(
     path: Option<&str>,
     limit: Option<i64>,
     output: &mut String,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let is_wildcard = query == "*" || query.is_empty();
     let mut symbols = if is_wildcard {
         db.get_symbols_by_path_prefix(path.unwrap_or(""))?
@@ -356,7 +352,7 @@ fn format_string_search(
     path: Option<&str>,
     limit: Option<i64>,
     output: &mut String,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let mut symbols = db.search_symbols_by_body(query)?;
     if let Some(p) = path {
         symbols.retain(|s| s.file_path.starts_with(p));
@@ -1304,7 +1300,7 @@ mod tests {
                 "fetch",
                 "src/lib.rs",
                 1,
-                "pub fn fetch() -> Result<String, Box<dyn std::error::Error>>",
+                "pub fn fetch() -> Result<String, crate::IlluError>",
             )],
         )
         .unwrap();

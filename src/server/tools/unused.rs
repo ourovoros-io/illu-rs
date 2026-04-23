@@ -8,7 +8,7 @@ pub fn handle_unused(
     kind: Option<&str>,
     include_private: bool,
     untested: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     if untested {
         return handle_untested(db, path, kind, include_private);
     }
@@ -51,7 +51,7 @@ fn handle_untested(
     path: Option<&str>,
     kind: Option<&str>,
     include_private: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let prefix = path.unwrap_or("");
     let mut symbols = db.get_symbols_by_path_prefix_filtered(prefix, include_private)?;
 

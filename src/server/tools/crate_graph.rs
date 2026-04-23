@@ -2,7 +2,7 @@ use crate::db::Database;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub fn handle_crate_graph(db: &Database) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_crate_graph(db: &Database) -> Result<String, crate::IlluError> {
     let crate_count = db.get_crate_count()?;
     if crate_count <= 1 {
         return Ok("Single-crate project — no crate dependency graph.".to_string());

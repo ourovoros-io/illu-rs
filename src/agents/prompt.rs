@@ -4,7 +4,7 @@ use super::{Agent, DetectionLevel};
 
 pub fn prompt_agents<'a>(
     detection: &[(&'a Agent, DetectionLevel, String)],
-) -> Result<Vec<&'a Agent>, Box<dyn std::error::Error>> {
+) -> Result<Vec<&'a Agent>, crate::IlluError> {
     use dialoguer::MultiSelect;
     use dialoguer::theme::ColorfulTheme;
 

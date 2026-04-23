@@ -7,7 +7,7 @@ pub fn handle_blame(
     db: &Database,
     repo_path: &Path,
     symbol_name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
         return Ok(super::symbol_not_found(db, symbol_name));
@@ -83,7 +83,7 @@ fn run_git_blame(
     file_path: &str,
     line_start: i64,
     line_end: i64,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let range = format!("-L{line_start},{line_end}");
     crate::git::run_git(repo_path, &["blame", "--porcelain", &range, file_path])
 }

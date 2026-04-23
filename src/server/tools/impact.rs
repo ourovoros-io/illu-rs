@@ -7,7 +7,7 @@ pub fn handle_impact(
     max_depth: Option<i64>,
     summary: bool,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
         return Ok(super::symbol_not_found(db, symbol_name));

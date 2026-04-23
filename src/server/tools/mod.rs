@@ -46,7 +46,7 @@ use crate::indexer::parser::SymbolKind;
 pub(crate) fn resolve_symbol(
     db: &Database,
     name: &str,
-) -> Result<Vec<StoredSymbol>, Box<dyn std::error::Error>> {
+) -> Result<Vec<StoredSymbol>, crate::IlluError> {
     // 1. Try Type::method qualified lookup
     if let Some((impl_type, method)) = name.rsplit_once("::") {
         let results = db.search_symbols_by_impl(impl_type, method)?;

@@ -6,10 +6,7 @@ use std::process::Command;
 /// On non-zero exit, returns `"git {args[0]} failed: {stderr}"`. Stdout is
 /// decoded via `from_utf8_lossy` because git porcelain output (blame, log -L)
 /// can contain source bytes that are not valid UTF-8.
-pub(crate) fn run_git(
-    repo_path: &Path,
-    args: &[&str],
-) -> Result<String, Box<dyn std::error::Error>> {
+pub(crate) fn run_git(repo_path: &Path, args: &[&str]) -> Result<String, crate::IlluError> {
     let output = Command::new("git")
         .current_dir(repo_path)
         .args(args)

@@ -10,7 +10,7 @@ pub fn handle_cross_callpath(
     from: &str,
     to: &str,
     target_repo: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let other_repos = registry.other_repos_for(primary_path);
     if other_repos.is_empty() {
         return Ok("No other repos registered.".into());

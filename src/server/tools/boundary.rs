@@ -3,7 +3,7 @@ use crate::indexer::parser::SymbolKind;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub fn handle_boundary(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_boundary(db: &Database, path: &str) -> Result<String, crate::IlluError> {
     let symbols = db.get_symbols_by_path_prefix_filtered(path, false)?;
     if symbols.is_empty() {
         return Ok(format!("No public symbols found under '{path}'."));

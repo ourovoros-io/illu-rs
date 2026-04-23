@@ -10,7 +10,7 @@ pub fn handle_similar(
     db: &Database,
     symbol_name: &str,
     path: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
         return Ok(super::symbol_not_found(db, symbol_name));
@@ -123,7 +123,7 @@ fn score_candidates<'a>(
     candidates: &'a [StoredSymbol],
     return_type: Option<&str>,
     target_callees: &HashSet<String>,
-) -> Result<Vec<ScoredSymbol<'a>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<ScoredSymbol<'a>>, crate::IlluError> {
     let target_params = extract_param_section(&target.signature);
     let mut scored: Vec<ScoredSymbol<'_>> = Vec::new();
 
@@ -153,7 +153,7 @@ fn score_one(
     cand_name: &str,
     return_type: Option<&str>,
     target_callees: &HashSet<String>,
-) -> Result<(usize, Vec<String>), Box<dyn std::error::Error>> {
+) -> Result<(usize, Vec<String>), crate::IlluError> {
     let mut score = 0usize;
     let mut reasons = Vec::new();
 

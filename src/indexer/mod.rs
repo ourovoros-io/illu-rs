@@ -112,7 +112,7 @@ pub struct IndexConfig {
     pub repo_path: PathBuf,
 }
 
-pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
+pub fn index_repo(db: &Database, config: &IndexConfig) -> Result<(), crate::IlluError> {
     db.clear_code_index()?;
 
     let has_cargo = config.repo_path.join("Cargo.toml").exists();
@@ -195,10 +195,7 @@ struct DirtyFile {
     crate_id: Option<crate::db::CrateId>,
 }
 
-pub fn refresh_index(
-    db: &Database,
-    config: &IndexConfig,
-) -> Result<usize, Box<dyn std::error::Error>> {
+pub fn refresh_index(db: &Database, config: &IndexConfig) -> Result<usize, crate::IlluError> {
     let file_count = db.file_count()?;
     if file_count == 0 {
         tracing::info!("Empty index — running full index");
@@ -336,7 +333,7 @@ fn rebuild_refs_for_universe_change(
     config: &IndexConfig,
     already_dirty: &[DirtyFile],
     changed_names: &std::collections::HashSet<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     if changed_names.is_empty() {
         return Ok(());
     }
@@ -380,14 +377,11 @@ fn rebuild_refs_for_universe_change(
         }
         db.delete_refs_from_file(relative)?;
         let refs = if is_ts_file(relative) {
-            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)?
         } else if is_py_file(relative) {
-            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)?
         } else {
-            parser::extract_refs(&source, relative, &known_symbols, &crate_map)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            parser::extract_refs(&source, relative, &known_symbols, &crate_map)?
         };
         db.store_symbol_refs_fast(&refs, &symbol_map)?;
         touched += 1;
@@ -405,7 +399,7 @@ fn reindex_dirty_files(
     db: &Database,
     dirty_files: &[DirtyFile],
     repo_path: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let count = dirty_files.len();
     for (i, df) in dirty_files.iter().enumerate() {
         crate::status::set(&format!("refreshing ▸ [{}/{}]", i + 1, count));
@@ -417,18 +411,15 @@ fn reindex_dirty_files(
             db.insert_file(&df.relative_path, &df.hash)?
         };
         let (symbols, trait_impls) = if is_ts_file(&df.relative_path) {
-            let (mut syms, ti) = ts_parser::parse_ts_source(&df.source, &df.relative_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            let (mut syms, ti) = ts_parser::parse_ts_source(&df.source, &df.relative_path)?;
             mark_ts_test_symbols(&mut syms, &df.relative_path);
             (syms, ti)
         } else if is_py_file(&df.relative_path) {
-            let (mut syms, ti) = py_parser::parse_py_source(&df.source, &df.relative_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            let (mut syms, ti) = py_parser::parse_py_source(&df.source, &df.relative_path)?;
             mark_py_test_symbols(&mut syms, &df.relative_path);
             (syms, ti)
         } else {
-            parser::parse_rust_source(&df.source, &df.relative_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            parser::parse_rust_source(&df.source, &df.relative_path)?
         };
         store::store_symbols(db, file_id, &symbols)?;
         store::store_trait_impls(db, file_id, &trait_impls)?;
@@ -442,7 +433,7 @@ fn rebuild_refs_for_files(
     db: &Database,
     dirty_files: &[DirtyFile],
     repo_path: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let known_symbols = db.get_all_symbol_names()?;
     if known_symbols.is_empty() {
         return Ok(());
@@ -459,14 +450,11 @@ fn rebuild_refs_for_files(
     db.begin_transaction()?;
     for df in dirty_files {
         let refs = if is_ts_file(&df.relative_path) {
-            ts_parser::extract_ts_refs(&df.source, &df.relative_path, &known_symbols, repo_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            ts_parser::extract_ts_refs(&df.source, &df.relative_path, &known_symbols, repo_path)?
         } else if is_py_file(&df.relative_path) {
-            py_parser::extract_py_refs(&df.source, &df.relative_path, &known_symbols, repo_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            py_parser::extract_py_refs(&df.source, &df.relative_path, &known_symbols, repo_path)?
         } else {
-            parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            parser::extract_refs(&df.source, &df.relative_path, &known_symbols, &crate_map)?
         };
         db.store_symbol_refs_fast(&refs, &symbol_map)?;
     }
@@ -478,7 +466,7 @@ fn index_single_crate(
     db: &Database,
     config: &IndexConfig,
     cargo_toml: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let direct = dependencies::parse_cargo_toml(cargo_toml)?;
     let locked = parse_cargo_lock(&config.repo_path)?;
     let resolved = dependencies::resolve_dependencies(&direct, &locked);
@@ -504,7 +492,7 @@ fn index_workspace(
     db: &Database,
     config: &IndexConfig,
     ws_info: &workspace::WorkspaceInfo,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let locked = parse_cargo_lock(&config.repo_path)?;
 
     // Collect all external deps across members
@@ -600,7 +588,7 @@ fn index_workspace(
     Ok(())
 }
 
-fn index_typescript(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
+fn index_typescript(db: &Database, config: &IndexConfig) -> Result<(), crate::IlluError> {
     // Parse package.json for name and dependencies
     let pkg_json_path = config.repo_path.join("package.json");
     let (pkg_name, pkg_content) = if pkg_json_path.exists() {
@@ -663,7 +651,7 @@ fn index_ts_files(
     config: &IndexConfig,
     root: &std::path::Path,
     crate_id: crate::db::CrateId,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     // Walk for TS/TSX/JS/JSX files (excluding node_modules, etc.)
     let ts_files: Vec<_> = walkdir::WalkDir::new(root)
         .into_iter()
@@ -694,8 +682,7 @@ fn index_ts_files(
         tracing::debug!("[{}/{}] Parsing TS {relative}", i + 1, total);
         let hash = content_hash(&source);
         let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
-        let (mut symbols, trait_impls) = ts_parser::parse_ts_source(&source, &relative)
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        let (mut symbols, trait_impls) = ts_parser::parse_ts_source(&source, &relative)?;
 
         mark_ts_test_symbols(&mut symbols, &relative);
 
@@ -706,7 +693,7 @@ fn index_ts_files(
     Ok(())
 }
 
-fn index_python(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
+fn index_python(db: &Database, config: &IndexConfig) -> Result<(), crate::IlluError> {
     let pyproject_path = config.repo_path.join("pyproject.toml");
     let pkg_name = if pyproject_path.exists() {
         let content = std::fs::read_to_string(&pyproject_path)?;
@@ -734,7 +721,7 @@ fn index_py_files(
     config: &IndexConfig,
     root: &std::path::Path,
     crate_id: crate::db::CrateId,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let py_files: Vec<_> = walkdir::WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| {
@@ -765,7 +752,7 @@ fn index_py_files(
         let hash = content_hash(&source);
         let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
         let (mut symbols, trait_impls) = py_parser::parse_py_source(&source, &relative)
-            .map_err(|e| -> Box<dyn std::error::Error> { format!("{e}: {relative}").into() })?;
+            .map_err(|e| crate::IlluError::Parse(format!("{e}: {relative}")))?;
 
         mark_py_test_symbols(&mut symbols, &relative);
 
@@ -781,7 +768,7 @@ fn index_crate_sources(
     config: &IndexConfig,
     src_dir: &std::path::Path,
     crate_id: crate::db::CrateId,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     // Collect files first so we can report progress
     let rs_files: Vec<_> = walkdir::WalkDir::new(src_dir)
         .into_iter()
@@ -814,8 +801,7 @@ fn index_crate_sources(
         tracing::debug!("[{}/{}] Parsing {relative}", i + 1, total);
         let hash = content_hash(&source);
         let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
-        let (symbols, trait_impls) = parser::parse_rust_source(&source, &relative)
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        let (symbols, trait_impls) = parser::parse_rust_source(&source, &relative)?;
         store::store_symbols(db, file_id, &symbols)?;
         store::store_trait_impls(db, file_id, &trait_impls)?;
     }
@@ -823,10 +809,7 @@ fn index_crate_sources(
     Ok(())
 }
 
-fn extract_all_symbol_refs(
-    db: &Database,
-    config: &IndexConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn extract_all_symbol_refs(db: &Database, config: &IndexConfig) -> Result<(), crate::IlluError> {
     let known_symbols = db.get_all_symbol_names()?;
     if known_symbols.is_empty() {
         tracing::info!("No symbols found, skipping ref extraction");
@@ -865,14 +848,11 @@ fn extract_all_symbol_refs(
             }
         };
         let refs = if is_ts_file(relative) {
-            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            ts_parser::extract_ts_refs(&source, relative, &known_symbols, &config.repo_path)?
         } else if is_py_file(relative) {
-            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            py_parser::extract_py_refs(&source, relative, &known_symbols, &config.repo_path)?
         } else {
-            parser::extract_refs(&source, relative, &known_symbols, &crate_map)
-                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?
+            parser::extract_refs(&source, relative, &known_symbols, &crate_map)?
         };
         ref_count += db.store_symbol_refs_fast(&refs, &symbol_map)?;
     }
@@ -882,10 +862,7 @@ fn extract_all_symbol_refs(
     Ok(())
 }
 
-fn generate_skill_file(
-    db: &Database,
-    config: &IndexConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_skill_file(db: &Database, config: &IndexConfig) -> Result<(), crate::IlluError> {
     let direct_deps = db.get_direct_dependencies()?;
     let dep_names: Vec<&str> = direct_deps.iter().map(|d| d.name.as_str()).collect();
     let skill_content = generate_claude_skill(&dep_names);
@@ -925,7 +902,7 @@ pub fn is_index_stale(
     stored_version != Some(INDEX_VERSION) || indexed_commit != current_head
 }
 
-fn update_metadata(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn std::error::Error>> {
+fn update_metadata(db: &Database, config: &IndexConfig) -> Result<(), crate::IlluError> {
     let commit_hash =
         get_current_commit_hash(&config.repo_path).unwrap_or_else(|_| "unknown".to_string());
     db.set_metadata(
@@ -938,7 +915,7 @@ fn update_metadata(db: &Database, config: &IndexConfig) -> Result<(), Box<dyn st
 
 fn parse_cargo_lock(
     repo_path: &std::path::Path,
-) -> Result<Vec<dependencies::LockedDep>, Box<dyn std::error::Error>> {
+) -> Result<Vec<dependencies::LockedDep>, crate::IlluError> {
     match std::fs::read_to_string(repo_path.join("Cargo.lock")) {
         Ok(lock) => Ok(dependencies::parse_cargo_lock(&lock)?),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
@@ -1362,9 +1339,7 @@ fn collect_dirty_files(
     dirty
 }
 
-fn get_current_commit_hash(
-    repo_path: &std::path::Path,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn get_current_commit_hash(repo_path: &std::path::Path) -> Result<String, crate::IlluError> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(repo_path)

@@ -13,7 +13,7 @@ use std::path::Path;
 ///
 /// Returns an error if the file exists but is not valid JSON, or if I/O on
 /// the file or its parent directory fails.
-pub fn ensure_tools_allowed(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn ensure_tools_allowed(config_path: &Path) -> Result<(), crate::IlluError> {
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)?;
     }

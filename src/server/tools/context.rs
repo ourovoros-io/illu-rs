@@ -16,7 +16,7 @@ pub fn handle_context(
     sections: Option<&[&str]>,
     callers_path: Option<&str>,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let symbols = resolve_symbols(db, symbol_name, file)?;
     if symbols.is_empty() {
         return Ok(super::symbol_not_found(db, symbol_name));
@@ -64,7 +64,7 @@ fn resolve_symbols(
     db: &Database,
     symbol_name: &str,
     file: Option<&str>,
-) -> Result<Vec<StoredSymbol>, Box<dyn std::error::Error>> {
+) -> Result<Vec<StoredSymbol>, crate::IlluError> {
     let mut symbols = super::resolve_symbol(db, symbol_name)?;
 
     if let Some(fp) = file {
@@ -173,7 +173,7 @@ fn render_trait_info(
     db: &Database,
     output: &mut String,
     sym: &StoredSymbol,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     if sym.kind == SymbolKind::Struct || sym.kind == SymbolKind::Enum {
         let impls = db.get_trait_impls_for_type(&sym.name)?;
         if !impls.is_empty() {
@@ -213,7 +213,7 @@ fn render_callers(
     sym: &StoredSymbol,
     callers_path: Option<&str>,
     exclude_tests: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     const MAX_CALLERS: usize = 30;
 
     let mut callers = db.get_callers(&sym.name, &sym.file_path, exclude_tests, Some("high"))?;
@@ -256,7 +256,7 @@ fn render_callees(
     sym: &StoredSymbol,
     callers_path: Option<&str>,
     exclude_tests: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let mut callees = db.get_callees(&sym.name, &sym.file_path, exclude_tests)?;
     if let Some(p) = callers_path {
         callees.retain(|c| c.file_path.starts_with(p));
@@ -296,7 +296,7 @@ fn render_tested_by(
     db: &Database,
     output: &mut String,
     sym: &StoredSymbol,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     const MAX_INLINE: usize = 10;
 
     let tests = db.get_related_tests(&sym.name, sym.impl_type.as_deref())?;
@@ -340,7 +340,7 @@ fn render_related(
     db: &Database,
     output: &mut String,
     sym: &StoredSymbol,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let siblings = db.get_symbols_by_path_prefix(&sym.file_path)?;
     let is_type_def = matches!(
         sym.kind,
@@ -398,7 +398,7 @@ fn render_related_docs(
     db: &Database,
     output: &mut String,
     symbol_name: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let docs = db.search_docs(symbol_name)?;
     if !docs.is_empty() {
         output.push_str("## Related Documentation\n\n");

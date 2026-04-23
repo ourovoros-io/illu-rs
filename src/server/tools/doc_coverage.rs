@@ -7,7 +7,7 @@ pub fn handle_doc_coverage(
     path: Option<&str>,
     kind: Option<&str>,
     include_private: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let prefix = path.unwrap_or("");
     let mut symbols = db.get_symbols_by_path_prefix_filtered(prefix, include_private)?;
 
