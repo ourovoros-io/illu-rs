@@ -2,9 +2,16 @@
 //!
 //! `IlluError` unifies failure modes across indexer, server, docs, git, and
 //! agent subsystems. It is `Send + Sync + 'static` so errors propagate across
-//! `tokio::spawn_blocking` without losing their `source()` chain — removing
-//! the `format_error_chain` workaround that a non-`Send` `Box<dyn Error>`
-//! previously forced at every blocking boundary.
+//! `tokio::spawn_blocking` without losing their typed `source()` chain — the
+//! original motivation for migrating off the non-`Send` `Box<dyn Error>`.
+//!
+//! Note on `format_error_chain` (`src/server/mod.rs`): that helper still
+//! exists, but it is no longer a `Send` workaround. It flattens an error's
+//! `source()` chain into a single `String` for `McpError::internal_error`,
+//! whose payload is `String`-typed — plain `Display` would drop the causal
+//! chain and MCP clients would only see the outermost message. Callers
+//! pass an `IlluError` reference to it; the helper no longer has to
+//! special-case `Box<dyn Error>`.
 //!
 //! ## Variants
 //!
@@ -16,11 +23,15 @@
 //!
 //! `Other(String)` is the escape hatch used during the migration from the
 //! prior `Box<dyn std::error::Error>` scheme; prefer a domain variant when
-//! adding new error sites.
+//! adding new error sites. Several domain variants are defined but not yet
+//! plumbed through every call site — follow-up work will route them (see
+//! the tracking memo in user memory).
 //!
 //! ## Axioms
 //!
-//! - `#[non_exhaustive]` so downstream can grow without a breaking release.
+//! - `#[non_exhaustive]` so downstream pattern matches stay forward-compatible
+//!   when new variants land. Construction via `#[from]` / `From` impls is
+//!   unaffected because those are inherent to `IlluError` itself.
 //! - `thiserror` handles `std::error::Error` impls and `source()` chaining.
 //! - Every variant is `Send + Sync` — verified by the `_assert_traits`
 //!   compile-time check at the bottom of this module.

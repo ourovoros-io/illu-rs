@@ -113,12 +113,13 @@ mod tests {
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["illu"]["command"], "illu-rs");
-        // `serve(repo)` emits `["--repo", "<abs>", "serve"]`; pin the
-        // first and last tokens so the invocation mode stays observable
-        // even if future flags land in between.
+        // `serve(repo)` emits exactly `["--repo", "<abs>", "serve"]`. Pin the
+        // length too so any future flag addition is a deliberate test update
+        // rather than a silent pass at the serialization layer.
         let args = v["mcpServers"]["illu"]["args"].as_array().unwrap();
+        assert_eq!(args.len(), 3, "expected 3 args, got {args:?}");
         assert_eq!(args[0], "--repo");
-        assert_eq!(args.last().unwrap(), "serve");
+        assert_eq!(args[2], "serve");
     }
 
     #[test]
