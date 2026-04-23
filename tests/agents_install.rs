@@ -1,6 +1,6 @@
 #![expect(clippy::unwrap_used, clippy::expect_used, reason = "integration tests")]
 
-use illu_rs::agents::{SetupFlags, configure_global, self_heal_on_serve};
+use illu_rs::agents::{configure_global, self_heal_on_serve, SetupFlags};
 use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;
@@ -99,6 +99,14 @@ fn install_claude_code_writes_global_settings() {
         settings.get("mcpServers").is_none(),
         "mcpServers leaked into .claude/settings.json: {settings}",
     );
+
+    // CLAUDE.md must carry the rust-design-discipline contract that the
+    // discipline commit (a49534b) embedded into the rendered instruction
+    // file.
+    let claude_md = fs::read_to_string(dir.path().join(".claude/CLAUDE.md")).unwrap();
+    assert!(claude_md.contains("Plan before code"));
+    assert!(claude_md.contains("Read docs before use"));
+    assert!(claude_md.contains("planning data structures documentation comments idiomatic rust"));
 }
 
 #[test]

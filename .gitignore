@@ -4,3 +4,6 @@
 .claude/agents/illu-*.md
 .gemini/agents/illu-*.md
 .DS_Store
+# The Rust Book is a local reference checkout (~91 MB with its own .git).
+# It is not bundled with illu-rs and must never be committed here.
+/assets/rust-book/

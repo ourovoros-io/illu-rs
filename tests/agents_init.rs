@@ -35,6 +35,36 @@ fn init_with_explicit_claude_code_writes_expected_files() {
     let mcp: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(dir.path().join(".mcp.json")).unwrap()).unwrap();
     assert_eq!(mcp["mcpServers"]["illu"]["command"], "illu-rs");
+
+    let claude_md = fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+    assert!(claude_md.contains("Plan before code"));
+    assert!(claude_md.contains("Read docs before use"));
+    assert!(claude_md.contains("planning data structures documentation comments idiomatic rust"));
+}
+
+#[test]
+fn init_with_explicit_gemini_cli_writes_discipline_into_gemini_md() {
+    let dir = tempdir().unwrap();
+    fake_cargo_repo(dir.path());
+
+    let flags = SetupFlags {
+        explicit_agents: vec!["gemini-cli".into()],
+        ..SetupFlags::default()
+    };
+    configure_repo(dir.path(), &flags).unwrap();
+
+    let gemini_md = fs::read_to_string(dir.path().join("GEMINI.md")).unwrap();
+    assert!(gemini_md.contains("Rust Design Discipline"));
+    assert!(gemini_md.contains("Plan before code"));
+    assert!(gemini_md.contains("Read docs before use"));
+    assert!(gemini_md.contains("planning data structures documentation comments idiomatic rust"));
+    // Gemini CLI consumes tools with the `mcp_illu_` prefix (single underscore,
+    // not double). Lock in the prefix so nobody copy-pastes the Claude form.
+    assert!(gemini_md.contains("mcp_illu_axioms"));
+    assert!(
+        !gemini_md.contains("mcp__illu__axioms"),
+        "GEMINI.md must use mcp_illu_ prefix, not mcp__illu__",
+    );
 }
 
 #[test]

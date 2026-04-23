@@ -1051,6 +1051,7 @@ fn write_tool_listing(out: &mut String) {
 /// MCP tools and the project's direct dependencies.
 #[must_use]
 pub(crate) fn generate_claude_skill(direct_dep_names: &[&str]) -> String {
+    use crate::agents::instruction_md::RUST_QUALITY_QUERY;
     use std::fmt::Write;
 
     let mut out = String::new();
@@ -1062,6 +1063,27 @@ pub(crate) fn generate_claude_skill(direct_dep_names: &[&str]) -> String {
          and its dependencies.\n"
     );
     write_tool_listing(&mut out);
+
+    let _ = writeln!(out, "## Rust Design Discipline\n");
+    let _ = writeln!(
+        out,
+        "Before writing, modifying, or recommending Rust code, do these in order:\n\n\
+         1. Plan first — name the data flow, invariants, failure cases, and \
+         the concrete types (structs / enums / newtypes / collections) you will use.\n\
+         2. Choose data structures deliberately; prefer representations that make \
+         invalid states unrepresentable.\n\
+         3. Read the docs before assuming any non-trivial API's behavior. \
+         Standard-library items are not exempt.\n\
+         4. Query `axioms` twice: once with `{RUST_QUALITY_QUERY}` and once \
+         with the concrete task context.\n\
+         5. Write idiomatic Rust per The Rust Book, Rust for Rustaceans, and \
+         illu axioms — ownership/borrowing, enums, iterators, explicit errors.\n\
+         6. Comments must explain invariants, safety, ownership rationale, or \
+         why the design exists — never narrate syntax.\n\n\
+         Full rules: see the `Rust Design Discipline` section of CLAUDE.md or \
+         GEMINI.md in the repo.\n"
+    );
+
     let _ = writeln!(out, "## Direct Dependencies\n");
 
     if direct_dep_names.is_empty() {
@@ -1323,12 +1345,18 @@ pub fn hello() -> &'static str { "hello" }
         assert!(skill.contains("ra_context"));
         assert!(skill.contains("ra_expand_macro"));
         assert!(skill.contains("ra_ssr"));
+        // Rust Design Discipline block — keeps the skill file in sync with
+        // CLAUDE.md so the model sees the same rules from both load paths.
+        assert!(skill.contains("Rust Design Discipline"));
+        assert!(skill.contains("Plan first"));
+        assert!(skill.contains("planning data structures documentation comments idiomatic rust"));
     }
 
     #[test]
     fn test_generate_skill_no_deps() {
         let skill = generate_claude_skill(&[]);
         assert!(skill.contains("No direct dependencies"));
+        assert!(skill.contains("Rust Design Discipline"));
     }
 
     #[test]

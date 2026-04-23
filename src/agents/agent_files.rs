@@ -42,6 +42,7 @@ pub const AGENT_DEFS: &[AgentDef] = &[
             "query",
             "context",
             "batch_context",
+            "axioms",
             "overview",
             "tree",
             "neighborhood",
@@ -70,10 +71,18 @@ pub const AGENT_DEFS: &[AgentDef] = &[
          WRONG: Glob(pattern: \"src/**/*.rs\") to find modules\n\
          RIGHT: tree() or overview(path: \"src/\")\n\n\
          Report findings concisely — do not edit files.\n\n\
+         ## Rust quality gate\n\
+         For any Rust implementation guidance, query `axioms` before answering. \
+         First use `planning data structures documentation comments idiomatic rust`, \
+         then query the task-specific context. Start from a short plan naming \
+         the data structures, ownership/mutability model, invariants, and error \
+         handling. Verify docs before assuming how a type or API behaves, including \
+         standard-library items.\n\n\
          ## Tool guide\n\
          - query: find symbols by name, kind, signature, or attribute\n\
          - context: full definition + source + callers + callees (use sections param to limit output)\n\
          - batch_context: context for multiple symbols at once\n\
+         - axioms: Rust safety, idiom, and design rules to ingest before making recommendations\n\
          - overview: structural map of a directory (functions, structs, traits)\n\
          - tree: file/module tree layout\n\
          - neighborhood: bidirectional call graph around a symbol\n\
@@ -99,6 +108,7 @@ pub const AGENT_DEFS: &[AgentDef] = &[
             "Glob",
             "Grep",
             "query",
+            "axioms",
             "impact",
             "diff_impact",
             "test_impact",
@@ -107,6 +117,7 @@ pub const AGENT_DEFS: &[AgentDef] = &[
             "blame",
             "history",
             "context",
+            "docs",
             "doc_coverage",
         ],
         "You are an illu-powered code review agent.\n\n\
@@ -123,8 +134,15 @@ pub const AGENT_DEFS: &[AgentDef] = &[
          WRONG: Grep(pattern: \"fn refresh\") to find a function\n\
          RIGHT: query(query: \"refresh\")\n\n\
          Report findings concisely — do not edit files.\n\n\
+         ## Rust quality gate\n\
+         Before recommending Rust changes, query `axioms` with \
+         `planning data structures documentation comments idiomatic rust` and then \
+         with the concrete review topic. Make your review from a short design plan: \
+         data structures, ownership/mutability, invariants, and failure handling. \
+         Verify docs before assuming the behavior of any non-trivial type or API.\n\n\
          ## Tool guide\n\
          - query: find symbols by name to start analysis\n\
+         - axioms: Rust safety, idiom, and design rules to ground review feedback\n\
          - context: full definition + callers + callees (use sections param to limit output)\n\
          - impact: see all downstream dependents of a symbol before changes\n\
          - diff_impact: analyze impact of git diff changes (use compact: true for large diffs)\n\
@@ -133,9 +151,10 @@ pub const AGENT_DEFS: &[AgentDef] = &[
          - references: unified view of all references (callers, type usage, trait impls)\n\
          - blame: git blame on a symbol's line range\n\
          - history: git commit history for a symbol (use show_diff: true for code changes)\n\
+         - docs: documentation for external dependencies mentioned in the change\n\
          - doc_coverage: find symbols missing doc comments\n\n\
          ## Workflow\n\
-         diff_impact for changed symbols → impact on key symbols → \
+         axioms before Rust recommendations → diff_impact for changed symbols → impact on key symbols → \
          test_impact to verify coverage → boundary to check API surface. \
          Use exclude_tests: true to focus on production callers.",
     ),
@@ -146,6 +165,7 @@ pub const AGENT_DEFS: &[AgentDef] = &[
             "Read",
             "Glob",
             "Grep",
+            "axioms",
             "rename_plan",
             "unused",
             "orphaned",
@@ -156,6 +176,7 @@ pub const AGENT_DEFS: &[AgentDef] = &[
             "impact",
             "references",
             "boundary",
+            "docs",
         ],
         "You are an illu-powered refactoring agent.\n\n\
          ## MANDATORY: Use illu tools, NOT Read/Grep/Glob\n\n\
@@ -171,7 +192,14 @@ pub const AGENT_DEFS: &[AgentDef] = &[
          WRONG: Grep(pattern: \"fn refresh\") to find a function\n\
          RIGHT: query(query: \"refresh\")\n\n\
          Report findings concisely — do not edit files.\n\n\
+         ## Rust quality gate\n\
+         Before proposing Rust refactors, query `axioms` with \
+         `planning data structures documentation comments idiomatic rust` and then \
+         with the task-specific refactor context. Start from a short plan naming \
+         the target data structures, ownership/mutability changes, invariants, and \
+         error behavior. Verify docs before assuming the semantics of any type or API.\n\n\
          ## Tool guide\n\
+         - axioms: Rust safety, idiom, and design rules to ingest before planning changes\n\
          - rename_plan: preview all locations affected by renaming a symbol\n\
          - unused: find symbols with zero incoming references\n\
          - orphaned: find symbols with no callers AND no test coverage (safe to remove)\n\
@@ -181,9 +209,10 @@ pub const AGENT_DEFS: &[AgentDef] = &[
          - context: full definition + callers + callees (use sections param to limit output)\n\
          - impact: see all downstream dependents before changing a symbol\n\
          - references: unified view of all references to a symbol\n\
-         - boundary: classify symbols as public API vs internal\n\n\
+         - boundary: classify symbols as public API vs internal\n\
+         - docs: documentation for external dependencies involved in the refactor\n\n\
          ## Workflow\n\
-         hotspots to find targets → unused/orphaned for dead code → \
+         axioms before Rust planning → hotspots to find targets → unused/orphaned for dead code → \
          impact before any change → rename_plan to preview renames → \
          boundary to verify API surface. \
          Use exclude_tests: true to focus on production code.",
@@ -283,8 +312,14 @@ mod tests {
 
         // Each has illu tools with correct prefix
         assert!(explore.contains("mcp__illu__query"));
+        assert!(explore.contains("mcp__illu__axioms"));
         assert!(review.contains("mcp__illu__impact"));
+        assert!(review.contains("mcp__illu__axioms"));
         assert!(refactor.contains("mcp__illu__rename_plan"));
+        assert!(refactor.contains("mcp__illu__axioms"));
+        assert!(
+            refactor.contains("planning data structures documentation comments idiomatic rust")
+        );
 
         // tools: key must be a YAML array (no inline value on same line)
         for content in [&explore, &review, &refactor] {
