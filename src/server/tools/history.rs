@@ -116,22 +116,9 @@ fn run_git_log_with_diff(
     line_end: i64,
     limit: i64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let range = format!("{line_start},{line_end}");
-    let output = std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args([
-            "log",
-            &format!("-L{range}:{file}"),
-            &format!("-n{limit}"),
-            "--no-color",
-        ])
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git log -L failed: {stderr}").into());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    let range_arg = format!("-L{line_start},{line_end}:{file}");
+    let limit_arg = format!("-n{limit}");
+    crate::git::run_git(repo_path, &["log", &range_arg, &limit_arg, "--no-color"])
 }
 
 struct DiffLogEntry {
@@ -264,22 +251,18 @@ fn run_git_log(
     line_end: i64,
     limit: i64,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let output = std::process::Command::new("git")
-        .current_dir(repo_path)
-        .args([
+    let limit_arg = format!("-{limit}");
+    let range_arg = format!("-L{line_start},{line_end}:{file_path}");
+    crate::git::run_git(
+        repo_path,
+        &[
             "log",
-            &format!("-{limit}"),
+            &limit_arg,
             "--format=%H%n%an%n%aI%n%s%n%b%x00",
-            &format!("-L{line_start},{line_end}:{file_path}"),
+            &range_arg,
             "--no-patch",
-        ])
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git log failed: {stderr}").into());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        ],
+    )
 }
 
 fn parse_log_output(output: &str) -> Vec<LogEntry> {

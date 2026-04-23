@@ -20,9 +20,13 @@ pub enum SymbolKind {
     Class,
 }
 
-impl std::fmt::Display for SymbolKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
+impl SymbolKind {
+    /// Canonical lowercase string form. Matches `Display` and is the
+    /// input accepted by `FromStr`. Returned as `&'static str` so callers
+    /// can compare without allocating.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
             Self::Function => "function",
             Self::Struct => "struct",
             Self::Enum => "enum",
@@ -38,8 +42,13 @@ impl std::fmt::Display for SymbolKind {
             Self::Union => "union",
             Self::Interface => "interface",
             Self::Class => "class",
-        };
-        f.write_str(s)
+        }
+    }
+}
+
+impl std::fmt::Display for SymbolKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
