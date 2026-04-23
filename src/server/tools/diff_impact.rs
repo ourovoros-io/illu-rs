@@ -63,10 +63,7 @@ fn parse_hunk_header(line: &str, file_path: &str) -> Option<DiffHunk> {
 }
 
 /// Run `git diff` with `--unified=0` and return the raw output.
-pub fn run_git_diff(
-    repo_path: &Path,
-    git_ref: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn run_git_diff(repo_path: &Path, git_ref: Option<&str>) -> Result<String, crate::IlluError> {
     // `Cow` keeps the zero-alloc path when the caller already supplies a
     // `..`-range; only the bare-ref case (`HEAD~1`) needs an owned string.
     let ref_arg: Option<std::borrow::Cow<'_, str>> = git_ref.map(|r| {
@@ -92,7 +89,7 @@ pub fn handle_diff_impact(
     git_ref: Option<&str>,
     changes_only: bool,
     compact: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let diff_output = run_git_diff(repo_path, git_ref)?;
     if diff_output.trim().is_empty() {
         return Ok("No changes detected. Check the git ref format:\n\
@@ -165,7 +162,7 @@ fn render_diff_output(
     changes_only: bool,
     compact: bool,
     stale_warning: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let mut output = String::new();
     output.push_str(stale_warning);
 
@@ -215,7 +212,7 @@ fn render_downstream_impact(
     db: &Database,
     output: &mut String,
     changed_symbols: &[(String, crate::db::StoredSymbol)],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     let mut impact_sections = Vec::new();
     for (_file, sym) in changed_symbols {
         let dependents = db.impact_dependents(&sym.name, sym.impl_type.as_deref())?;

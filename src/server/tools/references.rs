@@ -6,7 +6,7 @@ pub fn handle_references(
     symbol_name: &str,
     path: Option<&str>,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
         return Ok(super::symbol_not_found(db, symbol_name));
@@ -51,7 +51,7 @@ fn render_call_sites(
     path: Option<&str>,
     exclude_tests: bool,
     output: &mut String,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     let _ = writeln!(output, "\n### Call Sites\n");
     let mut seen: std::collections::HashSet<(String, String, i64)> =
         std::collections::HashSet::new();
@@ -95,7 +95,7 @@ fn render_type_usage(
     base_name: &str,
     path: Option<&str>,
     output: &mut String,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     let _ = writeln!(output, "\n### Type Usage in Signatures\n");
     let sig_results = db.search_symbols_by_signature(base_name)?;
     let mut entries = Vec::new();
@@ -132,7 +132,7 @@ fn render_trait_impls(
     db: &Database,
     base_name: &str,
     output: &mut String,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     let _ = writeln!(output, "\n### Trait Implementations\n");
     let type_impls = db.get_trait_impls_for_type(base_name)?;
     let trait_impls = db.get_trait_impls_for_trait(base_name)?;

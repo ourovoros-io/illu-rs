@@ -3,10 +3,7 @@ use crate::indexer::parser::SymbolKind;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub fn handle_rename_plan(
-    db: &Database,
-    symbol_name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_rename_plan(db: &Database, symbol_name: &str) -> Result<String, crate::IlluError> {
     let symbols = super::resolve_symbol(db, symbol_name)?;
     if symbols.is_empty() {
         return Ok(super::symbol_not_found(db, symbol_name));
@@ -47,7 +44,7 @@ fn write_call_sites(
     output: &mut String,
     db: &Database,
     symbols: &[StoredSymbol],
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     // Collect all callers across definitions, deduplicating by (name, file)
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     let mut by_file: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -78,7 +75,7 @@ fn write_signature_usage(
     output: &mut String,
     db: &Database,
     base_name: &str,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     let sig_matches = db.search_symbols_by_signature(base_name)?;
     let filtered: Vec<_> = sig_matches
         .iter()
@@ -118,7 +115,7 @@ fn write_field_usage(
     output: &mut String,
     db: &Database,
     base_name: &str,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     let mut matches = db.search_symbols_by_details(base_name, "")?;
     matches.retain(|s| s.name != base_name);
     if !matches.is_empty() {
@@ -139,7 +136,7 @@ fn write_trait_impls(
     output: &mut String,
     db: &Database,
     base_name: &str,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     let as_type = db.get_trait_impls_for_type(base_name)?;
     let as_trait = db.get_trait_impls_for_trait(base_name)?;
     let all: Vec<_> = as_type.iter().chain(as_trait.iter()).collect();
@@ -161,7 +158,7 @@ fn write_doc_mentions(
     output: &mut String,
     db: &Database,
     base_name: &str,
-) -> Result<usize, Box<dyn std::error::Error>> {
+) -> Result<usize, crate::IlluError> {
     let mentions = db.search_symbols_by_doc_comment(base_name)?;
     let filtered: Vec<_> = mentions.iter().filter(|s| s.name != base_name).collect();
     if !filtered.is_empty() {

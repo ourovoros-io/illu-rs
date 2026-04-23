@@ -1,11 +1,14 @@
 pub mod agents;
 pub mod db;
+pub mod error;
 pub mod git;
 pub mod indexer;
 pub mod ra;
 pub mod registry;
 pub mod server;
 pub mod status;
+
+pub use error::{IlluError, Result};
 
 /// Truncate a string at a char boundary, appending "..." if truncated.
 #[must_use]

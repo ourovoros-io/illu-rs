@@ -5,7 +5,7 @@ pub fn handle_implements(
     db: &Database,
     trait_name: Option<&str>,
     type_name: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let mut output = String::new();
 
     match (trait_name, type_name) {

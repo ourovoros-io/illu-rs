@@ -95,10 +95,40 @@ pub struct IlluCommand {
 }
 
 impl IlluCommand {
-    /// Bare-name invocation, suitable for per-repo configs that may be shared
-    /// via version control and consumed from PATH on teammates' machines.
+    /// Per-repo invocation with an explicit `--repo` flag.
+    ///
+    /// MCP clients do not guarantee a specific current working directory when
+    /// they spawn servers. Without `--repo`, illu-rs falls back to CWD-based
+    /// detection in `main.rs`, which fails whenever the client launches from
+    /// outside the project (e.g. `/` or `$HOME`). The resulting process opens
+    /// an empty in-memory index and exposes only cross-repo tools — a
+    /// confusing failure mode that looks like a broken index.
+    ///
+    /// Embedding the canonical absolute path pins the server to this repo
+    /// regardless of spawn CWD. `.mcp.json` is per-checkout anyway (the
+    /// PATH-relative `illu-rs` binary name already assumes per-machine
+    /// configuration), so baking in an absolute path is consistent with the
+    /// file's existing portability model.
+    ///
+    /// Falls back to bare `["serve"]` when canonicalization or UTF-8
+    /// conversion fails, matching pre-patch behavior instead of panicking,
+    /// and logs a `warn!` so the regression is observable.
     #[must_use]
-    pub fn serve() -> Self {
+    pub fn serve(repo_path: &Path) -> Self {
+        if let Ok(canonical) = dunce::canonicalize(repo_path)
+            && let Ok(s) = canonical.into_os_string().into_string()
+        {
+            return Self {
+                command: "illu-rs".to_string(),
+                args: vec!["--repo".to_string(), s, "serve".to_string()],
+            };
+        }
+        tracing::warn!(
+            path = %repo_path.display(),
+            "could not canonicalize repo path for MCP config; falling back \
+             to bare `serve` — MCP clients that spawn with CWD outside the \
+             repo will land in cross-repo-only mode"
+        );
         Self {
             command: "illu-rs".to_string(),
             args: vec!["serve".to_string()],
@@ -370,12 +400,12 @@ fn detect_scoped(
 pub fn configure_repo(
     repo_path: &Path,
     flags: &SetupFlags,
-) -> Result<Vec<AgentWriteReport>, Box<dyn std::error::Error>> {
+) -> Result<Vec<AgentWriteReport>, crate::IlluError> {
     let ctx = detect::RealContext::new()?;
     let scoped: Vec<&Agent> = AGENTS.iter().filter(|a| a.repo_config.is_some()).collect();
     let detection = detect_scoped(&ctx, |a| a.repo_config.is_some());
     let chosen = resolve_selection(&scoped, &detection, flags)?;
-    let cmd = IlluCommand::serve();
+    let cmd = IlluCommand::serve(repo_path);
     let mut reports = Vec::with_capacity(chosen.len());
     for agent in chosen {
         let report = write_repo_for(agent, repo_path, &cmd, flags.dry_run)?;
@@ -388,7 +418,7 @@ pub fn configure_repo(
 pub fn configure_global(
     home: &Path,
     flags: &SetupFlags,
-) -> Result<Vec<AgentWriteReport>, Box<dyn std::error::Error>> {
+) -> Result<Vec<AgentWriteReport>, crate::IlluError> {
     let ctx = detect::RealContext::with_home(home.to_path_buf());
     let scoped: Vec<&Agent> = AGENTS
         .iter()
@@ -407,19 +437,18 @@ pub fn configure_global(
 
 /// Detect via env vars only and write configs for any `Active` agent.
 /// Called by `illu serve` on startup.
-pub fn self_heal_on_serve(
-    repo_path: Option<&Path>,
-    home: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn self_heal_on_serve(repo_path: Option<&Path>, home: &Path) -> Result<(), crate::IlluError> {
     let ctx = detect::RealContext::new()?;
-    let repo_cmd = IlluCommand::serve();
+    // Repo command is only well-defined when we have a repo path; global
+    // command stands on its own because `serve_resolved` never takes a repo.
+    let repo_cmd = repo_path.map(IlluCommand::serve);
     let global_cmd = IlluCommand::serve_resolved();
     for agent in AGENTS {
         if detect::detect_level(agent, &ctx) != DetectionLevel::Active {
             continue;
         }
-        if let (Some(repo), Some(_)) = (repo_path, &agent.repo_config)
-            && let Err(e) = write_repo_for(agent, repo, &repo_cmd, false)
+        if let (Some(repo), Some(_), Some(cmd)) = (repo_path, &agent.repo_config, repo_cmd.as_ref())
+            && let Err(e) = write_repo_for(agent, repo, cmd, false)
         {
             tracing::warn!(agent = agent.id, "self-heal repo write failed: {e}");
         }
@@ -436,7 +465,7 @@ fn resolve_selection<'a>(
     scoped_agents: &[&'a Agent],
     detection: &[(&'a Agent, DetectionLevel, String)],
     flags: &SetupFlags,
-) -> Result<Vec<&'a Agent>, Box<dyn std::error::Error>> {
+) -> Result<Vec<&'a Agent>, crate::IlluError> {
     let pairs: Vec<(&Agent, DetectionLevel)> = detection.iter().map(|(a, l, _)| (*a, *l)).collect();
     match selection::select_from_flags(scoped_agents, flags, &pairs, prompt::has_tty()) {
         Ok(picked) => Ok(picked),
@@ -507,7 +536,7 @@ impl ResolvedTargets {
         agent: &Agent,
         cmd: &IlluCommand,
         dry_run: bool,
-    ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<PathBuf>, crate::IlluError> {
         let mut written = Vec::new();
         let (mcp_path, fmt) = self.mcp;
         if !dry_run {
@@ -552,7 +581,7 @@ fn write_repo_for(
     repo_path: &Path,
     cmd: &IlluCommand,
     dry_run: bool,
-) -> Result<AgentWriteReport, Box<dyn std::error::Error>> {
+) -> Result<AgentWriteReport, crate::IlluError> {
     let Some(targets) = ResolvedTargets::from_repo(agent, repo_path) else {
         return Ok(AgentWriteReport {
             agent_id: agent.id,
@@ -574,7 +603,7 @@ fn write_global_for(
     os: detect::TargetOs,
     cmd: &IlluCommand,
     dry_run: bool,
-) -> Result<AgentWriteReport, Box<dyn std::error::Error>> {
+) -> Result<AgentWriteReport, crate::IlluError> {
     let Some(targets) = ResolvedTargets::from_global(agent, home, os) else {
         return Ok(AgentWriteReport {
             agent_id: agent.id,
@@ -623,7 +652,7 @@ fn resolved_binary_path() -> String {
 /// from settings.json so it does not linger and confuse operators reading
 /// their config. Preserves any sibling permissions/hooks/env keys and any
 /// other `mcpServers.*` entries a third-party tool might have added.
-fn migrate_claude_code_legacy_mcp(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn migrate_claude_code_legacy_mcp(home: &Path) -> Result<(), crate::IlluError> {
     let legacy = home.join(".claude/settings.json");
     let content = match std::fs::read_to_string(&legacy) {
         Ok(s) => s,
@@ -661,8 +690,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serve_is_bare_name() {
-        let cmd = IlluCommand::serve();
+    fn serve_embeds_absolute_repo_path() {
+        // `serve()` must pin an existing repo path into `--repo` so the MCP
+        // server does not depend on the spawn CWD. See the doc comment on
+        // `IlluCommand::serve` for the failure mode this guards against.
+        let dir = tempfile::tempdir().unwrap();
+        let cmd = IlluCommand::serve(dir.path());
+        assert_eq!(cmd.command, "illu-rs");
+        assert_eq!(cmd.args.len(), 3, "expected [--repo, <path>, serve]");
+        assert_eq!(cmd.args[0], "--repo");
+        assert!(
+            Path::new(&cmd.args[1]).is_absolute(),
+            "canonicalized repo path must be absolute, got {:?}",
+            cmd.args[1]
+        );
+        assert_eq!(cmd.args[2], "serve");
+    }
+
+    #[test]
+    fn serve_falls_back_when_repo_does_not_exist() {
+        // `dunce::canonicalize` fails on non-existent paths. The fallback
+        // preserves pre-patch behavior instead of panicking so callers that
+        // hand in a stale path still get a working (if CWD-dependent)
+        // invocation.
+        let cmd = IlluCommand::serve(Path::new("/this/path/does/not/exist/illu-test"));
         assert_eq!(cmd.command, "illu-rs");
         assert_eq!(cmd.args, vec!["serve".to_string()]);
     }

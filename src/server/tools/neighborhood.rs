@@ -9,7 +9,7 @@ pub fn handle_neighborhood(
     direction: Option<&str>,
     format: Option<&str>,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let max_depth = usize::try_from(depth.unwrap_or(2).max(1)).unwrap_or(2);
     let dir = direction.unwrap_or("both");
     let fmt = format.unwrap_or("list");
@@ -80,7 +80,7 @@ fn bfs_collect(
     max_depth: usize,
     direction: Direction,
     exclude_tests: bool,
-) -> Result<BTreeMap<String, BfsEntry>, Box<dyn std::error::Error>> {
+) -> Result<BTreeMap<String, BfsEntry>, crate::IlluError> {
     let mut visited: BTreeMap<String, BfsEntry> = BTreeMap::new();
     // Track (name, file) for file-qualified BFS to avoid name collisions
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
@@ -203,7 +203,7 @@ impl<'a> TreeRenderer<'a> {
         prefix: &str,
         is_last: bool,
         is_root: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), crate::IlluError> {
         if is_root {
             let _ = writeln!(self.output, "**{name}**");
         } else {
@@ -252,7 +252,7 @@ fn render_tree_output(
     dir: &str,
     max_depth: usize,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let label = if dir == "down" {
         "Call Tree"
     } else {

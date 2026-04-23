@@ -5,7 +5,7 @@ pub fn handle_docs(
     db: &Database,
     dep_name: &str,
     topic: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     if let Some(topic) = topic {
         return handle_docs_with_topic(db, dep_name, topic);
     }
@@ -66,7 +66,7 @@ fn handle_docs_with_topic(
     db: &Database,
     dep_name: &str,
     topic: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     // Try exact module match first
     if let Some(doc) = db.get_doc_by_module(dep_name, topic)? {
         let mut output = String::new();

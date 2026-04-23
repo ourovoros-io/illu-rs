@@ -124,9 +124,7 @@ pub fn resolve_dependencies(direct: &[DirectDep], locked: &[LockedDep]) -> Vec<R
 }
 
 /// Parse Python dependencies from `pyproject.toml` or `requirements.txt`.
-pub fn parse_python_deps(
-    repo_path: &std::path::Path,
-) -> Result<Vec<DirectDep>, Box<dyn std::error::Error>> {
+pub fn parse_python_deps(repo_path: &std::path::Path) -> Result<Vec<DirectDep>, crate::IlluError> {
     // Try pyproject.toml first
     let pyproject = repo_path.join("pyproject.toml");
     if pyproject.exists() {

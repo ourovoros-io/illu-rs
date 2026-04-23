@@ -292,9 +292,8 @@ impl IlluServer {
     /// the reactor. The DB lock is acquired inside the blocking task, so no
     /// guard is held while the reactor schedules the work.
     ///
-    /// `Box<dyn Error>` is not `Send`, so the error is flattened to a
-    /// caused-by chain via `format_error_chain` inside the blocking
-    /// closure — preserving information that plain `Display` drops.
+    /// `IlluError` is `Send + Sync`, so the `source()` chain crosses the
+    /// blocking-pool boundary intact — no stringification required.
     ///
     /// **Trade-off:** every call pays a tokio blocking-pool dispatch
     /// even when the handler only does in-memory SQL. Only migrate a
@@ -306,19 +305,19 @@ impl IlluServer {
     /// with huge graphs, etc.), pick `run_blocking`.
     async fn run_blocking<F>(&self, f: F) -> Result<String, McpError>
     where
-        F: FnOnce(&Database, &IndexConfig) -> Result<String, Box<dyn std::error::Error>>
-            + Send
-            + 'static,
+        F: FnOnce(&Database, &IndexConfig) -> Result<String, crate::IlluError> + Send + 'static,
     {
         let db = std::sync::Arc::clone(&self.db);
         let config = std::sync::Arc::clone(&self.config);
-        tokio::task::spawn_blocking(move || -> Result<String, String> {
-            let guard = db.lock().map_err(|e| e.to_string())?;
-            f(&guard, &config).map_err(|e| format_error_chain(&*e))
+        tokio::task::spawn_blocking(move || -> Result<String, crate::IlluError> {
+            let guard = db
+                .lock()
+                .map_err(|e| crate::IlluError::Other(e.to_string()))?;
+            f(&guard, &config)
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?
-        .map_err(|e| McpError::internal_error(e, None))
+        .map_err(|e| McpError::internal_error(format_error_chain(&e), None))
     }
 
     /// Refresh the index if the cooldown has elapsed. Heavy work
@@ -342,18 +341,20 @@ impl IlluServer {
 
         let db = std::sync::Arc::clone(&self.db);
         let config = std::sync::Arc::clone(&self.config);
-        let pending_docs = tokio::task::spawn_blocking(move || -> Result<Vec<_>, String> {
-            let db = db.lock().map_err(|e| e.to_string())?;
-            let refreshed =
-                crate::indexer::refresh_index(&db, &config).map_err(|e| format_error_chain(&*e))?;
-            if refreshed > 0 {
-                tracing::info!(count = refreshed, "Refreshed changed files");
-            }
-            crate::indexer::docs::pending_docs(&db).map_err(|e| format_error_chain(&*e))
-        })
-        .await
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?
-        .map_err(|e| McpError::internal_error(e, None))?;
+        let pending_docs =
+            tokio::task::spawn_blocking(move || -> Result<Vec<_>, crate::IlluError> {
+                let db = db
+                    .lock()
+                    .map_err(|e| crate::IlluError::Other(e.to_string()))?;
+                let refreshed = crate::indexer::refresh_index(&db, &config)?;
+                if refreshed > 0 {
+                    tracing::info!(count = refreshed, "Refreshed changed files");
+                }
+                crate::indexer::docs::pending_docs(&db)
+            })
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            .map_err(|e| McpError::internal_error(format_error_chain(&e), None))?;
 
         if let Ok(mut last) = self.last_refresh.lock() {
             *last = std::time::Instant::now();
@@ -842,9 +843,9 @@ fn ra_error(e: impl std::fmt::Display) -> CallToolResult {
 }
 
 /// Flatten an error and its `source()` chain to a multi-line string.
-/// Used when an error must cross a thread boundary (via `spawn_blocking`)
-/// where `Box<dyn Error>` is not `Send` — plain `Display` would drop the
-/// causal chain, so we walk it ourselves before serialising.
+/// `McpError::internal_error` accepts a `String`; plain `Display` would
+/// drop the causal chain, so we walk it ourselves so downstream clients
+/// see the full `IlluError -> rusqlite::Error -> io::Error` trail.
 fn format_error_chain(e: &(dyn std::error::Error + 'static)) -> String {
     let mut out = e.to_string();
     let mut source = e.source();
@@ -1628,7 +1629,7 @@ impl IlluServer {
         let _guard = crate::status::StatusGuard::new("cross_deps");
         let registry = std::sync::Arc::clone(&self.registry);
         let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
-            tools::cross_deps::handle_cross_deps(&registry).map_err(|e| format_error_chain(&*e))
+            tools::cross_deps::handle_cross_deps(&registry).map_err(|e| format_error_chain(&e))
         })
         .await
         .map_err(|e| McpError::internal_error(e.to_string(), None))?

@@ -10,7 +10,7 @@ pub fn handle_callpath(
     all_paths: bool,
     max_paths: Option<i64>,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let max_depth = usize::try_from(max_depth.unwrap_or(10).max(1)).unwrap_or(10);
 
     let from_syms = super::resolve_symbol(db, from)?;
@@ -48,7 +48,7 @@ fn handle_shortest_path(
     to_name: &str,
     max_depth: usize,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let mut visited: HashSet<BfsNode> = HashSet::new();
     let mut parent: HashMap<BfsNode, BfsNode> = HashMap::new();
     let mut queue: VecDeque<(BfsNode, usize)> = VecDeque::new();
@@ -143,7 +143,7 @@ fn find_all_paths(
     current_path: &mut Vec<BfsNode>,
     visited: &mut HashSet<BfsNode>,
     results: &mut Vec<Vec<String>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), crate::IlluError> {
     if results.len() >= cfg.max_paths || current_path.len() > cfg.max_depth {
         return Ok(());
     }
@@ -185,7 +185,7 @@ fn handle_all_paths(
     from_syms: &[crate::db::StoredSymbol],
     to_name: &str,
     cfg: &DfsConfig,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let mut results: Vec<Vec<String>> = Vec::new();
 
     for sym in from_syms {

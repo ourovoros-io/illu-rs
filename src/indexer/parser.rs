@@ -3510,7 +3510,7 @@ pub fn handle_query(
     db: &Database,
     query: &str,
     scope: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     todo!()
 }
 ";

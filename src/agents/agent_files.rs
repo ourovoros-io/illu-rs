@@ -226,10 +226,7 @@ pub const BUILTIN_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
 /// Each file gets YAML frontmatter (`name`, `description`, `tools`) followed by
 /// the agent's body text. Tool names are rewritten with `tool_prefix` unless
 /// they are built-in (see [`BUILTIN_TOOLS`]).
-pub fn generate_agent_files(
-    agents_dir: &Path,
-    tool_prefix: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn generate_agent_files(agents_dir: &Path, tool_prefix: &str) -> Result<(), crate::IlluError> {
     use std::fmt::Write;
 
     std::fs::create_dir_all(agents_dir)?;

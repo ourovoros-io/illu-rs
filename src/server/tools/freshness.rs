@@ -3,10 +3,7 @@ use std::fmt::Write;
 use std::path::Path;
 use std::process::Command;
 
-pub fn handle_freshness(
-    db: &Database,
-    repo_path: &Path,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_freshness(db: &Database, repo_path: &Path) -> Result<String, crate::IlluError> {
     let mut output = String::new();
     let _ = writeln!(output, "## Index Freshness\n");
 

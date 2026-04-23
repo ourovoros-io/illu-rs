@@ -7,7 +7,7 @@ pub fn handle_stats(
     db: &Database,
     path: Option<&str>,
     exclude_tests: bool,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let prefix = path.unwrap_or("");
     let mut output = String::new();
     let _ = writeln!(

@@ -22,7 +22,7 @@ pub fn is_tauri_project(repo_path: &std::path::Path) -> bool {
 ///
 /// Creates `SymbolRef` entries linking TS callers to Rust
 /// command handlers via the existing `symbol_refs` table.
-pub fn resolve_tauri_bridge(db: &Database) -> Result<usize, Box<dyn std::error::Error>> {
+pub fn resolve_tauri_bridge(db: &Database) -> Result<usize, crate::IlluError> {
     // Find all TS files and scan for invoke() calls
     let ts_files = db.get_all_file_paths()?;
     let invoke_calls = find_invoke_calls(db, &ts_files)?;
@@ -89,10 +89,7 @@ struct TauriCommand {
 }
 
 /// Find `invoke('command_name')` calls in TS source bodies.
-fn find_invoke_calls(
-    db: &Database,
-    files: &[String],
-) -> Result<Vec<InvokeCall>, Box<dyn std::error::Error>> {
+fn find_invoke_calls(db: &Database, files: &[String]) -> Result<Vec<InvokeCall>, crate::IlluError> {
     let mut calls = Vec::new();
 
     for file_path in files {
@@ -127,7 +124,7 @@ fn find_invoke_calls(
 
 /// Find Rust functions annotated with
 /// `#[tauri::command]`.
-fn find_tauri_commands(db: &Database) -> Result<Vec<TauriCommand>, Box<dyn std::error::Error>> {
+fn find_tauri_commands(db: &Database) -> Result<Vec<TauriCommand>, crate::IlluError> {
     let symbols = db.search_symbols_by_attribute("tauri::command")?;
     let commands: Vec<TauriCommand> = symbols
         .into_iter()

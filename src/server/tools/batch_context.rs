@@ -6,7 +6,7 @@ pub fn handle_batch_context(
     symbols: &[String],
     full_body: bool,
     sections: Option<&[&str]>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     if symbols.is_empty() {
         return Ok("No symbols provided.".to_string());
     }

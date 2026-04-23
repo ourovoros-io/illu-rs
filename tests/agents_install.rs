@@ -230,7 +230,7 @@ impl Drop for EnvVarGuard {
 }
 
 #[test]
-fn self_heal_uses_resolved_command_for_global_but_bare_for_repo() {
+fn self_heal_emits_repo_arg_for_repo_and_resolved_command_for_global() {
     let _guard = ENV_LOCK.lock().unwrap();
     let home = tempdir().unwrap();
     let repo = tempdir().unwrap();
@@ -244,12 +244,34 @@ fn self_heal_uses_resolved_command_for_global_but_bare_for_repo() {
 
     self_heal_on_serve(Some(repo.path()), home.path()).unwrap();
 
-    // Per-repo write: bare name, portable across teammates.
+    // Per-repo write: `command` stays bare (consumed from PATH), but `args`
+    // pin the canonical repo path so the server does not depend on the MCP
+    // client's spawn CWD. Without this, launching Claude Code from outside
+    // the repo lands in empty-index / cross-repo-only mode.
     let repo_cfg: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(repo.path().join(".mcp.json")).unwrap()).unwrap();
     assert_eq!(
         repo_cfg["mcpServers"]["illu"]["command"], "illu-rs",
-        "per-repo command must stay bare for portability",
+        "per-repo command stays bare; the repo path lives in args instead",
+    );
+    let repo_args = repo_cfg["mcpServers"]["illu"]["args"]
+        .as_array()
+        .expect("args array");
+    assert_eq!(
+        repo_args[0], "--repo",
+        "per-repo args must start with --repo"
+    );
+    let embedded = repo_args[1]
+        .as_str()
+        .expect("repo path arg must be a string");
+    assert!(
+        std::path::Path::new(embedded).is_absolute(),
+        "embedded repo path must be absolute, got: {embedded}",
+    );
+    assert_eq!(
+        repo_args.last().and_then(|v| v.as_str()),
+        Some("serve"),
+        "per-repo args must terminate with `serve`",
     );
 
     // Global write: resolved absolute path, survives GUI launch without PATH.

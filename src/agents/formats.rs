@@ -3,11 +3,7 @@
 use super::{IlluCommand, McpFormat};
 use std::path::Path;
 
-pub fn write(
-    path: &Path,
-    format: McpFormat,
-    cmd: &IlluCommand,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn write(path: &Path, format: McpFormat, cmd: &IlluCommand) -> Result<(), crate::IlluError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -22,10 +18,7 @@ pub fn write(
     }
 }
 
-fn write_mcp_servers_json(
-    path: &Path,
-    cmd: &IlluCommand,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn write_mcp_servers_json(path: &Path, cmd: &IlluCommand) -> Result<(), crate::IlluError> {
     let mut config: serde_json::Value = match std::fs::read_to_string(path) {
         Ok(s) => serde_json::from_str(&s)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -44,7 +37,7 @@ fn write_mcp_servers_json(
     Ok(())
 }
 
-fn write_vscode_json(path: &Path, cmd: &IlluCommand) -> Result<(), Box<dyn std::error::Error>> {
+fn write_vscode_json(path: &Path, cmd: &IlluCommand) -> Result<(), crate::IlluError> {
     let mut config: serde_json::Value = match std::fs::read_to_string(path) {
         Ok(s) => serde_json::from_str(&s)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -64,7 +57,7 @@ fn write_vscode_json(path: &Path, cmd: &IlluCommand) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-fn write_codex_toml(path: &Path, cmd: &IlluCommand) -> Result<(), Box<dyn std::error::Error>> {
+fn write_codex_toml(path: &Path, cmd: &IlluCommand) -> Result<(), crate::IlluError> {
     use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value};
 
     let existing = match std::fs::read_to_string(path) {
@@ -108,19 +101,24 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn cmd() -> IlluCommand {
-        IlluCommand::serve()
+    fn cmd(repo: &Path) -> IlluCommand {
+        IlluCommand::serve(repo)
     }
 
     #[test]
     fn writes_mcp_servers_json_fresh() {
         let dir = tempdir().unwrap();
         let path = dir.path().join(".mcp.json");
-        write(&path, McpFormat::ClaudeCodeJson, &cmd()).unwrap();
+        write(&path, McpFormat::ClaudeCodeJson, &cmd(dir.path())).unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["illu"]["command"], "illu-rs");
-        assert_eq!(v["mcpServers"]["illu"]["args"][0], "serve");
+        // `serve(repo)` emits `["--repo", "<abs>", "serve"]`; pin the
+        // first and last tokens so the invocation mode stays observable
+        // even if future flags land in between.
+        let args = v["mcpServers"]["illu"]["args"].as_array().unwrap();
+        assert_eq!(args[0], "--repo");
+        assert_eq!(args.last().unwrap(), "serve");
     }
 
     #[test]
@@ -128,7 +126,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join(".mcp.json");
         std::fs::write(&path, r#"{"mcpServers":{"other":{"command":"x"}}}"#).unwrap();
-        write(&path, McpFormat::ClaudeCodeJson, &cmd()).unwrap();
+        write(&path, McpFormat::ClaudeCodeJson, &cmd(dir.path())).unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["other"]["command"], "x");
@@ -139,7 +137,7 @@ mod tests {
     fn vscode_uses_servers_key_and_type_stdio() {
         let dir = tempdir().unwrap();
         let path = dir.path().join(".vscode/mcp.json");
-        write(&path, McpFormat::VsCodeJson, &cmd()).unwrap();
+        write(&path, McpFormat::VsCodeJson, &cmd(dir.path())).unwrap();
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["servers"]["illu"]["type"], "stdio");
@@ -150,11 +148,12 @@ mod tests {
     fn codex_toml_writes_mcp_servers_illu_section() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        write(&path, McpFormat::CodexToml, &cmd()).unwrap();
+        write(&path, McpFormat::CodexToml, &cmd(dir.path())).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("[mcp_servers.illu]"));
         assert!(content.contains("command = \"illu-rs\""));
-        assert!(content.contains("args = [\"serve\"]"));
+        assert!(content.contains("\"--repo\""));
+        assert!(content.contains("\"serve\""));
     }
 
     #[test]
@@ -166,7 +165,7 @@ mod tests {
             "[user]\nname = \"alice\"\n\n[mcp_servers.existing]\ncommand = \"x\"\n",
         )
         .unwrap();
-        write(&path, McpFormat::CodexToml, &cmd()).unwrap();
+        write(&path, McpFormat::CodexToml, &cmd(dir.path())).unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("[user]"));
         assert!(content.contains("name = \"alice\""));
@@ -178,9 +177,9 @@ mod tests {
     fn idempotent_rewrites() {
         let dir = tempdir().unwrap();
         let path = dir.path().join(".mcp.json");
-        write(&path, McpFormat::ClaudeCodeJson, &cmd()).unwrap();
+        write(&path, McpFormat::ClaudeCodeJson, &cmd(dir.path())).unwrap();
         let first = std::fs::read_to_string(&path).unwrap();
-        write(&path, McpFormat::ClaudeCodeJson, &cmd()).unwrap();
+        write(&path, McpFormat::ClaudeCodeJson, &cmd(dir.path())).unwrap();
         let second = std::fs::read_to_string(&path).unwrap();
         assert_eq!(first, second);
     }
@@ -190,7 +189,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join(".mcp.json");
         std::fs::write(&path, "{this is not json").unwrap();
-        let err = write(&path, McpFormat::ClaudeCodeJson, &cmd()).unwrap_err();
+        let err = write(&path, McpFormat::ClaudeCodeJson, &cmd(dir.path())).unwrap_err();
         // Assert the user's existing file is NOT clobbered.
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "{this is not json");

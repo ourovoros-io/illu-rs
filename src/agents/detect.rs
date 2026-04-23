@@ -74,7 +74,7 @@ fn current_os() -> TargetOs {
 }
 
 impl RealContext {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<Self, crate::IlluError> {
         let home = std::env::var("HOME")
             .ok()
             .or_else(|| std::env::var("USERPROFILE").ok())

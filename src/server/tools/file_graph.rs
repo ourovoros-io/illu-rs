@@ -2,7 +2,7 @@ use crate::db::Database;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub fn handle_file_graph(db: &Database, path: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_file_graph(db: &Database, path: &str) -> Result<String, crate::IlluError> {
     let edges = db.get_file_dependencies(path, Some("high"))?;
 
     let mut output = String::new();

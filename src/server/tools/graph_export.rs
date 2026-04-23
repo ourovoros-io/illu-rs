@@ -9,7 +9,7 @@ pub fn handle_graph_export(
     depth: Option<i64>,
     direction: Option<&str>,
     format: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     let fmt = format.unwrap_or("dot");
 
     if let Some(sym) = symbol_name {
@@ -39,7 +39,7 @@ fn collect_symbol_edges(
     symbol: &StoredSymbol,
     max_depth: i64,
     direction: &str,
-) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(String, String)>, crate::IlluError> {
     let include_down = direction == "both" || direction == "down";
     let include_up = direction == "both" || direction == "up";
 
@@ -87,7 +87,7 @@ fn collect_symbol_edges(
 fn collect_file_edges(
     db: &Database,
     path_prefix: &str,
-) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+) -> Result<Vec<(String, String)>, crate::IlluError> {
     let deps = db.get_file_dependencies(path_prefix, Some("high"))?;
     let edges: Vec<(String, String)> = deps
         .into_iter()

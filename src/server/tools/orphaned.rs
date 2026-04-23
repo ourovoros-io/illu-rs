@@ -6,7 +6,7 @@ pub fn handle_orphaned(
     db: &Database,
     path: Option<&str>,
     kind: Option<&str>,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, crate::IlluError> {
     // Get unused symbols (no incoming references)
     let mut unused = db.get_unreferenced_symbols(path, false)?;
 

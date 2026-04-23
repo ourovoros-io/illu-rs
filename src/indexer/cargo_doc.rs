@@ -19,7 +19,7 @@ pub type CrateDocs = (String, Vec<ModuleDoc>);
 pub fn generate_cargo_docs(
     repo_path: &Path,
     dep_names: &[String],
-) -> Result<Vec<CrateDocs>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CrateDocs>, crate::IlluError> {
     if dep_names.is_empty() {
         return Ok(Vec::new());
     }
@@ -99,10 +99,7 @@ pub fn generate_cargo_docs(
 
 /// Parse a rustdoc JSON file and produce a formatted API summary.
 #[cfg(test)]
-fn parse_rustdoc_json(
-    json_str: &str,
-    crate_name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+fn parse_rustdoc_json(json_str: &str, crate_name: &str) -> Result<String, crate::IlluError> {
     let doc: serde_json::Value = serde_json::from_str(json_str)?;
     let version = doc
         .get("crate_version")
@@ -370,7 +367,7 @@ fn as_submodule<'a>(
 pub fn parse_rustdoc_json_modules(
     json_str: &str,
     crate_name: &str,
-) -> Result<Vec<ModuleDoc>, Box<dyn std::error::Error>> {
+) -> Result<Vec<ModuleDoc>, crate::IlluError> {
     let doc: serde_json::Value = serde_json::from_str(json_str)?;
     let version = doc
         .get("crate_version")

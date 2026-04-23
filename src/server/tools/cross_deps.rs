@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::path::PathBuf;
 
-pub fn handle_cross_deps(registry: &Registry) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_cross_deps(registry: &Registry) -> Result<String, crate::IlluError> {
     // Defensively collapse worktree duplicates by `git_common_dir`.
     // `Registry::register` already dedupes on insert, but legacy
     // `registry.toml` files written before that fix may carry multiple

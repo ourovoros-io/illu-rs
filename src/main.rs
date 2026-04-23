@@ -118,7 +118,7 @@ enum RepoCommand {
     },
 }
 
-fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error>> {
+fn open_or_index(repo_path: &Path) -> Result<Database, illu_rs::IlluError> {
     illu_rs::status::init(repo_path);
     let db_path = repo_path.join(".illu/index.db");
     if db_path.exists() {
@@ -136,7 +136,7 @@ fn open_or_index(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error
     ensure_indexed(repo_path)
 }
 
-fn ensure_indexed(repo_path: &Path) -> Result<Database, Box<dyn std::error::Error>> {
+fn ensure_indexed(repo_path: &Path) -> Result<Database, illu_rs::IlluError> {
     let db_dir = repo_path.join(".illu");
     std::fs::create_dir_all(&db_dir)?;
     let db_path = db_dir.join("index.db");
@@ -160,7 +160,7 @@ fn print_result(result: &str) {
 fn init_repo(
     repo_path: &Path,
     flags: &illu_rs::agents::SetupFlags,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), illu_rs::IlluError> {
     let repo_path = repo_path.canonicalize()?;
 
     let kinds = detect_project_kind(&repo_path);
@@ -219,7 +219,7 @@ fn init_repo(
     Ok(())
 }
 
-fn append_gitignore_entry(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+fn append_gitignore_entry(path: &Path) -> Result<bool, illu_rs::IlluError> {
     let content = std::fs::read_to_string(path).unwrap_or_default();
     let entries = [
         ".illu/",
@@ -247,7 +247,7 @@ fn append_gitignore_entry(path: &Path) -> Result<bool, Box<dyn std::error::Error
     Ok(added)
 }
 
-fn ensure_gitignore(repo_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+fn ensure_gitignore(repo_path: &Path) -> Result<bool, illu_rs::IlluError> {
     append_gitignore_entry(&repo_path.join(".gitignore"))
 }
 
@@ -283,7 +283,7 @@ fn register_repo(repo_path: &Path) {
 const STATUSLINE_SH: &str = include_str!("../assets/statusline.sh");
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
-fn install_statusline(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn install_statusline(home: &Path) -> Result<(), illu_rs::IlluError> {
     // Write the script to ~/.illu/statusline.sh
     let illu_dir = home.join(".illu");
     std::fs::create_dir_all(&illu_dir)?;
@@ -328,7 +328,7 @@ fn install_statusline(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn ensure_global_gitignore(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn ensure_global_gitignore(home: &Path) -> Result<(), illu_rs::IlluError> {
     let gitignore_path = home.join(".config/git/ignore");
     if let Some(parent) = gitignore_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -338,7 +338,7 @@ fn ensure_global_gitignore(home: &Path) -> Result<(), Box<dyn std::error::Error>
 }
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
-fn install_global(flags: &illu_rs::agents::SetupFlags) -> Result<(), Box<dyn std::error::Error>> {
+fn install_global(flags: &illu_rs::agents::SetupFlags) -> Result<(), illu_rs::IlluError> {
     let home = std::env::var("HOME").map_err(|_| "HOME environment variable not set")?;
     let home = PathBuf::from(home);
 
@@ -496,7 +496,7 @@ fn now_unix_secs() -> u64 {
 }
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
-fn handle_repo_command(command: RepoCommand) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_repo_command(command: RepoCommand) -> Result<(), illu_rs::IlluError> {
     let registry_path = illu_rs::registry::Registry::default_path()
         .map_err(|e| format!("Could not get default registry path: {e}"))?;
     let mut registry = illu_rs::registry::Registry::load(&registry_path)
@@ -610,7 +610,7 @@ fn handle_repo_command(command: RepoCommand) -> Result<(), Box<dyn std::error::E
 
 #[tokio::main]
 #[expect(clippy::too_many_lines, reason = "CLI dispatch with many subcommands")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), illu_rs::IlluError> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())

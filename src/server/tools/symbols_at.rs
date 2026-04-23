@@ -1,11 +1,7 @@
 use crate::db::Database;
 use std::fmt::Write;
 
-pub fn handle_symbols_at(
-    db: &Database,
-    file: &str,
-    line: i64,
-) -> Result<String, Box<dyn std::error::Error>> {
+pub fn handle_symbols_at(db: &Database, file: &str, line: i64) -> Result<String, crate::IlluError> {
     let symbols = db.get_symbols_at_lines(file, &[(line, line)])?;
 
     let mut output = String::new();
