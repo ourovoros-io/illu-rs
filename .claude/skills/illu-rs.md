@@ -94,6 +94,7 @@ Full rules: see the `Rust Design Discipline` section of CLAUDE.md or GEMINI.md i
 - axum
 - clap
 - dialoguer
+- dunce
 - futures
 - lsp-types
 - opener

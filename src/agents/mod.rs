@@ -95,10 +95,31 @@ pub struct IlluCommand {
 }
 
 impl IlluCommand {
+    /// Bare-name invocation, suitable for per-repo configs that may be shared
+    /// via version control and consumed from PATH on teammates' machines.
     #[must_use]
     pub fn serve() -> Self {
         Self {
             command: "illu-rs".to_string(),
+            args: vec!["serve".to_string()],
+        }
+    }
+
+    /// Absolute-path invocation, suitable for user-global configs.
+    /// GUI-launched agents (Claude Desktop, Codex Desktop, Cursor, VS Code,
+    /// Antigravity) do not inherit shell PATH on macOS, so a bare name yields
+    /// `spawn illu-rs ENOENT`.
+    ///
+    /// Resolution prefers, in order: canonicalized `current_exe` via
+    /// `dunce::canonicalize` (avoids Windows `\\?\` extended-length paths that
+    /// some MCP clients mishandle); raw `current_exe` if canonicalization
+    /// fails; the bare name `"illu-rs"` as a last resort (preserves pre-patch
+    /// behavior rather than panicking). A fallback to the bare name is
+    /// logged at warn level so operators can diagnose the `ENOENT` case.
+    #[must_use]
+    pub fn serve_resolved() -> Self {
+        Self {
+            command: resolved_binary_path(),
             args: vec!["serve".to_string()],
         }
     }
@@ -141,7 +162,11 @@ pub static AGENTS: &[Agent] = &[
             allow_list_path: Some(".claude/settings.local.json"),
         }),
         global_config: Some(GlobalConfig {
-            mcp_config_path: GlobalPath::Home(".claude/settings.json"),
+            // User-scope MCP servers live in `~/.claude.json` per Claude Code
+            // docs. `~/.claude/settings.json` holds permissions/hooks/env and
+            // does NOT accept `mcpServers` — writing MCP there is silently
+            // ignored by Claude Code's loader.
+            mcp_config_path: GlobalPath::Home(".claude.json"),
             mcp_format: McpFormat::ClaudeCodeJson,
             instruction_file: Some(GlobalPath::Home(".claude/CLAUDE.md")),
             agents_dir: Some(GlobalPath::Home(".claude/agents")),
@@ -286,12 +311,16 @@ pub static AGENTS: &[Agent] = &[
         detection: Detection {
             env_vars: &[],
             binaries: &["antigravity"],
-            config_dirs: &[".antigravity"],
+            // Antigravity stores its MCP config under `.gemini/antigravity/`
+            // rather than a dedicated top-level dir. Using the nested subdir
+            // as the detection signal avoids falsely firing on `.gemini`,
+            // which is shared with the Gemini CLI.
+            config_dirs: &[".gemini/antigravity"],
             app_bundles: &["/Applications/Antigravity.app"],
         },
         repo_config: None,
         global_config: Some(GlobalConfig {
-            mcp_config_path: GlobalPath::Home(".antigravity/mcp.json"),
+            mcp_config_path: GlobalPath::Home(".gemini/antigravity/mcp_config.json"),
             mcp_format: McpFormat::AntigravityJson,
             instruction_file: None,
             agents_dir: None,
@@ -367,7 +396,7 @@ pub fn configure_global(
         .collect();
     let detection = detect_scoped(&ctx, |a| a.global_config.is_some());
     let chosen = resolve_selection(&scoped, &detection, flags)?;
-    let cmd = IlluCommand::serve();
+    let cmd = IlluCommand::serve_resolved();
     let mut reports = Vec::with_capacity(chosen.len());
     for agent in chosen {
         let report = write_global_for(agent, home, ctx.os(), &cmd, flags.dry_run)?;
@@ -383,18 +412,19 @@ pub fn self_heal_on_serve(
     home: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ctx = detect::RealContext::new()?;
-    let cmd = IlluCommand::serve();
+    let repo_cmd = IlluCommand::serve();
+    let global_cmd = IlluCommand::serve_resolved();
     for agent in AGENTS {
         if detect::detect_level(agent, &ctx) != DetectionLevel::Active {
             continue;
         }
         if let (Some(repo), Some(_)) = (repo_path, &agent.repo_config)
-            && let Err(e) = write_repo_for(agent, repo, &cmd, false)
+            && let Err(e) = write_repo_for(agent, repo, &repo_cmd, false)
         {
             tracing::warn!(agent = agent.id, "self-heal repo write failed: {e}");
         }
         if agent.global_config.is_some()
-            && let Err(e) = write_global_for(agent, home, ctx.os(), &cmd, false)
+            && let Err(e) = write_global_for(agent, home, ctx.os(), &global_cmd, false)
         {
             tracing::warn!(agent = agent.id, "self-heal global write failed: {e}");
         }
@@ -553,9 +583,167 @@ fn write_global_for(
         });
     };
     let written = targets.apply(agent, cmd, dry_run)?;
+    if agent.id == "claude-code"
+        && !dry_run
+        && let Err(e) = migrate_claude_code_legacy_mcp(home)
+    {
+        tracing::warn!("claude-code legacy mcp migration failed: {e}");
+    }
     Ok(AgentWriteReport {
         agent_id: agent.id,
         written_paths: written,
         skipped: false,
     })
+}
+
+/// Resolve the running binary's path for use as the `command` field in
+/// user-global MCP configs. See `IlluCommand::serve_resolved` for the
+/// resolution order and rationale.
+fn resolved_binary_path() -> String {
+    let raw = std::env::current_exe().ok();
+    let canonical = raw.as_deref().and_then(|p| dunce::canonicalize(p).ok());
+    if let Some(path) = canonical.or(raw)
+        && let Ok(s) = path.into_os_string().into_string()
+    {
+        return s;
+    }
+    tracing::warn!(
+        "could not resolve absolute path to illu-rs binary; \
+         falling back to bare name `illu-rs` — GUI agents without shell PATH \
+         will fail with spawn ENOENT"
+    );
+    "illu-rs".to_string()
+}
+
+/// Earlier illu-rs versions wrote the `mcpServers.illu` entry to
+/// `~/.claude/settings.json`, where Claude Code's MCP loader silently
+/// ignores it. User-scope MCP servers actually live in `~/.claude.json`.
+///
+/// When the orchestrator writes the correct file, scrub the legacy entry
+/// from settings.json so it does not linger and confuse operators reading
+/// their config. Preserves any sibling permissions/hooks/env keys and any
+/// other `mcpServers.*` entries a third-party tool might have added.
+fn migrate_claude_code_legacy_mcp(home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let legacy = home.join(".claude/settings.json");
+    let content = match std::fs::read_to_string(&legacy) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut v: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        // Don't clobber a hand-edited malformed settings.json.
+        Err(_) => return Ok(()),
+    };
+    let Some(root) = v.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(servers) = root
+        .get_mut("mcpServers")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    if servers.remove("illu").is_none() {
+        return Ok(());
+    }
+    if servers.is_empty() {
+        root.remove("mcpServers");
+    }
+    let serialized = serde_json::to_string_pretty(&v)?;
+    std::fs::write(&legacy, serialized)?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serve_is_bare_name() {
+        let cmd = IlluCommand::serve();
+        assert_eq!(cmd.command, "illu-rs");
+        assert_eq!(cmd.args, vec!["serve".to_string()]);
+    }
+
+    #[test]
+    fn serve_resolved_returns_non_empty_command() {
+        let cmd = IlluCommand::serve_resolved();
+        assert!(!cmd.command.is_empty());
+        assert_eq!(cmd.args, vec!["serve".to_string()]);
+        // Under `cargo test`, `current_exe()` returns the test binary path,
+        // which should resolve to an absolute path (not the bare fallback).
+        // If resolution ever falls back to `illu-rs`, the warn!() log fires
+        // and this test becomes a red flag on the host environment.
+        assert_ne!(
+            cmd.command, "illu-rs",
+            "current_exe() should have resolved under cargo test",
+        );
+    }
+
+    #[test]
+    fn migrate_claude_code_legacy_mcp_is_noop_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        migrate_claude_code_legacy_mcp(dir.path()).unwrap();
+        assert!(!dir.path().join(".claude/settings.json").exists());
+    }
+
+    #[test]
+    fn migrate_claude_code_legacy_mcp_strips_only_illu_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let initial = serde_json::json!({
+            "permissions": { "deny": ["X"] },
+            "mcpServers": {
+                "illu": { "command": "illu-rs", "args": ["serve"] },
+                "other": { "command": "keep-me" },
+            },
+        });
+        std::fs::write(&settings, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
+        migrate_claude_code_legacy_mcp(dir.path()).unwrap();
+
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert!(after["mcpServers"].get("illu").is_none());
+        assert_eq!(after["mcpServers"]["other"]["command"], "keep-me");
+        assert_eq!(after["permissions"]["deny"][0], "X");
+    }
+
+    #[test]
+    fn migrate_claude_code_legacy_mcp_removes_empty_mcpservers() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let initial = serde_json::json!({
+            "permissions": {},
+            "mcpServers": { "illu": { "command": "illu-rs" } },
+        });
+        std::fs::write(&settings, serde_json::to_string_pretty(&initial).unwrap()).unwrap();
+
+        migrate_claude_code_legacy_mcp(dir.path()).unwrap();
+
+        let after: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert!(
+            after.get("mcpServers").is_none(),
+            "empty mcpServers object should be stripped, got: {after}",
+        );
+    }
+
+    #[test]
+    fn migrate_claude_code_legacy_mcp_leaves_malformed_json_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        let junk = "{this is not json";
+        std::fs::write(&settings, junk).unwrap();
+
+        migrate_claude_code_legacy_mcp(dir.path()).unwrap();
+
+        let after = std::fs::read_to_string(&settings).unwrap();
+        assert_eq!(after, junk, "malformed settings.json must not be clobbered");
+    }
 }
