@@ -94,8 +94,11 @@ pub enum IlluError {
     #[error(transparent)]
     Ra(#[from] crate::ra::error::RaError),
 
-    /// Indexing pipeline failure (tree-sitter parse failed, workspace layout
-    /// rejected, file skipped for a non-IO reason).
+    /// Indexing pipeline failure: tree-sitter parse failed, workspace layout
+    /// rejected, file skipped for a non-IO reason, or any other failure at
+    /// the indexer-orchestrator boundary that wraps a parser-internal
+    /// `Result<_, String>`. All parser-layer errors (Rust / TS / Python)
+    /// flow through this variant — there is no separate `Parse` category.
     #[error("indexing: {0}")]
     Indexing(String),
 
@@ -103,9 +106,13 @@ pub enum IlluError {
     #[error("workspace: {0}")]
     Workspace(String),
 
-    /// Generic parser-layer error that lacks a typed source.
-    #[error("parser: {0}")]
-    Parse(String),
+    /// User-supplied argument to a CLI command or MCP tool is invalid
+    /// (e.g. unknown enum value, out-of-range number, missing required
+    /// field). Distinct from `Indexing` (parser errors on source code) and
+    /// from `Agent` (agent detection / config-file issues). Use when the
+    /// caller passed something the tool refuses to process.
+    #[error("invalid argument: {0}")]
+    Invalid(String),
 
     /// Agent detection, selection, or file-writing error.
     #[error("agent: {0}")]
@@ -125,7 +132,8 @@ pub enum IlluError {
 
     /// Untyped escape hatch. Prefer a domain variant when adding new sites;
     /// this is retained for the one-shot string-error sites that would
-    /// otherwise need a variant per call.
+    /// otherwise need a variant per call. See the module-level doc for the
+    /// legitimate sources; new call sites should use a domain variant.
     #[error("{0}")]
     Other(String),
 }

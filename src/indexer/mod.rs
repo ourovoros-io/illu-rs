@@ -761,7 +761,7 @@ fn index_py_files(
         let hash = content_hash(&source);
         let file_id = db.insert_file_with_crate(&relative, &hash, crate_id)?;
         let (mut symbols, trait_impls) = py_parser::parse_py_source(&source, &relative)
-            .map_err(|e| crate::IlluError::Parse(format!("{e}: {relative}")))?;
+            .map_err(|e| crate::IlluError::Indexing(format!("{e}: {relative}")))?;
 
         mark_py_test_symbols(&mut symbols, &relative);
 

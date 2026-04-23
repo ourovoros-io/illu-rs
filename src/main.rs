@@ -495,11 +495,11 @@ fn now_unix_secs() -> u64 {
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
 fn handle_repo_command(command: RepoCommand) -> Result<(), illu_rs::IlluError> {
-    let registry_path = illu_rs::registry::Registry::default_path().map_err(|e| {
-        illu_rs::IlluError::Other(format!("could not get default registry path: {e}"))
-    })?;
-    let mut registry = illu_rs::registry::Registry::load(&registry_path)
-        .map_err(|e| illu_rs::IlluError::Other(format!("could not load registry: {e}")))?;
+    // `Registry::default_path` now returns `IlluError::Agent` on HOME-missing
+    // and `Registry::load` routes IO / TOML errors through their typed
+    // variants via `#[from]`; both propagate through `?` without wrapping.
+    let registry_path = illu_rs::registry::Registry::default_path()?;
+    let mut registry = illu_rs::registry::Registry::load(&registry_path)?;
 
     match command {
         RepoCommand::List => {
