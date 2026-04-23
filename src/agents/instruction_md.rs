@@ -5,8 +5,13 @@ use std::path::Path;
 
 pub const ILLU_SECTION_START: &str = "<!-- illu:start -->";
 pub const ILLU_SECTION_END: &str = "<!-- illu:end -->";
+// Each keyword in this list maps to one design-category axiom in
+// `assets/axioms.json` (Design Workflow, Data Modeling, Documentation,
+// Comments, Idiomatic Rust, Verification Sources, Performance Discipline).
+// When adding a new design axiom, extend this list so the baseline quality
+// query continues to surface every category in the top-N response.
 pub const RUST_QUALITY_QUERY: &str =
-    "planning data structures documentation comments idiomatic rust";
+    "planning data structures documentation comments idiomatic rust verification performance";
 
 #[must_use]
 pub fn illu_agent_section(tool_prefix: &str) -> String {
