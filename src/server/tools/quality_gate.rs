@@ -474,23 +474,53 @@ fn is_unsafe_code_line(line: &str) -> bool {
         || trimmed.starts_with("///")
         || trimmed.starts_with("//!")
         || trimmed.starts_with("#[")
-        || trimmed.starts_with('"')
     {
         return false;
     }
 
-    trimmed.starts_with("unsafe ")
-        || trimmed.starts_with("unsafe{")
-        || trimmed.starts_with("unsafe fn ")
-        || trimmed.starts_with("unsafe extern ")
-        || trimmed.starts_with("unsafe impl ")
-        || trimmed.starts_with("unsafe trait ")
-        || trimmed.starts_with("pub unsafe ")
-        || trimmed.starts_with("pub(crate) unsafe ")
-        || trimmed.starts_with("const unsafe ")
-        || trimmed.starts_with("impl unsafe ")
-        || trimmed.contains(" unsafe {")
-        || trimmed.contains("= unsafe {")
+    contains_rust_keyword(&code_without_line_comments_and_strings(trimmed), "unsafe")
+}
+
+fn code_without_line_comments_and_strings(line: &str) -> String {
+    let mut code = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '/' && chars.peek().is_some_and(|next| *next == '/') {
+            break;
+        }
+        if ch == '"' {
+            code.push(' ');
+            let mut escaped = false;
+            for string_ch in chars.by_ref() {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if string_ch == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if string_ch == '"' {
+                    break;
+                }
+            }
+            continue;
+        }
+        code.push(ch);
+    }
+    code
+}
+
+fn contains_rust_keyword(code: &str, keyword: &str) -> bool {
+    code.match_indices(keyword).any(|(index, _)| {
+        let before = code[..index].chars().next_back();
+        let after = code[index + keyword.len()..].chars().next();
+        !before.is_some_and(is_rust_ident_continue) && !after.is_some_and(is_rust_ident_continue)
+    })
+}
+
+fn is_rust_ident_continue(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn is_public_api_line(line: &str) -> bool {
@@ -724,6 +754,39 @@ diff --git a/src/lib.rs b/src/lib.rs
         let impact = vec!["impact helper".to_string()];
         let tests = vec!["cargo test".to_string()];
         let report = analyze_quality_gate(diff, &evidence("add docs", &docs, &impact, &tests));
+        assert!(!report.contains("without safety notes"));
+    }
+
+    #[test]
+    fn unsafe_block_in_expression_requires_safety_notes() {
+        let diff = "\
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@
++pub fn helper(ptr: *const u8) -> u8 { read_byte(unsafe { ptr.read() }) }
+";
+        let docs = vec!["std_docs pointer read".to_string()];
+        let impact = vec!["impact helper".to_string()];
+        let tests = vec!["cargo test".to_string()];
+        let report = analyze_quality_gate(diff, &evidence("add helper", &docs, &impact, &tests));
+        assert!(report.contains("Quality Gate: BLOCKED"));
+        assert!(report.contains("without safety notes"));
+    }
+
+    #[test]
+    fn unsafe_word_in_string_literal_does_not_require_safety_notes() {
+        let diff = "\
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@
++pub fn helper() -> &'static str { \"unsafe is a word here\" }
+";
+        let docs = vec!["std_docs str".to_string()];
+        let impact = vec!["impact helper".to_string()];
+        let tests = vec!["cargo test".to_string()];
+        let report = analyze_quality_gate(diff, &evidence("add helper", &docs, &impact, &tests));
         assert!(!report.contains("without safety notes"));
     }
 

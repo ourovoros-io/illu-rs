@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 const EXCERPT_LIMIT: usize = 4_000;
 const TOPIC_CONTEXT: usize = 2_000;
 
-static STD_DOC_INDEX: OnceLock<std::result::Result<StdDocIndex, String>> = OnceLock::new();
+static STD_DOC_INDEX: OnceLock<StdDocIndex> = OnceLock::new();
 
 #[derive(Debug)]
 struct StdDocIndex {
@@ -30,15 +30,29 @@ struct ResolvedStdDoc<'a> {
 }
 
 pub fn handle_std_docs(item: &str, topic: Option<&str>) -> Result<String, crate::IlluError> {
-    let index = STD_DOC_INDEX.get_or_init(|| build_std_doc_index().map_err(|e| e.to_string()));
-    match index {
-        Ok(index) => render_std_docs(index, item, topic),
-        Err(message) => Ok(format!(
-            "## Standard Library Docs Unavailable\n\n\
-             {message}\n\n\
-             Install local docs with `rustup component add rust-docs`, then try `std_docs` again."
-        )),
+    if let Some(index) = STD_DOC_INDEX.get() {
+        return render_std_docs(index, item, topic);
     }
+
+    let index = match build_std_doc_index() {
+        Ok(index) => {
+            // A lost race is harmless: all callers build the same deterministic
+            // index from the same local rustdoc root, and the winner is reused.
+            let _ = STD_DOC_INDEX.set(index);
+            STD_DOC_INDEX.get().ok_or_else(|| {
+                crate::IlluError::Other("std docs cache not initialised after set".to_string())
+            })?
+        }
+        Err(error) => {
+            return Ok(format!(
+                "## Standard Library Docs Unavailable\n\n\
+             {error}\n\n\
+             Install local docs with `rustup component add rust-docs`, then try `std_docs` again."
+            ));
+        }
+    };
+
+    render_std_docs(index, item, topic)
 }
 
 fn build_std_doc_index() -> Result<StdDocIndex, crate::IlluError> {
