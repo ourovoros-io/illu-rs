@@ -1,3 +1,5 @@
+#![allow(dead_code, missing_docs, unreachable_pub)]
+
 #[cfg(feature = "dashboard")]
 pub(crate) mod dashboard;
 pub mod tools;

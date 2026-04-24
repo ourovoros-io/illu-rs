@@ -1,6 +1,6 @@
 #![expect(clippy::unwrap_used, clippy::expect_used, reason = "integration tests")]
 
-use illu_rs::agents::{SetupFlags, configure_global, self_heal_on_serve};
+use illu_rs::api::agents::{SetupFlags, configure_global, self_heal_on_serve};
 use std::fs;
 use std::sync::Mutex;
 use tempfile::tempdir;

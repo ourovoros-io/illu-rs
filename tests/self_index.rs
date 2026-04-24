@@ -7,10 +7,10 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-use illu_rs::db::Database;
-use illu_rs::indexer::parser::{SymbolKind, Visibility};
-use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::parser::{SymbolKind, Visibility};
+use illu_rs::api::indexer::{IndexConfig, index_repo};
+use illu_rs::api::server::tools::{
     context, doc_coverage, graph_export, impact, orphaned, overview, query, references, test_impact,
 };
 

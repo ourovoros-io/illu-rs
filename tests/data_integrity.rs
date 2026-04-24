@@ -11,9 +11,9 @@
 //! - Incremental re-indexing must not leave stale data (wrong = outdated info)
 //! - Cross-tool consistency (all tools see the same file paths and line ranges)
 
-use illu_rs::db::Database;
-use illu_rs::indexer::{IndexConfig, index_repo, refresh_index};
-use illu_rs::server::tools::{context, docs, impact, overview, query, tree};
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::{IndexConfig, index_repo, refresh_index};
+use illu_rs::api::server::tools::{context, docs, impact, overview, query, tree};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1288,7 +1288,7 @@ fn cargo_doc_parse_includes_all_item_kinds() {
     });
 
     let modules =
-        illu_rs::indexer::cargo_doc::parse_rustdoc_json_modules(&json.to_string(), "mylib")
+        illu_rs::api::indexer::cargo_doc::parse_rustdoc_json_modules(&json.to_string(), "mylib")
             .unwrap();
     let summary = modules.iter().find(|m| m.module.is_empty()).unwrap();
     let result = &summary.content;

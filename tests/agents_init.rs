@@ -1,6 +1,6 @@
 #![expect(clippy::unwrap_used, reason = "integration tests")]
 
-use illu_rs::agents::{AGENTS, SetupFlags, configure_repo, known_agent_ids};
+use illu_rs::api::agents::{AGENTS, SetupFlags, configure_repo, known_agent_ids};
 use std::fs;
 use tempfile::tempdir;
 

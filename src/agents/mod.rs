@@ -1,5 +1,7 @@
 //! Per-agent config registry and orchestration.
 
+#![allow(dead_code, missing_docs, unreachable_pub)]
+
 pub(crate) mod agent_files;
 pub(crate) mod allow_list;
 pub(crate) mod detect;

@@ -3,8 +3,8 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use illu_rs::db::Database;
-use illu_rs::indexer::{IndexConfig, index_repo};
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::{IndexConfig, index_repo};
 
 fn bench_self_index(c: &mut Criterion) {
     c.bench_function("index_illu_rs", |b| {
@@ -28,7 +28,7 @@ fn bench_query_after_index(c: &mut Criterion) {
     let mut group = c.benchmark_group("tools");
     group.bench_function("query_symbol", |b| {
         b.iter(|| {
-            illu_rs::server::tools::query::handle_query(
+            illu_rs::api::server::tools::query::handle_query(
                 &db,
                 black_box("Database"),
                 Some("symbols"),
@@ -43,7 +43,7 @@ fn bench_query_after_index(c: &mut Criterion) {
     });
     group.bench_function("context", |b| {
         b.iter(|| {
-            illu_rs::server::tools::context::handle_context(
+            illu_rs::api::server::tools::context::handle_context(
                 &db,
                 black_box("Database"),
                 false,
@@ -57,7 +57,7 @@ fn bench_query_after_index(c: &mut Criterion) {
     });
     group.bench_function("impact", |b| {
         b.iter(|| {
-            illu_rs::server::tools::impact::handle_impact(
+            illu_rs::api::server::tools::impact::handle_impact(
                 &db,
                 black_box("Database"),
                 None,
@@ -69,8 +69,13 @@ fn bench_query_after_index(c: &mut Criterion) {
     });
     group.bench_function("overview", |b| {
         b.iter(|| {
-            illu_rs::server::tools::overview::handle_overview(&db, black_box("src/"), false, None)
-                .unwrap();
+            illu_rs::api::server::tools::overview::handle_overview(
+                &db,
+                black_box("src/"),
+                false,
+                None,
+            )
+            .unwrap();
         });
     });
     group.finish();

@@ -4,8 +4,8 @@
 
 #![expect(clippy::unwrap_used, reason = "integration tests")]
 
-use illu_rs::db::Database;
-use illu_rs::indexer::{IndexConfig, index_repo, refresh_index};
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::{IndexConfig, index_repo, refresh_index};
 
 // ---------------------------------------------------------------------------
 // Helpers

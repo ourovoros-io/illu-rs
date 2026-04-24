@@ -1,6 +1,7 @@
-use std::path::{Path, PathBuf};
+#![allow(dead_code, missing_docs, unreachable_pub)]
 
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RepoEntry {

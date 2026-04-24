@@ -1,9 +1,9 @@
 #![expect(clippy::unwrap_used, reason = "integration tests")]
 
-use illu_rs::db::Database;
-use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::registry::{Registry, RepoEntry};
-use illu_rs::server::tools::{cross_callpath, cross_deps, cross_impact, cross_query, repos};
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::{IndexConfig, index_repo};
+use illu_rs::api::registry::{Registry, RepoEntry};
+use illu_rs::api::server::tools::{cross_callpath, cross_deps, cross_impact, cross_query, repos};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -846,7 +846,7 @@ fn git_init_and_common_dir(dir: &Path) -> PathBuf {
         .status()
         .unwrap();
 
-    illu_rs::git::git_common_dir(dir).unwrap()
+    illu_rs::api::git::git_common_dir(dir).unwrap()
 }
 
 /// Create a "stale sibling" checkout on disk: a separate tempdir with its

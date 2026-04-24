@@ -49,39 +49,51 @@ pub type Result<T> = std::result::Result<T, IlluError>;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum IlluError {
+    /// Filesystem, process, or stream I/O failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
+    /// `SQLite` operation failed.
     #[error(transparent)]
     Db(#[from] rusqlite::Error),
 
+    /// JSON serialization or deserialization failed.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 
+    /// TOML deserialization failed.
     #[error(transparent)]
     TomlDe(#[from] toml::de::Error),
 
+    /// Directory traversal failed.
     #[error(transparent)]
     Walk(#[from] walkdir::Error),
 
+    /// HTTP request or response processing failed.
     #[error(transparent)]
     Http(#[from] reqwest::Error),
 
+    /// URL parsing failed.
     #[error(transparent)]
     Url(#[from] url::ParseError),
 
+    /// UTF-8 decoding from borrowed bytes failed.
     #[error(transparent)]
     Utf8(#[from] std::str::Utf8Error),
 
+    /// UTF-8 decoding from owned bytes failed.
     #[error(transparent)]
     FromUtf8(#[from] std::string::FromUtf8Error),
 
+    /// Integer parsing failed.
     #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
 
+    /// Formatting into a `fmt::Write` sink failed.
     #[error(transparent)]
     Fmt(#[from] std::fmt::Error),
 
+    /// Interactive prompt failed.
     #[error(transparent)]
     Dialoguer(#[from] dialoguer::Error),
 
@@ -91,6 +103,7 @@ pub enum IlluError {
     #[error(transparent)]
     RmcpInit(Box<rmcp::service::ServerInitializeError>),
 
+    /// rust-analyzer integration failed.
     #[error(transparent)]
     Ra(#[from] crate::ra::error::RaError),
 
