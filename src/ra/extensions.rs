@@ -10,16 +10,19 @@ use super::types::PositionSpec;
 // ── Expand Macro ─────────────────────────────────────────────────────────
 
 #[derive(Debug)]
-pub enum ExpandMacro {}
+#[non_exhaustive]
+pub(crate) enum ExpandMacro {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExpandMacroParams {
+#[non_exhaustive]
+pub(crate) struct ExpandMacroParams {
     pub text_document: TextDocumentIdentifier,
     pub position: lsp_types::Position,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ExpandedMacro {
     pub name: String,
     pub expansion: String,
@@ -33,7 +36,7 @@ impl lsp_types::request::Request for ExpandMacro {
 
 impl RaClient {
     pub async fn expand_macro(&self, spec: &PositionSpec) -> Result<Option<ExpandedMacro>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -52,11 +55,13 @@ impl RaClient {
 // ── SSR (Structural Search and Replace) ──────────────────────────────────
 
 #[derive(Debug)]
-pub enum Ssr {}
+#[non_exhaustive]
+pub(crate) enum Ssr {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SsrParams {
+#[non_exhaustive]
+pub(crate) struct SsrParams {
     pub query: String,
     pub parse_only: bool,
     #[serde(flatten)]
@@ -115,21 +120,25 @@ impl RaClient {
 // ── Related Tests ────────────────────────────────────────────────────────
 
 #[derive(Debug)]
-pub enum RelatedTests {}
+#[non_exhaustive]
+pub(crate) enum RelatedTests {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RelatedTestsParams {
+#[non_exhaustive]
+pub(crate) struct RelatedTestsParams {
     pub text_document: TextDocumentIdentifier,
     pub position: lsp_types::Position,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct TestInfo {
     pub runnable: Runnable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Runnable {
     pub label: String,
     pub location: Option<lsp_types::LocationLink>,
@@ -139,6 +148,7 @@ pub struct Runnable {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub struct RunnableArgs {
     pub workspace_root: Option<String>,
     pub cargo_args: Vec<String>,
@@ -153,7 +163,7 @@ impl lsp_types::request::Request for RelatedTests {
 
 impl RaClient {
     pub async fn related_tests(&self, spec: &PositionSpec) -> Result<Vec<TestInfo>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -172,11 +182,13 @@ impl RaClient {
 // ── Syntax Tree ──────────────────────────────────────────────────────────
 
 #[derive(Debug)]
-pub enum SyntaxTree {}
+#[non_exhaustive]
+pub(crate) enum SyntaxTree {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SyntaxTreeParams {
+#[non_exhaustive]
+pub(crate) struct SyntaxTreeParams {
     pub text_document: TextDocumentIdentifier,
 }
 

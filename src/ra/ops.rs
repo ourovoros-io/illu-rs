@@ -7,8 +7,8 @@ use lsp_types::{TextEdit, WorkspaceEdit};
 use super::client::RaClient;
 use super::error::{RaError, Result};
 use super::types::{
-    FileReferences, PositionSpec, RenameImpact, RenameResult, RichLocation, SymbolContext,
-    url_to_path_string,
+    CallInfo, FileReferences, PositionSpec, RenameImpact, RenameResult, RichLocation,
+    SymbolContext, url_to_path_string,
 };
 
 // ── Symbol Context ──────────────────────────────────────────────────────
@@ -17,14 +17,15 @@ impl RaClient {
     /// Get full context for a symbol: definition, hover, callers, callees,
     /// implementations, and related tests.
     pub async fn symbol_context(&self, spec: &PositionSpec) -> Result<SymbolContext> {
+        let mut warnings = Vec::new();
         let definitions = self.definition(spec).await?;
         let def_location = definitions.first().map_or_else(
             || RichLocation {
-                file: spec.file.display().to_string(),
-                line: spec.line,
-                col: spec.col,
-                end_line: spec.line,
-                end_col: spec.col,
+                file: spec.file().display().to_string(),
+                line: spec.line(),
+                col: spec.col(),
+                end_line: spec.line(),
+                end_col: spec.col(),
                 context_before: None,
                 text: String::new(),
                 context_after: None,
@@ -34,47 +35,40 @@ impl RaClient {
 
         let def_location = enrich_location(def_location).await;
 
-        let hover = self.hover(spec).await.unwrap_or(None);
-        let refs = self.references(spec, false).await.unwrap_or_default();
+        let hover = match self.hover(spec).await {
+            Ok(hover) => hover,
+            Err(err) => {
+                record_partial_failure(&mut warnings, "hover", &err);
+                None
+            }
+        };
+        let refs = match self.references(spec, false).await {
+            Ok(refs) => refs,
+            Err(err) => {
+                record_partial_failure(&mut warnings, "references", &err);
+                Vec::new()
+            }
+        };
         let reference_count = refs.len();
 
-        let (incoming_calls, outgoing_calls) = match self.prepare_call_hierarchy(spec).await {
-            Ok(items) if !items.is_empty() => {
-                // Safe: we just checked !items.is_empty(), so next() always returns Some
-                let Some(item) = items.into_iter().next() else {
-                    return Ok(SymbolContext {
-                        name: String::new(),
-                        hover: None,
-                        definition: def_location,
-                        reference_count: 0,
-                        incoming_calls: vec![],
-                        outgoing_calls: vec![],
-                        implementations: vec![],
-                        related_tests: vec![],
-                    });
-                };
-                let incoming = self.incoming_calls(item.clone()).await.unwrap_or_default();
-                let outgoing = self.outgoing_calls(item).await.unwrap_or_default();
-                (incoming, outgoing)
+        let (incoming_calls, outgoing_calls) =
+            collect_call_hierarchy(self, spec, &mut warnings).await;
+
+        let implementations = match self.implementation(spec).await {
+            Ok(locations) => locations.iter().map(RichLocation::from_location).collect(),
+            Err(err) => {
+                record_partial_failure(&mut warnings, "implementations", &err);
+                Vec::new()
             }
-            _ => (vec![], vec![]),
         };
 
-        let implementations = self
-            .implementation(spec)
-            .await
-            .unwrap_or_default()
-            .iter()
-            .map(RichLocation::from_location)
-            .collect();
-
-        let related_tests = self
-            .related_tests(spec)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|t| t.runnable.label)
-            .collect();
+        let related_tests = match self.related_tests(spec).await {
+            Ok(tests) => tests.into_iter().map(|t| t.runnable.label).collect(),
+            Err(err) => {
+                record_partial_failure(&mut warnings, "related tests", &err);
+                Vec::new()
+            }
+        };
 
         let name = hover
             .as_ref()
@@ -95,9 +89,9 @@ impl RaClient {
             .unwrap_or_else(|| {
                 format!(
                     "symbol at {}:{}:{}",
-                    spec.file.display(),
-                    spec.line,
-                    spec.col
+                    spec.file().display(),
+                    spec.line(),
+                    spec.col()
                 )
             });
 
@@ -110,8 +104,47 @@ impl RaClient {
             outgoing_calls,
             implementations,
             related_tests,
+            warnings,
         })
     }
+}
+
+async fn collect_call_hierarchy(
+    client: &RaClient,
+    spec: &PositionSpec,
+    warnings: &mut Vec<String>,
+) -> (Vec<CallInfo>, Vec<CallInfo>) {
+    let items = match client.prepare_call_hierarchy(spec).await {
+        Ok(items) => items,
+        Err(err) => {
+            record_partial_failure(warnings, "call hierarchy", &err);
+            return (vec![], vec![]);
+        }
+    };
+
+    let Some(item) = items.into_iter().next() else {
+        return (vec![], vec![]);
+    };
+
+    let incoming = match client.incoming_calls(item.clone()).await {
+        Ok(calls) => calls,
+        Err(err) => {
+            record_partial_failure(warnings, "incoming calls", &err);
+            Vec::new()
+        }
+    };
+    let outgoing = match client.outgoing_calls(item).await {
+        Ok(calls) => calls,
+        Err(err) => {
+            record_partial_failure(warnings, "outgoing calls", &err);
+            Vec::new()
+        }
+    };
+    (incoming, outgoing)
+}
+
+fn record_partial_failure(warnings: &mut Vec<String>, operation: &str, err: &RaError) {
+    warnings.push(format!("{operation} failed: {err}"));
 }
 
 /// Add source text context to a `RichLocation` by reading from disk.
@@ -149,7 +182,7 @@ impl RaClient {
                 placeholder.clone()
             }
             lsp_types::PrepareRenameResponse::Range(range) => {
-                if let Ok(content) = std::fs::read_to_string(&spec.file) {
+                if let Ok(content) = std::fs::read_to_string(spec.file()) {
                     let lines: Vec<&str> = content.lines().collect();
                     if let Some(line) = lines.get(range.start.line as usize) {
                         let start = range.start.character as usize;
@@ -250,7 +283,7 @@ impl RaClient {
 // ── Workspace Edit Application ──────────────────────────────────────────
 
 /// Apply a `WorkspaceEdit` to files on disk. Returns the list of changed files.
-pub async fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<Vec<String>> {
+pub(crate) async fn apply_workspace_edit(edit: &WorkspaceEdit) -> Result<Vec<String>> {
     let mut changed_files = vec![];
 
     if let Some(changes) = &edit.changes {

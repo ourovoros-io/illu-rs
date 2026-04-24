@@ -5,9 +5,9 @@
 
 #![expect(clippy::unwrap_used, reason = "integration tests")]
 
-use illu_rs::db::Database;
-use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{callpath, neighborhood, test_impact};
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::{IndexConfig, index_repo};
+use illu_rs::api::server::tools::{callpath, neighborhood, test_impact};
 use std::collections::HashSet;
 use std::fmt::Write as _;
 

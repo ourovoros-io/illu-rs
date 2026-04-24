@@ -932,7 +932,7 @@ fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
 ) -> Vec<String> {
     // crate:: prefix (current crate)
     if let Some(path) = qualified_path.strip_prefix("crate::") {
-        let segments: Vec<&str> = path.split("::").collect();
+        let segments = without_api_facade(path.split("::").collect());
         if segments.len() < 2 {
             return Vec::new();
         }
@@ -942,7 +942,7 @@ fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
     }
 
     // Workspace crate prefixes
-    let segments: Vec<&str> = qualified_path.split("::").collect();
+    let mut segments: Vec<&str> = qualified_path.split("::").collect();
     if segments.len() < 2 {
         return Vec::new();
     }
@@ -950,6 +950,12 @@ fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
     let Some(crate_path) = crate_map.get(crate_name) else {
         return Vec::new();
     };
+    if segments.get(1) == Some(&"api") {
+        segments.remove(1);
+    }
+    if segments.len() < 2 {
+        return Vec::new();
+    }
 
     // Normalize "." to "" so paths don't start with "./"
     let prefix = if crate_path == "." {
@@ -968,6 +974,13 @@ fn qualified_path_to_files_with_crates<S: std::hash::BuildHasher>(
         format!("{prefix}{sep}src/{joined}.rs"),
         format!("{prefix}{sep}src/{joined}/mod.rs"),
     ]
+}
+
+fn without_api_facade(mut segments: Vec<&str>) -> Vec<&str> {
+    if segments.first() == Some(&"api") {
+        segments.remove(0);
+    }
+    segments
 }
 
 /// Convert a `crate::` qualified path to a relative file path (first candidate).
@@ -3300,6 +3313,12 @@ pub fn documented_with_code() {}
     }
 
     #[test]
+    fn test_qualified_path_to_file_skips_api_facade_segment() {
+        let result = qualified_path_to_file("crate::api::server::tools::query::handle_query");
+        assert_eq!(result, Some("src/server/tools/query.rs".to_string()));
+    }
+
+    #[test]
     fn test_qualified_path_to_file_non_crate() {
         let result = qualified_path_to_file("anyhow::Result");
         assert!(result.is_none());
@@ -3334,6 +3353,12 @@ pub fn documented_with_code() {}
             first("shared::config::Config"),
             Some("shared/src/config.rs".to_string()),
         );
+
+        assert_eq!(
+            first("shared::api::indexer::index_repo"),
+            Some("shared/src/indexer.rs".to_string()),
+        );
+        assert!(qualified_path_to_files_with_crates("shared::api", &crate_map).is_empty());
 
         // workspace crate with non-trivial path
         assert_eq!(

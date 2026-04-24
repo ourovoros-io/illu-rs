@@ -1,3 +1,5 @@
+#![allow(dead_code, missing_docs, unreachable_pub)]
+
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 

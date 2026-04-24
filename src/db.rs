@@ -1,3 +1,5 @@
+#![allow(dead_code, missing_docs, unreachable_pub)]
+
 use crate::indexer::parser::{SymbolKind, Visibility};
 use rusqlite::types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Connection, Result as SqlResult, params};

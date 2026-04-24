@@ -1,3 +1,5 @@
+#![allow(dead_code, missing_docs, unreachable_pub)]
+
 pub mod cargo_doc;
 pub mod dependencies;
 pub mod docs;

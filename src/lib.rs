@@ -1,12 +1,23 @@
-pub mod agents;
-pub mod db;
+//! Library support for the `illu` MCP server and CLI.
+//!
+//! The stable user surface is the CLI/MCP protocol plus the curated [`api`]
+//! facade. Implementation modules are private so internal database, indexer,
+//! server, and rust-analyzer wiring can evolve without becoming accidental
+//! semver commitments.
+
+#![deny(missing_docs)]
+#![warn(unreachable_pub, broken_intra_doc_links)]
+
+mod agents;
+pub mod api;
+mod db;
 pub mod error;
-pub mod git;
-pub mod indexer;
-pub mod ra;
-pub mod registry;
-pub mod server;
-pub mod status;
+mod git;
+mod indexer;
+mod ra;
+mod registry;
+mod server;
+mod status;
 
 pub use error::{IlluError, Result};
 

@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 use super::types::DiagnosticInfo;
 
 /// Event to signal the mainloop to stop.
-pub struct Stop;
+pub(crate) struct Stop;
 
 /// Token names for rust-analyzer indexing progress.
 const RA_INDEXING_TOKENS: &[&str] = &["rustAnalyzer/Indexing", "rustAnalyzer/cachePriming"];
@@ -129,7 +129,7 @@ impl ServerState {
 
 /// Build the notification router for the LSP client.
 #[must_use]
-pub fn build_router(state: ServerState) -> Router<()> {
+pub(crate) fn build_router(state: ServerState) -> Router<()> {
     let progress_state = state.clone();
     let diag_state = state;
 

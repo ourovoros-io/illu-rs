@@ -7,9 +7,9 @@
 //! tool outputs contain accurate signatures, line numbers, doc
 //! comments, references, and formatting.
 
-use illu_rs::db::Database;
-use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{context, docs, impact, overview, query, tree};
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::{IndexConfig, index_repo};
+use illu_rs::api::server::tools::{context, docs, impact, overview, query, tree};
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -19,7 +19,7 @@ pub enum TargetOs {
     Windows,
 }
 
-pub fn detect_level(agent: &Agent, ctx: &dyn DetectionContext) -> DetectionLevel {
+pub(crate) fn detect_level(agent: &Agent, ctx: &dyn DetectionContext) -> DetectionLevel {
     detect_with_reason(agent, ctx).0
 }
 
@@ -29,7 +29,10 @@ pub fn detect_level(agent: &Agent, ctx: &dyn DetectionContext) -> DetectionLevel
 /// The reason is empty for `DetectionLevel::Unknown` and otherwise names
 /// the first signal that matched (e.g. `"env:CLAUDECODE"`, `"binary:claude"`,
 /// `"~/.cursor"`, or `"/Applications/Claude.app"`).
-pub fn detect_with_reason(agent: &Agent, ctx: &dyn DetectionContext) -> (DetectionLevel, String) {
+pub(crate) fn detect_with_reason(
+    agent: &Agent,
+    ctx: &dyn DetectionContext,
+) -> (DetectionLevel, String) {
     // Active: any env var present
     for var in agent.detection.env_vars {
         if ctx.env_var(var).is_some() {
@@ -58,7 +61,7 @@ pub fn detect_with_reason(agent: &Agent, ctx: &dyn DetectionContext) -> (Detecti
 }
 
 /// Real detection context backed by the process environment and filesystem.
-pub struct RealContext {
+pub(crate) struct RealContext {
     home: PathBuf,
     os: TargetOs,
 }
@@ -74,7 +77,7 @@ fn current_os() -> TargetOs {
 }
 
 impl RealContext {
-    pub fn new() -> Result<Self, crate::IlluError> {
+    pub(crate) fn new() -> Result<Self, crate::IlluError> {
         let home = std::env::var("HOME")
             .ok()
             .or_else(|| std::env::var("USERPROFILE").ok())
@@ -93,7 +96,7 @@ impl RealContext {
     /// the OS from the current compilation target. Useful for tests and
     /// for callers that already know HOME (e.g. `configure_global`).
     #[must_use]
-    pub fn with_home(home: PathBuf) -> Self {
+    pub(crate) fn with_home(home: PathBuf) -> Self {
         Self {
             home,
             os: current_os(),

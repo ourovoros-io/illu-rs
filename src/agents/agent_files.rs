@@ -7,7 +7,7 @@ use std::path::Path;
 /// at the declaration site and new fields (e.g. `#[non_exhaustive]`
 /// metadata) can be added without reshaping every call site.
 #[non_exhaustive]
-pub struct AgentDef {
+pub(crate) struct AgentDef {
     pub name: &'static str,
     pub description: &'static str,
     pub tools: &'static [&'static str],
@@ -16,7 +16,7 @@ pub struct AgentDef {
 
 impl AgentDef {
     #[must_use]
-    pub const fn new(
+    pub(crate) const fn new(
         name: &'static str,
         description: &'static str,
         tools: &'static [&'static str],
@@ -31,7 +31,7 @@ impl AgentDef {
     }
 }
 
-pub const AGENT_DEFS: &[AgentDef] = &[
+pub(crate) const AGENT_DEFS: &[AgentDef] = &[
     AgentDef::new(
         "illu-explore",
         "Explore codebases using illu code intelligence (Rust, Python, TypeScript/JavaScript)",
@@ -236,14 +236,17 @@ pub const AGENT_DEFS: &[AgentDef] = &[
     ),
 ];
 
-pub const BUILTIN_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
+pub(crate) const BUILTIN_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
 
 /// Write one Markdown file per entry in [`AGENT_DEFS`] into `agents_dir`.
 ///
 /// Each file gets YAML frontmatter (`name`, `description`, `tools`) followed by
 /// the agent's body text. Tool names are rewritten with `tool_prefix` unless
 /// they are built-in (see [`BUILTIN_TOOLS`]).
-pub fn generate_agent_files(agents_dir: &Path, tool_prefix: &str) -> Result<(), crate::IlluError> {
+pub(crate) fn generate_agent_files(
+    agents_dir: &Path,
+    tool_prefix: &str,
+) -> Result<(), crate::IlluError> {
     use std::fmt::Write;
 
     std::fs::create_dir_all(agents_dir)?;

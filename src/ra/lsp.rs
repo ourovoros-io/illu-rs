@@ -30,7 +30,7 @@ use super::types::{
 impl RaClient {
     /// Go to definition at the given position.
     pub async fn definition(&self, spec: &PositionSpec) -> Result<Vec<Location>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -55,7 +55,7 @@ impl RaClient {
 
     /// Go to implementation at the given position.
     pub async fn implementation(&self, spec: &PositionSpec) -> Result<Vec<Location>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -84,7 +84,7 @@ impl RaClient {
         spec: &PositionSpec,
         include_declaration: bool,
     ) -> Result<Vec<Location>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -130,7 +130,7 @@ fn goto_response_to_locations(response: Option<GotoDefinitionResponse>) -> Vec<L
 
 impl RaClient {
     pub async fn hover(&self, spec: &PositionSpec) -> Result<Option<String>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -291,7 +291,7 @@ impl RaClient {
         &self,
         spec: &PositionSpec,
     ) -> Result<Vec<CallHierarchyItem>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -399,7 +399,7 @@ impl RaClient {
         &self,
         spec: &PositionSpec,
     ) -> Result<Vec<TypeHierarchyItem>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -495,7 +495,7 @@ impl RaClient {
         &self,
         spec: &PositionSpec,
     ) -> Result<Option<PrepareRenameResponse>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -519,7 +519,7 @@ impl RaClient {
         spec: &PositionSpec,
         new_name: &str,
     ) -> Result<Option<WorkspaceEdit>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 
@@ -551,7 +551,7 @@ impl RaClient {
         spec: &PositionSpec,
         kind_filter: Option<&str>,
     ) -> Result<Vec<CodeActionOrCommand>> {
-        let uri = self.ensure_open(&spec.file).await?;
+        let uri = self.ensure_open(spec.file()).await?;
         let pos = spec.to_lsp_position();
         let server = self.server().clone();
 

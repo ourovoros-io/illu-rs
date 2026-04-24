@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
-use illu_rs::db::Database;
-use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::IlluServer;
-use illu_rs::server::tools::{
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::{IndexConfig, index_repo};
+use illu_rs::api::server::IlluServer;
+use illu_rs::api::server::tools::{
     context::handle_context, docs::handle_docs, impact::handle_impact, query::handle_query,
     tree::handle_tree,
 };
@@ -119,14 +119,14 @@ enum RepoCommand {
 }
 
 fn open_or_index(repo_path: &Path) -> Result<Database, illu_rs::IlluError> {
-    illu_rs::status::init(repo_path);
+    illu_rs::api::status::init(repo_path);
     let db_path = repo_path.join(".illu/index.db");
     if db_path.exists() {
         let db = Database::open(&db_path)?;
         let config = IndexConfig {
             repo_path: repo_path.to_path_buf(),
         };
-        let refreshed = illu_rs::indexer::refresh_index(&db, &config)?;
+        let refreshed = illu_rs::api::indexer::refresh_index(&db, &config)?;
         if refreshed > 0 {
             tracing::info!("Refreshed {refreshed} file(s)");
         }
@@ -159,7 +159,7 @@ fn print_result(result: &str) {
 #[expect(clippy::print_stdout, reason = "CLI output")]
 fn init_repo(
     repo_path: &Path,
-    flags: &illu_rs::agents::SetupFlags,
+    flags: &illu_rs::api::agents::SetupFlags,
 ) -> Result<(), illu_rs::IlluError> {
     let repo_path = repo_path.canonicalize()?;
 
@@ -173,7 +173,7 @@ fn init_repo(
 
     println!("Setting up illu in {}", repo_path.display());
 
-    let reports = illu_rs::agents::configure_repo(&repo_path, flags)?;
+    let reports = illu_rs::api::agents::configure_repo(&repo_path, flags)?;
     for report in &reports {
         if report.skipped {
             continue;
@@ -185,7 +185,7 @@ fn init_repo(
     }
     if reports.is_empty() || reports.iter().all(|r| r.skipped) {
         if flags.explicit_agents.is_empty() && !flags.all {
-            let scoped_ids: Vec<&str> = illu_rs::agents::AGENTS
+            let scoped_ids: Vec<&str> = illu_rs::api::agents::AGENTS
                 .iter()
                 .filter(|a| a.repo_config.is_some())
                 .map(|a| a.id)
@@ -205,7 +205,7 @@ fn init_repo(
     }
 
     println!("  indexing...");
-    illu_rs::status::init(&repo_path);
+    illu_rs::api::status::init(&repo_path);
     ensure_indexed(&repo_path)?;
     println!("  index built");
 
@@ -250,10 +250,10 @@ fn ensure_gitignore(repo_path: &Path) -> Result<bool, illu_rs::IlluError> {
 }
 
 fn register_repo(repo_path: &Path) {
-    let Ok(registry_path) = illu_rs::registry::Registry::default_path() else {
+    let Ok(registry_path) = illu_rs::api::registry::Registry::default_path() else {
         return;
     };
-    let Ok(mut registry) = illu_rs::registry::Registry::load(&registry_path) else {
+    let Ok(mut registry) = illu_rs::api::registry::Registry::load(&registry_path) else {
         return;
     };
 
@@ -261,13 +261,13 @@ fn register_repo(repo_path: &Path) {
         .file_name()
         .map_or_else(|| "unknown".into(), |n| n.to_string_lossy().into_owned());
 
-    let git_remote = illu_rs::git::git_remote_url(repo_path);
+    let git_remote = illu_rs::api::git::git_remote_url(repo_path);
     let git_common_dir =
-        illu_rs::git::git_common_dir(repo_path).unwrap_or_else(|_| repo_path.join(".git"));
+        illu_rs::api::git::git_common_dir(repo_path).unwrap_or_else(|_| repo_path.join(".git"));
 
     let now = now_unix_secs().to_string();
 
-    registry.register(illu_rs::registry::RepoEntry {
+    registry.register(illu_rs::api::registry::RepoEntry {
         name,
         path: repo_path.to_path_buf(),
         git_remote,
@@ -336,14 +336,14 @@ fn ensure_global_gitignore(home: &Path) -> Result<(), illu_rs::IlluError> {
 }
 
 #[expect(clippy::print_stdout, reason = "CLI output")]
-fn install_global(flags: &illu_rs::agents::SetupFlags) -> Result<(), illu_rs::IlluError> {
+fn install_global(flags: &illu_rs::api::agents::SetupFlags) -> Result<(), illu_rs::IlluError> {
     let home = std::env::var("HOME")
         .map_err(|_| illu_rs::IlluError::Agent("HOME environment variable not set".to_string()))?;
     let home = PathBuf::from(home);
 
     println!("Installing illu globally...");
 
-    let reports = illu_rs::agents::configure_global(&home, flags)?;
+    let reports = illu_rs::api::agents::configure_global(&home, flags)?;
     for report in &reports {
         if report.skipped {
             continue;
@@ -355,7 +355,7 @@ fn install_global(flags: &illu_rs::agents::SetupFlags) -> Result<(), illu_rs::Il
     }
     if reports.is_empty() || reports.iter().all(|r| r.skipped) {
         if flags.explicit_agents.is_empty() && !flags.all {
-            let scoped_ids: Vec<&str> = illu_rs::agents::AGENTS
+            let scoped_ids: Vec<&str> = illu_rs::api::agents::AGENTS
                 .iter()
                 .filter(|a| a.global_config.is_some())
                 .map(|a| a.id)
@@ -410,8 +410,8 @@ async fn head_watcher(db: std::sync::Arc<std::sync::Mutex<Database>>, config: In
                 tracing::warn!("Background refresh: could not acquire DB lock");
                 return;
             };
-            illu_rs::status::set("refreshing ▸ background");
-            match illu_rs::indexer::refresh_index(&db, &config) {
+            illu_rs::api::status::set("refreshing ▸ background");
+            match illu_rs::api::indexer::refresh_index(&db, &config) {
                 Ok(count) if count > 0 => {
                     tracing::info!(count, "Background refresh: re-indexed files");
                 }
@@ -425,7 +425,7 @@ async fn head_watcher(db: std::sync::Arc<std::sync::Mutex<Database>>, config: In
                     tracing::warn!("Background refresh failed: {e}");
                 }
             }
-            illu_rs::status::set(illu_rs::status::READY);
+            illu_rs::api::status::set(illu_rs::api::status::READY);
         })
         .await;
 
@@ -481,7 +481,7 @@ fn detect_project_kind(repo_path: &Path) -> ProjectKinds {
         cargo: repo_path.join("Cargo.toml").exists(),
         typescript: repo_path.join("tsconfig.json").exists()
             || repo_path.join("package.json").exists(),
-        python: illu_rs::indexer::has_python_project(repo_path),
+        python: illu_rs::api::indexer::has_python_project(repo_path),
     }
 }
 
@@ -498,8 +498,8 @@ fn handle_repo_command(command: RepoCommand) -> Result<(), illu_rs::IlluError> {
     // `Registry::default_path` now returns `IlluError::Agent` on HOME-missing
     // and `Registry::load` routes IO / TOML errors through their typed
     // variants via `#[from]`; both propagate through `?` without wrapping.
-    let registry_path = illu_rs::registry::Registry::default_path()?;
-    let mut registry = illu_rs::registry::Registry::load(&registry_path)?;
+    let registry_path = illu_rs::api::registry::Registry::default_path()?;
+    let mut registry = illu_rs::api::registry::Registry::load(&registry_path)?;
 
     match command {
         RepoCommand::List => {
@@ -618,8 +618,8 @@ async fn main() -> Result<(), illu_rs::IlluError> {
     let cli = Cli::parse();
     let detect_from_cwd = || -> PathBuf {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        match illu_rs::git::detect_repo_root(&cwd) {
-            Ok(git_root) => illu_rs::git::detect_cargo_root(&cwd, &git_root),
+        match illu_rs::api::git::detect_repo_root(&cwd) {
+            Ok(git_root) => illu_rs::api::git::detect_cargo_root(&cwd, &git_root),
             Err(_) => cwd,
         }
     };
@@ -651,7 +651,7 @@ async fn main() -> Result<(), illu_rs::IlluError> {
 
             let home = std::env::var("HOME").ok().map(PathBuf::from);
             if let Some(home) = &home
-                && let Err(e) = illu_rs::agents::self_heal_on_serve(
+                && let Err(e) = illu_rs::api::agents::self_heal_on_serve(
                     if has_project { Some(repo_path) } else { None },
                     home,
                 )
@@ -662,8 +662,8 @@ async fn main() -> Result<(), illu_rs::IlluError> {
             let (db, config) = if has_project {
                 let db_dir = repo_path.join(".illu");
                 std::fs::create_dir_all(&db_dir)?;
-                illu_rs::status::init(repo_path);
-                illu_rs::status::set("starting");
+                illu_rs::api::status::init(repo_path);
+                illu_rs::api::status::set("starting");
 
                 let config = IndexConfig {
                     repo_path: repo_path.clone(),
@@ -673,8 +673,8 @@ async fn main() -> Result<(), illu_rs::IlluError> {
                 tracing::debug!(path = %db_path.display(), "Opening database");
                 let db = Database::open(&db_path)?;
 
-                illu_rs::status::set("indexing");
-                let refreshed = illu_rs::indexer::refresh_index(&db, &config)?;
+                illu_rs::api::status::set("indexing");
+                let refreshed = illu_rs::api::indexer::refresh_index(&db, &config)?;
                 if refreshed > 0 {
                     tracing::info!(count = refreshed, "Refreshed changed files");
                 }
@@ -696,15 +696,15 @@ async fn main() -> Result<(), illu_rs::IlluError> {
             }
 
             let registry = {
-                let path = illu_rs::registry::Registry::default_path()
+                let path = illu_rs::api::registry::Registry::default_path()
                     .unwrap_or_else(|_| repo_path.join(".illu/registry.toml"));
-                illu_rs::registry::Registry::load(&path)
-                    .unwrap_or_else(|_| illu_rs::registry::Registry::empty())
+                illu_rs::api::registry::Registry::load(&path)
+                    .unwrap_or_else(|_| illu_rs::api::registry::Registry::empty())
             };
 
             // Check for pending docs before handing DB to the server
             let pending_docs = if kinds.cargo {
-                illu_rs::indexer::docs::pending_docs(&db)?
+                illu_rs::api::indexer::docs::pending_docs(&db)?
             } else {
                 Vec::new()
             };
@@ -713,7 +713,7 @@ async fn main() -> Result<(), illu_rs::IlluError> {
 
             // Start rust-analyzer in the background if available
             if !cli.no_ra && kinds.cargo {
-                match illu_rs::ra::RaClient::start(repo_path).await {
+                match illu_rs::api::ra::RaClient::start(repo_path).await {
                     Ok(ra) => {
                         let ra = std::sync::Arc::new(ra);
                         server = server.with_ra(ra.clone());
@@ -739,7 +739,7 @@ async fn main() -> Result<(), illu_rs::IlluError> {
             let transport = stdio();
             tracing::info!("MCP transport ready, starting handshake");
             if has_project {
-                illu_rs::status::set(illu_rs::status::READY);
+                illu_rs::api::status::set(illu_rs::api::status::READY);
             }
             let service = server.serve(transport).await?;
             tracing::info!("MCP server initialized, waiting for requests");
@@ -759,16 +759,16 @@ async fn main() -> Result<(), illu_rs::IlluError> {
                 tokio::spawn(async move {
                     let total = pending_docs.len();
                     tracing::info!(count = total, "Fetching docs in background");
-                    illu_rs::status::set(&format!("fetching docs ▸ 0/{total}"));
+                    illu_rs::api::status::set(&format!("fetching docs ▸ 0/{total}"));
                     let fetched =
-                        illu_rs::indexer::docs::fetch_docs(&pending_docs, &repo_path).await;
+                        illu_rs::api::indexer::docs::fetch_docs(&pending_docs, &repo_path).await;
                     if !fetched.is_empty() {
                         let Ok(db) = db.lock() else { return };
                         let count = fetched.len();
-                        let _ = illu_rs::indexer::docs::store_fetched_docs(&db, &fetched);
+                        let _ = illu_rs::api::indexer::docs::store_fetched_docs(&db, &fetched);
                         tracing::info!(count, "Stored dependency docs");
                     }
-                    illu_rs::status::set(illu_rs::status::READY);
+                    illu_rs::api::status::set(illu_rs::api::status::READY);
                 });
             }
 
@@ -808,7 +808,7 @@ async fn main() -> Result<(), illu_rs::IlluError> {
 
             tracing::info!("MCP server shut down");
             if has_project {
-                illu_rs::status::clear();
+                illu_rs::api::status::clear();
             }
         }
         Some(Command::Query {
@@ -852,12 +852,12 @@ async fn main() -> Result<(), illu_rs::IlluError> {
         #[cfg(feature = "dashboard")]
         Some(Command::Dashboard { port }) => {
             let registry = {
-                let path = illu_rs::registry::Registry::default_path()
+                let path = illu_rs::api::registry::Registry::default_path()
                     .unwrap_or_else(|_| repo_path.join(".illu/registry.toml"));
-                illu_rs::registry::Registry::load(&path)
-                    .unwrap_or_else(|_| illu_rs::registry::Registry::empty())
+                illu_rs::api::registry::Registry::load(&path)
+                    .unwrap_or_else(|_| illu_rs::api::registry::Registry::empty())
             };
-            illu_rs::server::dashboard::start_dashboard(registry, port).await?;
+            illu_rs::api::server::start_dashboard(registry, port).await?;
         }
         Some(Command::Init {
             agent,
@@ -865,7 +865,7 @@ async fn main() -> Result<(), illu_rs::IlluError> {
             yes,
             dry_run,
         }) => {
-            let flags = illu_rs::agents::SetupFlags {
+            let flags = illu_rs::api::agents::SetupFlags {
                 explicit_agents: agent,
                 all,
                 yes,
@@ -879,7 +879,7 @@ async fn main() -> Result<(), illu_rs::IlluError> {
             yes,
             dry_run,
         }) => {
-            let flags = illu_rs::agents::SetupFlags {
+            let flags = illu_rs::api::agents::SetupFlags {
                 explicit_agents: agent,
                 all,
                 yes,

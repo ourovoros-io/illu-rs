@@ -3,9 +3,9 @@
 //! Error path and edge case tests: verify graceful handling of bad input,
 //! malformed source, unicode, and boundary conditions.
 
-use illu_rs::db::Database;
-use illu_rs::indexer::{IndexConfig, index_repo};
-use illu_rs::server::tools::{context, impact, query};
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::{IndexConfig, index_repo};
+use illu_rs::api::server::tools::{context, impact, query};
 
 // ---------------------------------------------------------------------------
 // Helper

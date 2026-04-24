@@ -3,9 +3,9 @@
 
 #![expect(clippy::unwrap_used, reason = "integration tests")]
 
-use illu_rs::db::Database;
-use illu_rs::indexer::parser::SymbolKind;
-use illu_rs::indexer::{IndexConfig, index_repo};
+use illu_rs::api::db::Database;
+use illu_rs::api::indexer::parser::SymbolKind;
+use illu_rs::api::indexer::{IndexConfig, index_repo};
 
 // =========================================================================
 // Helpers

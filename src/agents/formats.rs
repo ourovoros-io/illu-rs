@@ -3,7 +3,11 @@
 use super::{IlluCommand, McpFormat};
 use std::path::Path;
 
-pub fn write(path: &Path, format: McpFormat, cmd: &IlluCommand) -> Result<(), crate::IlluError> {
+pub(crate) fn write(
+    path: &Path,
+    format: McpFormat,
+    cmd: &IlluCommand,
+) -> Result<(), crate::IlluError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

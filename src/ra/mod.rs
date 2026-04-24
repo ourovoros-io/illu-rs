@@ -4,15 +4,17 @@
 //! exposing semantic operations (go-to-definition, hover, rename, etc.)
 //! that are powered by the full Rust compiler.
 
-pub mod client;
-pub mod document;
-pub mod error;
-pub mod extensions;
-pub mod lsp;
-pub mod ops;
-pub mod retry;
-pub mod transport;
-pub mod types;
+#![allow(dead_code, missing_docs, unreachable_pub)]
+
+pub(crate) mod client;
+pub(crate) mod document;
+pub(crate) mod error;
+pub(crate) mod extensions;
+pub(crate) mod lsp;
+pub(crate) mod ops;
+pub(crate) mod retry;
+pub(crate) mod transport;
+pub(crate) mod types;
 
 pub use client::RaClient;
 pub use error::RaError;
