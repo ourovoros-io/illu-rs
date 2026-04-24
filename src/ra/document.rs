@@ -14,7 +14,7 @@ use super::error::{RaError, Result};
 
 /// Tracks which documents are currently open in the LSP session.
 #[derive(Debug, Clone)]
-pub struct DocumentTracker {
+pub(crate) struct DocumentTracker {
     inner: Arc<Mutex<TrackerInner>>,
 }
 
@@ -31,14 +31,14 @@ impl Default for DocumentTracker {
 
 impl DocumentTracker {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(TrackerInner::default())),
         }
     }
 
     /// Ensure a file is open in the LSP server. Returns the file URL.
-    pub async fn ensure_open(&self, socket: &ServerSocket, path: &Path) -> Result<Url> {
+    pub(crate) async fn ensure_open(&self, socket: &ServerSocket, path: &Path) -> Result<Url> {
         let abs_path = if path.is_absolute() {
             path.to_path_buf()
         } else {

@@ -1,6 +1,9 @@
 #[cfg(feature = "dashboard")]
-pub mod dashboard;
+pub(crate) mod dashboard;
 pub mod tools;
+
+#[cfg(feature = "dashboard")]
+pub use dashboard::start_dashboard;
 
 use crate::agents::instruction_md::RUST_QUALITY_QUERY;
 use crate::db::Database;
@@ -2273,6 +2276,13 @@ impl IlluServer {
                     out.push_str("### Related Tests\n");
                     for test in &ctx.related_tests {
                         let _ = writeln!(out, "- `{test}`");
+                    }
+                    out.push('\n');
+                }
+                if !ctx.warnings.is_empty() {
+                    out.push_str("### Partial Evidence Warnings\n");
+                    for warning in &ctx.warnings {
+                        let _ = writeln!(out, "- {warning}");
                     }
                     out.push('\n');
                 }

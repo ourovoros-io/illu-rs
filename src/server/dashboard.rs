@@ -14,12 +14,12 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Deserialize)]
-pub struct DeleteRepoRequest {
+pub(crate) struct DeleteRepoRequest {
     pub path: String,
 }
 
 #[derive(Serialize, Default)]
-pub struct RepoStatus {
+pub(crate) struct RepoStatus {
     pub name: String,
     pub path: String,
     pub error: Option<String>,
@@ -37,7 +37,7 @@ pub struct RepoStatus {
 }
 
 #[derive(Serialize, Default)]
-pub struct HealthInfo {
+pub(crate) struct HealthInfo {
     pub total_refs: i64,
     pub confidence_distribution: Vec<(String, i64)>,
     pub truncated_signatures: i64,
@@ -56,13 +56,13 @@ struct RepoIndexStats {
 }
 
 #[derive(Serialize)]
-pub struct DashboardData {
+pub(crate) struct DashboardData {
     pub repos: Vec<RepoStatus>,
     pub system_info: SystemInfo,
 }
 
 #[derive(Serialize)]
-pub struct SystemInfo {
+pub(crate) struct SystemInfo {
     pub os: String,
     pub arch: String,
     pub illu_version: String,
@@ -272,7 +272,7 @@ async fn delete_repo(
     }
 }
 
-pub struct DashboardState {
+pub(crate) struct DashboardState {
     pub registry: Arc<RwLock<Registry>>,
     /// The port the server is listening on. Used by the Host-header
     /// middleware to reject DNS-rebinding attempts.

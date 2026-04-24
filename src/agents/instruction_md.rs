@@ -3,16 +3,16 @@
 
 use std::path::Path;
 
-pub const ILLU_SECTION_START: &str = "<!-- illu:start -->";
-pub const ILLU_SECTION_END: &str = "<!-- illu:end -->";
+pub(crate) const ILLU_SECTION_START: &str = "<!-- illu:start -->";
+pub(crate) const ILLU_SECTION_END: &str = "<!-- illu:end -->";
 // The baseline query is intentionally broad: it pulls in project-specific
 // design discipline plus the stricter Rust API axioms from `assets/axioms.json`.
 // Keep this aligned with the top-N result cap in the `axioms` tool.
-pub const RUST_QUALITY_QUERY: &str =
+pub(crate) const RUST_QUALITY_QUERY: &str =
     "planning data structures documentation comments idiomatic rust verification performance";
 
 #[must_use]
-pub fn illu_agent_section(tool_prefix: &str) -> String {
+pub(crate) fn illu_agent_section(tool_prefix: &str) -> String {
     let query_tool = format!("{tool_prefix}query");
     let context_tool = format!("{tool_prefix}context");
     let references_tool = format!("{tool_prefix}references");
@@ -115,7 +115,7 @@ If you are about to add comments that merely restate what the code already says,
     )
 }
 
-pub fn write_md_section(
+pub(crate) fn write_md_section(
     repo_path: &Path,
     file_name: &str,
     heading: &str,

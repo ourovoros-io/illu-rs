@@ -857,7 +857,7 @@ async fn main() -> Result<(), illu_rs::IlluError> {
                 illu_rs::registry::Registry::load(&path)
                     .unwrap_or_else(|_| illu_rs::registry::Registry::empty())
             };
-            illu_rs::server::dashboard::start_dashboard(registry, port).await?;
+            illu_rs::server::start_dashboard(registry, port).await?;
         }
         Some(Command::Init {
             agent,

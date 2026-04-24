@@ -1,13 +1,13 @@
 //! Per-agent config registry and orchestration.
 
-pub mod agent_files;
-pub mod allow_list;
-pub mod detect;
-pub mod formats;
-pub mod instruction_md;
-pub mod paths;
-pub mod prompt;
-pub mod selection;
+pub(crate) mod agent_files;
+pub(crate) mod allow_list;
+pub(crate) mod detect;
+pub(crate) mod formats;
+pub(crate) mod instruction_md;
+pub(crate) mod paths;
+pub(crate) mod prompt;
+pub(crate) mod selection;
 
 use std::path::{Path, PathBuf};
 

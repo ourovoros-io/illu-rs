@@ -40,4 +40,4 @@ pub enum RaError {
     Io(#[from] std::io::Error),
 }
 
-pub type Result<T> = std::result::Result<T, RaError>;
+pub(crate) type Result<T> = std::result::Result<T, RaError>;

@@ -2,7 +2,7 @@
 
 use super::{Agent, DetectionLevel};
 
-pub fn prompt_agents<'a>(
+pub(crate) fn prompt_agents<'a>(
     detection: &[(&'a Agent, DetectionLevel, String)],
 ) -> Result<Vec<&'a Agent>, crate::IlluError> {
     use dialoguer::MultiSelect;
@@ -36,7 +36,7 @@ pub fn prompt_agents<'a>(
 }
 
 #[must_use]
-pub fn has_tty() -> bool {
+pub(crate) fn has_tty() -> bool {
     use std::io::IsTerminal;
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }

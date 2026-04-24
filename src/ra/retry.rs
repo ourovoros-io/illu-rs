@@ -11,7 +11,7 @@ const INITIAL_BACKOFF_MS: u64 = 100;
 
 /// Execute an LSP request with retry on `CONTENT_MODIFIED` errors.
 /// Uses exponential backoff between retries.
-pub async fn with_retry<F, Fut, T>(operation: F) -> Result<T>
+pub(crate) async fn with_retry<F, Fut, T>(operation: F) -> Result<T>
 where
     F: Fn() -> Fut,
     Fut: Future<Output = std::result::Result<T, Error>>,

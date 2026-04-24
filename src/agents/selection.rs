@@ -3,7 +3,7 @@
 use super::{Agent, DetectionLevel, SetupFlags};
 
 /// How the selection should be resolved based on flags and TTY state.
-pub enum Mode {
+pub(crate) enum Mode {
     /// `--agent X [--agent Y ...]`: caller named exact agent ids.
     Explicit,
     /// `--all`: configure every known agent.
@@ -16,7 +16,7 @@ pub enum Mode {
 
 /// Decide which [`Mode`] applies for the given flag bundle and TTY state.
 #[must_use]
-pub fn mode(flags: &SetupFlags, has_tty: bool) -> Mode {
+pub(crate) fn mode(flags: &SetupFlags, has_tty: bool) -> Mode {
     if !flags.explicit_agents.is_empty() {
         Mode::Explicit
     } else if flags.all {
@@ -45,7 +45,7 @@ pub fn mode(flags: &SetupFlags, has_tty: bool) -> Mode {
 ///   present in `agents`.
 /// - [`SelectionError::NeedsPrompt`] if the mode resolves to
 ///   [`Mode::Interactive`].
-pub fn select_from_flags<'a>(
+pub(crate) fn select_from_flags<'a>(
     agents: &[&'a Agent],
     flags: &SetupFlags,
     detection: &[(&'a Agent, DetectionLevel)],
@@ -83,7 +83,7 @@ fn detected<'a>(results: &[(&'a Agent, DetectionLevel)]) -> Vec<&'a Agent> {
 
 /// Errors that can arise when resolving the agent selection.
 #[derive(Debug, thiserror::Error)]
-pub enum SelectionError {
+pub(crate) enum SelectionError {
     /// The caller passed `--agent <id>` with an id that isn't in the registry.
     #[error("unknown agent id: {0}")]
     UnknownId(String),

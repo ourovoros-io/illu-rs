@@ -1,5 +1,6 @@
 use lsp_types::{Location, Position, SymbolKind, Url};
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -11,24 +12,53 @@ use super::error::{RaError, Result};
 /// 0-indexed positions internally. Keep conversions at this boundary so tool
 /// handlers do not mix user-facing and compiler-facing coordinates.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct PositionSpec {
-    pub file: PathBuf,
-    pub line: u32,
-    pub col: u32,
+    file: PathBuf,
+    line: NonZeroU32,
+    col: NonZeroU32,
 }
 
 impl PositionSpec {
     #[must_use]
-    pub fn new(file: PathBuf, line: u32, col: u32) -> Self {
+    pub fn new(file: PathBuf, line: NonZeroU32, col: NonZeroU32) -> Self {
         Self { file, line, col }
+    }
+
+    /// Build a position from human-facing 1-indexed coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RaError::InvalidPosition`] when either coordinate is zero.
+    pub fn try_new(file: PathBuf, line: u32, col: u32) -> Result<Self> {
+        let line = NonZeroU32::new(line)
+            .ok_or_else(|| RaError::InvalidPosition("line must be 1 or greater".to_string()))?;
+        let col = NonZeroU32::new(col)
+            .ok_or_else(|| RaError::InvalidPosition("column must be 1 or greater".to_string()))?;
+        Ok(Self::new(file, line, col))
+    }
+
+    #[must_use]
+    pub fn file(&self) -> &Path {
+        &self.file
+    }
+
+    #[must_use]
+    pub const fn line(&self) -> u32 {
+        self.line.get()
+    }
+
+    #[must_use]
+    pub const fn col(&self) -> u32 {
+        self.col.get()
     }
 
     /// Convert to LSP Position (0-indexed).
     #[must_use]
     pub fn to_lsp_position(&self) -> Position {
         Position {
-            line: self.line.saturating_sub(1),
-            character: self.col.saturating_sub(1),
+            line: self.line.get() - 1,
+            character: self.col.get() - 1,
         }
     }
 
@@ -58,7 +88,7 @@ impl FromStr for PositionSpec {
                 let col: u32 = col
                     .parse()
                     .map_err(|_| RaError::InvalidPosition(format!("invalid column: {col}")))?;
-                Ok(PositionSpec::new(PathBuf::from(file), line, col))
+                PositionSpec::try_new(PathBuf::from(file), line, col)
             }
             _ => Err(RaError::InvalidPosition(format!(
                 "expected file:line:col, got: {s}"
@@ -73,6 +103,7 @@ impl FromStr for PositionSpec {
 /// string suitable for MCP output. Optional context fields are display-only;
 /// they must not be treated as source of truth for edits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct RichLocation {
     pub file: String,
     pub line: u32,
@@ -105,6 +136,7 @@ impl RichLocation {
 
 /// Symbol information for outline/workspace symbol results.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct LspSymbolInfo {
     pub name: String,
     pub kind: String,
@@ -119,6 +151,7 @@ pub struct LspSymbolInfo {
 
 /// Call hierarchy item for display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct CallInfo {
     pub name: String,
     pub kind: String,
@@ -137,6 +170,7 @@ pub struct CallInfo {
 /// optional RA enrichment, but the coordinates remain LSP-derived and should be
 /// converted carefully before joining against tree-sitter line ranges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct CallSite {
     pub file: String,
     pub line: u32,
@@ -145,6 +179,7 @@ pub struct CallSite {
 
 /// Composed symbol context result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SymbolContext {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,10 +194,13 @@ pub struct SymbolContext {
     pub implementations: Vec<RichLocation>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub related_tests: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Rename impact preview.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct RenameImpact {
     pub old_name: String,
     pub new_name: String,
@@ -172,6 +210,7 @@ pub struct RenameImpact {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct FileReferences {
     pub file: String,
     pub count: usize,
@@ -180,6 +219,7 @@ pub struct FileReferences {
 
 /// Rename result after applying.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct RenameResult {
     pub old_name: String,
     pub new_name: String,
@@ -190,6 +230,7 @@ pub struct RenameResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct DiagnosticInfo {
     pub file: String,
     pub line: u32,
@@ -199,14 +240,14 @@ pub struct DiagnosticInfo {
 
 /// Convert a file URL to a display path string.
 #[must_use]
-pub fn url_to_path_string(url: &Url) -> String {
+pub(crate) fn url_to_path_string(url: &Url) -> String {
     url.to_file_path()
         .map_or_else(|()| url.to_string(), |p| p.display().to_string())
 }
 
 /// Convert a `SymbolKind` to a human-readable string.
 #[must_use]
-pub fn symbol_kind_name(kind: SymbolKind) -> &'static str {
+pub(crate) fn symbol_kind_name(kind: SymbolKind) -> &'static str {
     match kind {
         SymbolKind::FILE => "file",
         SymbolKind::MODULE => "module",
@@ -242,7 +283,7 @@ pub fn symbol_kind_name(kind: SymbolKind) -> &'static str {
 /// Async because RA ops consume it from async context; using `tokio::fs`
 /// keeps the read off the reactor without needing `spawn_blocking` at
 /// the caller.
-pub async fn read_context_lines(
+pub(crate) async fn read_context_lines(
     path: &Path,
     target_line: u32,
     context: u32,
@@ -266,4 +307,26 @@ pub async fn read_context_lines(
         .collect();
 
     Ok((before, text, after))
+}
+
+#[cfg(test)]
+#[expect(clippy::expect_used, reason = "tests")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn position_spec_rejects_zero_line_or_column() {
+        assert!("src/lib.rs:0:1".parse::<PositionSpec>().is_err());
+        assert!("src/lib.rs:1:0".parse::<PositionSpec>().is_err());
+    }
+
+    #[test]
+    fn position_spec_converts_one_indexed_coordinates_to_lsp() {
+        let spec: PositionSpec = "src/lib.rs:10:3"
+            .parse()
+            .expect("valid one-indexed position should parse");
+        let pos = spec.to_lsp_position();
+        assert_eq!(pos.line, 9);
+        assert_eq!(pos.character, 2);
+    }
 }

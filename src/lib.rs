@@ -1,3 +1,11 @@
+//! Library support for the `illu` MCP server and CLI.
+//!
+//! The stable user surface is the CLI/MCP protocol. Rust modules remain public
+//! where the sibling binary and integration tests need them, but new modules
+//! should prefer private implementation details plus explicit facade re-exports.
+
+#![warn(unreachable_pub, broken_intra_doc_links)]
+
 pub mod agents;
 pub mod db;
 pub mod error;

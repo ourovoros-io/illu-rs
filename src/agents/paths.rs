@@ -5,7 +5,7 @@ use super::detect::TargetOs;
 use std::path::{Path, PathBuf};
 
 #[must_use]
-pub fn resolve(global: &GlobalPath, os: TargetOs, home: &Path) -> PathBuf {
+pub(crate) fn resolve(global: &GlobalPath, os: TargetOs, home: &Path) -> PathBuf {
     match global {
         GlobalPath::Home(rel) => home.join(rel),
         GlobalPath::AppSupport(vendor, file) => match os {
