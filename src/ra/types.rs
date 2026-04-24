@@ -5,7 +5,11 @@ use std::str::FromStr;
 
 use super::error::{RaError, Result};
 
-/// A position in a file, specified as `file:line:col` (1-indexed for human input).
+/// A rust-analyzer position, specified as `file:line:col`.
+///
+/// The public MCP shape is deliberately 1-indexed for humans, while LSP uses
+/// 0-indexed positions internally. Keep conversions at this boundary so tool
+/// handlers do not mix user-facing and compiler-facing coordinates.
 #[derive(Debug, Clone)]
 pub struct PositionSpec {
     pub file: PathBuf,
@@ -63,7 +67,11 @@ impl FromStr for PositionSpec {
     }
 }
 
-/// A location with enriched context for display.
+/// A compiler-resolved location enriched for user display.
+///
+/// Coordinates are converted back to 1-indexed values and `file` is a path
+/// string suitable for MCP output. Optional context fields are display-only;
+/// they must not be treated as source of truth for edits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RichLocation {
     pub file: String,
@@ -123,6 +131,11 @@ pub struct CallInfo {
     pub call_sites: Vec<CallSite>,
 }
 
+/// One concrete call-site range returned by rust-analyzer.
+///
+/// This is compiler evidence and can be mapped back to indexed symbols during
+/// optional RA enrichment, but the coordinates remain LSP-derived and should be
+/// converted carefully before joining against tree-sitter line ranges.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallSite {
     pub file: String,

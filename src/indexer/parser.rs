@@ -110,6 +110,13 @@ impl std::str::FromStr for Visibility {
     }
 }
 
+/// Parser-level symbol discovered from source text.
+///
+/// `Symbol` is intentionally language-neutral enough for storage but precise
+/// enough for Rust tools: paths are repo-relative, line ranges are 1-indexed,
+/// and `impl_type` carries the enclosing type for methods/associated items.
+/// Parser output is structural tree-sitter evidence, not compiler resolution;
+/// reference confidence is assigned later when refs are stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub name: String,

@@ -110,6 +110,9 @@ fn install_claude_code_writes_global_settings() {
     // discipline commit (a49534b) embedded into the rendered instruction
     // file.
     let claude_md = fs::read_to_string(dir.path().join(".claude/CLAUDE.md")).unwrap();
+    assert!(claude_md.contains("rust_preflight"));
+    assert!(claude_md.contains("std_docs"));
+    assert!(claude_md.contains("quality_gate"));
     assert!(claude_md.contains("Plan before code"));
     assert!(claude_md.contains("Read docs before use"));
     assert!(claude_md.contains("planning data structures documentation comments idiomatic rust"));

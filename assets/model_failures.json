@@ -1,0 +1,47 @@
+[
+  {
+    "id": "clone-to-silence-borrow-checker",
+    "title": "Cloning to silence ownership uncertainty",
+    "trigger_terms": ["borrow", "lifetime", "ownership", "clone", "arc", "mutex"],
+    "bad_pattern": "Add `.clone()` or wrap in `Arc<Mutex<_>>` before proving the ownership boundary.",
+    "good_pattern": "Model the owner, borrower, and mutation point first. Prefer borrowing, narrow scopes, or owned transfer before shared mutable state.",
+    "rule": "Clones and shared ownership need a reason tied to data flow, not compiler appeasement.",
+    "source": "Rust Playbook: Design First"
+  },
+  {
+    "id": "stringly-state",
+    "title": "Stringly typed state machines",
+    "trigger_terms": ["state", "status", "mode", "kind", "phase", "variant"],
+    "bad_pattern": "Represent internal modes as arbitrary `String` values and branch on string comparisons.",
+    "good_pattern": "Use an enum or newtype with explicit variants, conversion boundaries, and exhaustive matches.",
+    "rule": "Make invalid states unrepresentable when the set of states is known.",
+    "source": "Rust Playbook: Design First"
+  },
+  {
+    "id": "unordered-map-assumption",
+    "title": "Assuming HashMap iteration order",
+    "trigger_terms": ["hashmap", "map", "deterministic", "order", "sort", "stable"],
+    "bad_pattern": "Expose `HashMap` iteration order in user-visible output or tests.",
+    "good_pattern": "Use `BTreeMap`, sort entries before rendering, or document that order is intentionally unspecified.",
+    "rule": "User-visible output and tests must not rely on unspecified collection ordering.",
+    "source": "Rust Playbook: Database And Transactions"
+  },
+  {
+    "id": "unwrap-in-tool-handler",
+    "title": "Unwraps in MCP handlers",
+    "trigger_terms": ["mcp", "tool", "handler", "server", "params", "parse"],
+    "bad_pattern": "Use `unwrap`, `expect`, or `panic` while parsing tool input or building output.",
+    "good_pattern": "Return `IlluError::Invalid` for bad inputs or a user-facing tool message for expected misses.",
+    "rule": "Tool handlers are user-facing boundaries and must preserve error context.",
+    "source": "Rust Playbook: MCP Tool Shape"
+  },
+  {
+    "id": "performance-without-evidence",
+    "title": "Performance claims without measurement",
+    "trigger_terms": ["performance", "speed", "faster", "latency", "throughput", "optimize", "benchmark"],
+    "bad_pattern": "Claim an implementation is faster because it looks simpler or avoids an allocation.",
+    "good_pattern": "Attach benchmark output, complexity reasoning, profiling data, or a before/after measurement.",
+    "rule": "Performance claims require evidence and must name the workload being improved.",
+    "source": "Rust Playbook: Performance Claims"
+  }
+]

@@ -17,6 +17,12 @@ struct RegistryFile {
     repos: Vec<RepoEntry>,
 }
 
+/// Persistent registry of repositories known to illu.
+///
+/// Entries are deduplicated by git common directory so multiple worktrees for
+/// the same repository do not look like unrelated projects. Cross-repo tools
+/// rely on this invariant when excluding the active repo and opening sibling
+/// indexes read-only.
 #[derive(Clone)]
 pub struct Registry {
     file_path: PathBuf,

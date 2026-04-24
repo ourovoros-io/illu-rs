@@ -107,6 +107,12 @@ fn package_name_from_json(content: &str) -> Option<String> {
         .map(String::from)
 }
 
+/// Configuration for one indexing run.
+///
+/// `repo_path` must be the repository root used for every relative path written
+/// to the database. Refresh, docs fetching, git diff tools, and source-body
+/// recovery all assume the same root; constructing this with a subdirectory
+/// produces an index that cannot be safely compared to git paths.
 #[derive(Clone)]
 pub struct IndexConfig {
     pub repo_path: PathBuf,
@@ -964,6 +970,27 @@ const TOOL_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Rust Quality",
+        &[
+            (
+                "axioms",
+                "Rust rules, safety constraints, and best-practice guidance.",
+            ),
+            (
+                "rust_preflight",
+                "Required evidence packet before Rust design/code: axioms, symbol context, impact hints, std/dependency docs, and model-failure reminders.",
+            ),
+            (
+                "std_docs",
+                "Local standard-library rustdoc lookup for items and methods.",
+            ),
+            (
+                "quality_gate",
+                "PASS/WARN/BLOCKED check for Rust diff evidence before final answer or commit.",
+            ),
+        ],
+    ),
+    (
         "Impact Analysis",
         &[
             (
@@ -1163,18 +1190,24 @@ pub(crate) fn generate_claude_skill(direct_dep_names: &[&str]) -> String {
     let _ = writeln!(
         out,
         "Before writing, modifying, or recommending Rust code, do these in order:\n\n\
-         1. Plan first — name the data flow, invariants, failure cases, and \
+         1. Run `rust_preflight` first to gather axioms, local symbol evidence, \
+         impact hints, std/dependency docs, and model-failure reminders.\n\
+         2. Plan first after preflight — name the data flow, invariants, failure cases, and \
          the concrete types (structs / enums / newtypes / collections) you will use.\n\
-         2. Choose data structures deliberately; prefer representations that make \
+         3. Choose data structures deliberately; prefer representations that make \
          invalid states unrepresentable.\n\
-         3. Read the docs before assuming any non-trivial API's behavior. \
-         Standard-library items are not exempt.\n\
-         4. Query `axioms` twice: once with `{RUST_QUALITY_QUERY}` and once \
-         with the concrete task context.\n\
-         5. Write idiomatic Rust per The Rust Book, Rust for Rustaceans, and \
+         4. Read the docs before assuming any non-trivial API's behavior. \
+         Standard-library items require `std_docs`; dependencies use `docs`; \
+         local types use `context`.\n\
+         5. Query `axioms` twice if preflight did not already supply both: once \
+         with `{RUST_QUALITY_QUERY}` and once with the concrete task context.\n\
+         6. Write idiomatic Rust per The Rust Book, Rust for Rustaceans, and \
          illu axioms — ownership/borrowing, enums, iterators, explicit errors.\n\
-         6. Comments must explain invariants, safety, ownership rationale, or \
+         7. Comments must explain invariants, safety, ownership rationale, or \
          why the design exists — never narrate syntax.\n\n\
+         Before final answer or commit for a Rust diff, run `quality_gate` with \
+         the plan, docs verified, impact checked, and tests run. `BLOCKED` means \
+         the work is not ready.\n\n\
          Full rules: see the `Rust Design Discipline` section of CLAUDE.md or \
          GEMINI.md in the repo.\n"
     );
@@ -1419,11 +1452,14 @@ pub fn hello() -> &'static str { "hello" }
         let skill = generate_claude_skill(&["serde", "tokio"]);
         assert!(skill.contains("serde"));
         assert!(skill.contains("tokio"));
-        assert!(skill.contains("49 available"));
+        assert!(skill.contains("53 available"));
         assert!(skill.contains("query"));
         assert!(skill.contains("context"));
         assert!(skill.contains("impact"));
         assert!(skill.contains("diff_impact"));
+        assert!(skill.contains("rust_preflight"));
+        assert!(skill.contains("std_docs"));
+        assert!(skill.contains("quality_gate"));
         assert!(skill.contains("test_impact"));
         assert!(skill.contains("neighborhood"));
         assert!(skill.contains("boundary"));

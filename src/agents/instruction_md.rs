@@ -5,11 +5,9 @@ use std::path::Path;
 
 pub const ILLU_SECTION_START: &str = "<!-- illu:start -->";
 pub const ILLU_SECTION_END: &str = "<!-- illu:end -->";
-// Each keyword in this list maps to one design-category axiom in
-// `assets/axioms.json` (Design Workflow, Data Modeling, Documentation,
-// Comments, Idiomatic Rust, Verification Sources, Performance Discipline).
-// When adding a new design axiom, extend this list so the baseline quality
-// query continues to surface every category in the top-N response.
+// The baseline query is intentionally broad: it pulls in project-specific
+// design discipline plus the stricter Rust API axioms from `assets/axioms.json`.
+// Keep this aligned with the top-N result cap in the `axioms` tool.
 pub const RUST_QUALITY_QUERY: &str =
     "planning data structures documentation comments idiomatic rust verification performance";
 
@@ -28,6 +26,9 @@ pub fn illu_agent_section(tool_prefix: &str) -> String {
     let cross_callpath_tool = format!("{tool_prefix}cross_callpath");
     let axioms_tool = format!("{tool_prefix}axioms");
     let docs_tool = format!("{tool_prefix}docs");
+    let std_docs_tool = format!("{tool_prefix}std_docs");
+    let rust_preflight_tool = format!("{tool_prefix}rust_preflight");
+    let quality_gate_tool = format!("{tool_prefix}quality_gate");
 
     format!(
         "{ILLU_SECTION_START}
@@ -56,14 +57,16 @@ log output, or when an illu tool explicitly returns no results.
 
 Before you write, modify, or meaningfully recommend Rust code, you MUST do the following in order:
 
-1. **Plan before code**: write a short plan first. Name the data flow, invariants, failure cases, and the exact structs/enums/newtypes/collections you intend to use.
-2. **Choose data structures deliberately**: justify each major type by ownership, mutability, ordering, lookup, and lifetime needs. Prefer representations that make invalid states unrepresentable.
-3. **Read docs before use**: verify the actual semantics of each non-trivial type, trait, method, macro, or standard-library API before relying on it. NEVER assume behavior from memory or name similarity.
-4. **Axiom pass before Rust**: query `{axioms_tool}` twice before significant Rust generation:
+1. **Run Rust preflight**: call `{rust_preflight_tool}` with the task, local symbols, std items, dependencies, and optional git ref. Treat its output as evidence to use, not as a design it invented.
+2. **Plan before code**: write a short plan first. Name the data flow, invariants, failure cases, and the exact structs/enums/newtypes/collections you intend to use.
+3. **Choose data structures deliberately**: justify each major type by ownership, mutability, ordering, lookup, and lifetime needs. Prefer representations that make invalid states unrepresentable.
+4. **Read docs before use**: verify the actual semantics of each non-trivial type, trait, method, macro, or standard-library API before relying on it. Use `{std_docs_tool}` for standard-library items, `{docs_tool}` for dependencies, and `{context_tool}` for local types. NEVER assume behavior from memory or name similarity.
+5. **Axiom pass before Rust**: query `{axioms_tool}` twice before significant Rust generation if `{rust_preflight_tool}` did not already supply both:
    - baseline quality query: `{RUST_QUALITY_QUERY}`
    - task query: the concrete feature, bug, or API you are working on
-5. **Write idiomatic Rust**: follow The Rust Book, Rust for Rustaceans, and illu axioms. Prefer ownership/borrowing, enums, iterators, explicit error handling, and compile-time modeling over ported Java/C++/Python patterns.
-6. **Comments are first-class**: comments must explain invariants, safety conditions, concurrency assumptions, ownership rationale, or why a design exists. Delete comments that merely narrate syntax.
+6. **Write idiomatic Rust**: follow The Rust Book, Rust for Rustaceans, and illu axioms. Prefer ownership/borrowing, enums, iterators, explicit error handling, and compile-time modeling over ported Java/C++/Python patterns.
+7. **Comments are first-class**: comments must explain invariants, safety conditions, concurrency assumptions, ownership rationale, or why a design exists. Delete comments that merely narrate syntax.
+8. **Gate before final**: before final answer or commit for any Rust diff, call `{quality_gate_tool}` with the plan, docs verified, impact checked, tests run, and safety/performance evidence when relevant. Treat `BLOCKED` as not ready.
 
 ### Subagent instructions (MANDATORY)
 
@@ -73,32 +76,38 @@ When spawning subagents for code tasks, ALWAYS include this instruction in the p
 (Rust, Python, TypeScript/JavaScript). NEVER use Read to view source files — use \
 {context_tool} instead. NEVER use Grep to search code — use {query_tool} instead. \
 Only use Read/Grep/Glob for non-code content (config, docs, logs). Before giving Rust \
-implementation advice, first make a short plan, choose data structures deliberately, \
-verify docs for every non-trivial API (including std), and query {axioms_tool} with \
-'{RUST_QUALITY_QUERY}' plus the task-specific context.\"
+implementation advice, first call {rust_preflight_tool}, make a short plan, choose data \
+structures deliberately, verify docs for every non-trivial API with {std_docs_tool}/{docs_tool}/{context_tool}, \
+and run {quality_gate_tool} before final answer or commit.\"
 
 Prefer `illu-explore`, `illu-review`, `illu-refactor` agents when available.
 
 ### Workflow
 
 1. **Locate before you read**: `{query_tool}` or `{context_tool}` first, then Read only what you need
-2. **Plan before you generate Rust**: produce a short design plan naming data structures, ownership/mutability, invariants, and error handling
-3. **Impact before you change**: always run `{impact_tool}` before modifying any public symbol
-4. **Save tokens**: use `sections` param on context/batch_context to fetch only what you need
-5. **Production focus**: use `exclude_tests: true` to filter out test functions
-6. **Cross-repo**: use `{cross_query_tool}`/`{cross_impact_tool}`/`{cross_deps_tool}`/`{cross_callpath_tool}` — \
+2. **Rust preflight before you generate Rust**: use `{rust_preflight_tool}` to gather axioms, local context, impact hints, std docs, dependency docs, and model-failure reminders
+3. **Plan before you generate Rust**: produce a short design plan naming data structures, ownership/mutability, invariants, and error handling
+4. **Impact before you change**: always run `{impact_tool}` before modifying any public symbol
+5. **Save tokens**: use `sections` param on context/batch_context to fetch only what you need
+6. **Production focus**: use `exclude_tests: true` to filter out test functions
+7. **Cross-repo**: use `{cross_query_tool}`/`{cross_impact_tool}`/`{cross_deps_tool}`/`{cross_callpath_tool}` — \
 NEVER navigate to or read files from other repositories directly
-7. **Axiom pass**: use `{axioms_tool}` with `{RUST_QUALITY_QUERY}` first, then with the concrete task context before meaningful Rust design/code
-8. **Documentation pass**: use `{context_tool}` with `sections: [\"docs\", \"source\"]` for local types and `{docs_tool}` for dependency types; verify standard-library behavior from docs before assuming it
+8. **Axiom pass**: use `{axioms_tool}` with `{RUST_QUALITY_QUERY}` first, then with the concrete task context before meaningful Rust design/code
+9. **Documentation pass**: use `{context_tool}` with `sections: [\"docs\", \"source\"]` for local types, `{docs_tool}` for dependency types, and `{std_docs_tool}` for standard-library behavior
+10. **Quality gate**: use `{quality_gate_tool}` before final answer or commit; `BLOCKED` means keep working
 
 ### Hard Constraints (Middleware Interception Simulation)
 You MUST act as if a middleware intercepts your native tool calls. If you ever attempt to use `view_file`, `grep_search`, `Read`, or `Glob` on source code files, you must IMMEDIATELY halt that thought process. Instead of throwing an error and stopping, you must **automatically self-correct and invoke `{tool_prefix}context` or `{tool_prefix}query` instead.**
+
+If you are about to write or modify Rust code, or propose a Rust architectural plan, and you have NOT yet called `{rust_preflight_tool}` for the task, you must IMMEDIATELY halt your generation. You must call `{rust_preflight_tool}` first.
 
 If you are about to write or modify Rust code, or propose a Rust architectural plan, and you have NOT yet produced a short plan naming the data structures, ownership/mutability model, and error strategy, you must IMMEDIATELY halt your generation. You must write that plan first.
 
 If you have NOT yet queried `{axioms_tool}` using both the baseline quality query `{RUST_QUALITY_QUERY}` and the task-specific context in this session, you must IMMEDIATELY halt your generation. You must **invoke `{axioms_tool}` first, and only then proceed with Rust generation.**
 
-If you are about to rely on the behavior of a type, trait, method, macro, or standard-library API whose semantics you have not verified from documentation or authoritative code context, you must IMMEDIATELY halt and read the docs first. Standard library items are NOT exempt.
+If you are about to rely on the behavior of a type, trait, method, macro, or standard-library API whose semantics you have not verified from documentation or authoritative code context, you must IMMEDIATELY halt and read the docs first. Standard library items require `{std_docs_tool}` and are NOT exempt.
+
+If you are about to final-answer or commit a Rust diff and have NOT called `{quality_gate_tool}` with your plan, docs verified, impact checked, and tests run, you must IMMEDIATELY halt and run `{quality_gate_tool}`. If it returns `BLOCKED`, do not present the work as complete.
 
 If you are about to add comments that merely restate what the code already says, you must delete or rewrite them so they capture invariants, why, safety, or other non-obvious context.
 </CRITICAL_INSTRUCTION_OVERRIDE>
@@ -163,6 +172,9 @@ mod tests {
     #[test]
     fn section_contains_rust_design_contract() {
         let section = illu_agent_section("mcp__illu__");
+        assert!(section.contains("mcp__illu__rust_preflight"));
+        assert!(section.contains("mcp__illu__std_docs"));
+        assert!(section.contains("mcp__illu__quality_gate"));
         assert!(section.contains("Plan before code"));
         assert!(section.contains("Read docs before use"));
         assert!(section.contains(RUST_QUALITY_QUERY));
