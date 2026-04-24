@@ -20,9 +20,9 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-dea584?style=flat-square&logo=rust" alt="Rust 2024"/>
-  <img src="https://img.shields.io/badge/tools-49-blue?style=flat-square" alt="49 tools"/>
+  <img src="https://img.shields.io/badge/tools-53-blue?style=flat-square" alt="53 tools"/>
   <img src="https://img.shields.io/badge/agents-8_supported-blueviolet?style=flat-square" alt="8 agents supported"/>
-  <img src="https://img.shields.io/badge/tests-841_passing-brightgreen?style=flat-square" alt="841 tests"/>
+  <img src="https://img.shields.io/badge/tests-901_passing-brightgreen?style=flat-square" alt="901 tests"/>
 </p>
 
 ---
@@ -94,7 +94,7 @@ Without `--repo`, illu auto-detects the repo from CWD via `git rev-parse --show-
 
 ## What Your AI Gets
 
-illu gives your AI agent **49 tools** through the [Model Context Protocol](https://modelcontextprotocol.io/), organized into seven categories — including cross-repo intelligence and optional **rust-analyzer integration** for compiler-accurate operations:
+illu gives your AI agent **53 tools** through the [Model Context Protocol](https://modelcontextprotocol.io/), organized into eight categories — including Rust quality evidence, cross-repo intelligence, and optional **rust-analyzer integration** for compiler-accurate operations:
 
 ### Search and Navigate
 
@@ -133,6 +133,41 @@ Fetch context for several symbols in one call. Supports the same `sections` filt
 ```
 symbols: ["Database", "handle_query", "parse_rust_source"]
 symbols: ["Config", "Server"], sections: ["source", "callees"]
+```
+
+### Rust Quality Evidence
+
+#### Query Rust rules — `axioms`
+
+Returns repository-specific Rust axioms and broader Rust quality guidance for planning, API design, safety, testing, benchmarking, and documentation.
+
+```
+query: "newtypes unsafe miri property tests"
+```
+
+#### Preflight before coding — `rust_preflight`
+
+Builds the required Rust evidence packet before design or implementation: baseline and task axioms, local symbol context, impact/test-impact hints, standard-library docs, dependency docs, model-failure reminders, and a design-plan template.
+
+```
+task: "add std docs lookup", symbols: ["IlluServer"], std_items: ["std::collections::BTreeMap"]
+```
+
+#### Verify std behavior locally — `std_docs`
+
+Reads local rustdoc for standard-library items and methods. No network fallback.
+
+```
+item: "std::collections::HashMap::iter"       → ordering and iterator docs
+item: "std::path::Path::strip_prefix"         → exact Result semantics
+```
+
+#### Gate the final diff — `quality_gate`
+
+Checks whether a Rust diff has the plan, docs, impact, tests, safety notes, and performance evidence it claims. Returns `PASS`, `WARN`, or `BLOCKED`.
+
+```
+task: "speed up index refresh", plan: "...", tests_run: ["cargo test --all-targets"]
 ```
 
 #### Look up symbols by file and line — `symbols_at`
@@ -429,7 +464,7 @@ Reports ref confidence distribution, signature quality, noise sources, and cover
 
 When rust-analyzer is installed, illu automatically spawns it in the background and exposes **13 additional tools** prefixed with `ra_`. These provide compiler-accurate results — resolving through macros, trait impls, and generics — complementing the fast tree-sitter-based tools.
 
-> **Optional:** If rust-analyzer isn't installed or fails to start, all 36 core tools work normally. Use `--no-ra` to skip RA entirely.
+> **Optional:** If rust-analyzer isn't installed or fails to start, all 40 core tools work normally. Use `--no-ra` to skip RA entirely.
 
 #### Go-to-definition — `ra_definition`
 
@@ -597,7 +632,7 @@ from: "process_request", to: "handle_event", target_repo: "event-service"
 | VS Code + Copilot | IDE | per-repo | `.vscode/mcp.json` |
 | Antigravity | IDE | global | `~/.antigravity/mcp.json` |
 
-All 49 tools are available to every configured agent. Claude-family agents see them as `mcp__illu__query`, Gemini CLI as `@illu query`, Codex / Cursor / VS Code / Antigravity per their respective MCP conventions. Any other MCP client with stdio transport support works too — illu speaks standard MCP and can be wired in manually via the [manual MCP config](#get-started) block above.
+All 53 tools are available to every configured agent. Claude-family agents see them as `mcp__illu__query`, Gemini CLI as `@illu query`, Codex / Cursor / VS Code / Antigravity per their respective MCP conventions. Any other MCP client with stdio transport support works too — illu speaks standard MCP and can be wired in manually via the [manual MCP config](#get-started) block above.
 
 ## Features
 
@@ -713,7 +748,7 @@ The script requires `jq` and `git` on PATH.
                        │               │
               ┌────────▼───────────────▼──┐
               │       MCP server           │  stdio transport
-              │  36 core + 13 ra_* tools   │
+              │  40 core + 13 ra_* tools   │
               └────────────┬──────────────┘
                            │
        ┌───────────────────┼───────────────────┐
@@ -723,7 +758,7 @@ The script requires `jq` and `git` on PATH.
                                           Antigravity
 ```
 
-**Two engines:** tree-sitter provides fast offline indexing (36 tools). rust-analyzer provides compiler-accurate intelligence (13 `ra_*` tools) when available. Both run simultaneously.
+**Two engines:** tree-sitter provides fast offline indexing (40 tools). rust-analyzer provides compiler-accurate intelligence (13 `ra_*` tools) when available. Both run simultaneously.
 
 **Multi-repo:** Each repo gets its own index. A global registry at `~/.illu/registry.toml` tracks all repos. Cross-repo tools open other indexes read-only on demand.
 
@@ -767,11 +802,14 @@ src/
 │   ├── types.rs         # PositionSpec, RichLocation, SymbolContext, etc.
 │   └── error.rs         # RaError enum
 └── server/
-    ├── mod.rs           # MCP server (rmcp, tool routing, 36 core + 13 RA tools)
-    └── tools/           # 36 core tool handlers (RA tools inline in mod.rs)
+    ├── mod.rs           # MCP server (rmcp, tool routing, 40 core + 13 RA tools)
+    └── tools/           # 40 core tool handlers (RA tools inline in mod.rs)
         ├── query.rs         # Symbol/doc/file/body search
         ├── context.rs       # Full symbol context with callers/callees
         ├── batch_context.rs # Multi-symbol context
+        ├── rust_preflight.rs # Rust evidence packet before coding
+        ├── std_docs.rs      # Local standard-library rustdoc lookup
+        ├── quality_gate.rs  # Rust diff evidence PASS/WARN/BLOCKED gate
         ├── impact.rs        # Transitive dependency analysis
         ├── diff_impact.rs   # Git-diff-based batch impact
         ├── test_impact.rs   # Symbol-to-test mapping
@@ -813,7 +851,7 @@ src/
 <summary>Development</summary>
 
 ```bash
-cargo test                                                    # 841 tests
+cargo test --all-targets                                      # 901 passing, 3 ignored
 cargo clippy --all-targets --all-features -- -D warnings      # strict lints
 cargo fmt --all -- --check                                    # formatting
 RUST_LOG=debug cargo run -- --repo /path/to/project serve     # debug mode
@@ -822,14 +860,17 @@ RUST_LOG=debug cargo run -- --no-ra serve                     # without rust-ana
 
 | Test Suite | Count | What it guards |
 |------------|-------|----------------|
-| Unit | 528 | Parser, DB, indexer, tool handlers, registry, agent setup |
-| Agents end-to-end | 8 | `configure_repo` / `configure_global` write correct files per agent |
+| Unit | 568 | Parser, DB, indexer, tool handlers, registry, agent setup |
+| CLI unit | 1 | CLI helper behavior |
+| Agents end-to-end | 15 | `configure_repo` / `configure_global` write correct files per agent |
+| Cross-repo | 31 | Registry, readonly indexes, cross-query/impact/deps/call paths |
 | Data integrity | 68 | Line numbers, refs, cross-crate resolution, stale cleanup |
 | Data quality | 61 | End-to-end tool output format and content |
-| Integration | 27 | Full pipeline: index, query, verify + cross-repo |
+| Integration | 19 | Full pipeline: index, query, verify |
 | Self-index | 24 | illu indexes itself — validates real-world accuracy |
+| Parser correctness | 31 | Rust parser edge cases and reference resolution |
 | TypeScript / Python | 29 | Non-Rust language parsers |
-| Error paths + misc | 96 | Edge cases, incremental correctness, cross-repo, etc. |
+| Error paths + graph + incremental | 54 | Failure paths, graph correctness, refresh behavior |
 
 </details>
 

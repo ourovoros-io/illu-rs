@@ -30,6 +30,9 @@ fn server_instructions() -> String {
          'unused' to find potentially dead code, \
          'freshness' to check index staleness, \
          'docs' for dependency docs, \
+         'std_docs' for local standard-library rustdoc evidence, \
+         'rust_preflight' to assemble the required Rust design evidence packet before coding, \
+         'quality_gate' to check diff evidence before final answers or commits, \
          'overview' for structural maps, \
          'tree' for file/module tree, \
          'implements' for trait/type relationships, \
@@ -57,12 +60,14 @@ fn server_instructions() -> String {
          'cross_impact' for finding cross-repo references to a symbol, \
          'cross_deps' for showing inter-repo dependency relationships, \
          'cross_callpath' for finding call chains spanning repo boundaries. \
-         Before writing or revising Rust, first make a short plan, choose data \
-         structures deliberately, verify API behavior from documentation \
-         (including standard-library items), query 'axioms' with \
-         '{RUST_QUALITY_QUERY}' plus your task-specific context, and write \
-         comments only when they explain invariants, safety, ownership, or why \
-         the design exists. \
+         Before writing or revising Rust, call 'rust_preflight' first, make a \
+         short plan, choose data structures deliberately, verify API behavior \
+         from documentation (use 'std_docs' for standard-library items and \
+         'docs' for dependencies), query 'axioms' with '{RUST_QUALITY_QUERY}' \
+         plus your task-specific context, and write comments only when they \
+         explain invariants, safety, ownership, or why the design exists. \
+         Before final answer or commit for a Rust diff, call 'quality_gate' \
+         with the plan, docs verified, impact checks, and tests run. \
          When rust-analyzer is available, additional 'ra_*' tools provide compiler-accurate intelligence: \
          'ra_definition' for precise go-to-definition, \
          'ra_hover' for type info and docs, \
@@ -218,6 +223,12 @@ fn parse_vec_string(mut value: serde_json::Value) -> Result<Vec<String>, String>
     ))
 }
 
+/// MCP server state shared by all tool handlers.
+///
+/// The server keeps the database index behind a mutex, the immutable
+/// `IndexConfig` behind an `Arc`, and rust-analyzer as an optional sidecar.
+/// Handlers that touch disk, git, or long-running SQL must use `run_blocking`
+/// so the async stdio transport remains responsive while the DB lock is held.
 #[derive(Clone)]
 pub struct IlluServer {
     db: std::sync::Arc<Mutex<Database>>,
@@ -764,6 +775,54 @@ struct AxiomsParams {
     query: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct StdDocsParams {
+    /// Standard-library item, e.g. `std::collections::HashMap` or `std::path::Path::strip_prefix`
+    item: String,
+    /// Optional topic/method text to focus within the resolved rustdoc page.
+    topic: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RustPreflightParams {
+    /// Concrete Rust task being designed or implemented.
+    task: String,
+    /// Local symbols to inspect for source/docs/impact/test evidence.
+    #[serde(default, deserialize_with = "lenient_vec_string")]
+    symbols: Vec<String>,
+    /// Standard-library items to verify through local rustdoc.
+    #[serde(default, deserialize_with = "lenient_vec_string")]
+    std_items: Vec<String>,
+    /// Dependency docs to inspect. Use `crate` or `crate::topic`.
+    #[serde(default, deserialize_with = "lenient_vec_string")]
+    dependencies: Vec<String>,
+    /// Optional git ref/range for diff context, e.g. `HEAD~1` or `main..feature`.
+    git_ref: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct QualityGateParams {
+    /// Concrete Rust task being completed.
+    task: String,
+    /// Design plan naming data structures, ownership, invariants, and error strategy.
+    plan: String,
+    /// Documentation evidence, e.g. `std_docs std::path::Path::strip_prefix`.
+    #[serde(default, deserialize_with = "lenient_vec_string")]
+    docs_verified: Vec<String>,
+    /// Impact evidence, e.g. `impact Database::open` or `diff_impact`.
+    #[serde(default, deserialize_with = "lenient_vec_string")]
+    impact_checked: Vec<String>,
+    /// Exact verification commands run.
+    #[serde(default, deserialize_with = "lenient_vec_string")]
+    tests_run: Vec<String>,
+    /// Optional git ref/range. Omit for unstaged changes.
+    git_ref: Option<String>,
+    /// Required when the task or plan claims speed, latency, throughput, or optimization.
+    performance_evidence: Option<String>,
+    /// Required when the diff adds or changes unsafe code.
+    safety_notes: Option<String>,
+}
+
 // ── RA (rust-analyzer) tool parameter structs ──────────────────────────
 
 #[derive(Deserialize, JsonSchema)]
@@ -874,6 +933,104 @@ impl IlluServer {
         tracing::info!(query = %params.query, "Tool call: axioms");
         let _guard = crate::status::StatusGuard::new(&format!("axioms ▸ {}", params.query));
         let result = tools::axioms::handle_axioms(&params.query).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "std_docs",
+        description = "Verify standard-library behavior from local rustdoc. Resolves items such as std::collections::HashMap, std::collections::HashMap::iter, and std::path::Path::strip_prefix."
+    )]
+    async fn std_docs(
+        &self,
+        Parameters(params): Parameters<StdDocsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(item = %params.item, topic = ?params.topic, "Tool call: std_docs");
+        let _guard = crate::status::StatusGuard::new(&format!("std_docs ▸ {}", params.item));
+        let item = params.item.clone();
+        let topic = params.topic.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            tools::std_docs::handle_std_docs(&item, topic.as_deref())
+        })
+        .await
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        .map_err(|e| McpError::internal_error(format_error_chain(&e), None))?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "rust_preflight",
+        description = "Build the required evidence packet before Rust design/code: axioms, local symbol context, impact/test hints, std/dependency docs, model-failure reminders, and a design-plan template."
+    )]
+    async fn rust_preflight(
+        &self,
+        Parameters(params): Parameters<RustPreflightParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(
+            task = %params.task,
+            symbols = ?params.symbols,
+            std_items = ?params.std_items,
+            dependencies = ?params.dependencies,
+            git_ref = ?params.git_ref,
+            "Tool call: rust_preflight"
+        );
+        let _guard = crate::status::StatusGuard::new("rust_preflight");
+        self.refresh().await?;
+        let task = params.task.clone();
+        let symbols = params.symbols.clone();
+        let std_items = params.std_items.clone();
+        let dependencies = params.dependencies.clone();
+        let git_ref = params.git_ref.clone();
+        let result = self
+            .run_blocking(move |db, cfg| {
+                tools::rust_preflight::handle_rust_preflight(
+                    db,
+                    &cfg.repo_path,
+                    &task,
+                    &symbols,
+                    &std_items,
+                    &dependencies,
+                    git_ref.as_deref(),
+                )
+            })
+            .await?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "quality_gate",
+        description = "Check whether a diff has enough Rust design evidence before final answer or commit. Reports PASS, WARN, or BLOCKED with concrete missing evidence."
+    )]
+    async fn quality_gate(
+        &self,
+        Parameters(params): Parameters<QualityGateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(task = %params.task, git_ref = ?params.git_ref, "Tool call: quality_gate");
+        let _guard = crate::status::StatusGuard::new("quality_gate");
+        let task = params.task.clone();
+        let plan = params.plan.clone();
+        let docs_verified = params.docs_verified.clone();
+        let impact_checked = params.impact_checked.clone();
+        let tests_run = params.tests_run.clone();
+        let git_ref = params.git_ref.clone();
+        let performance_evidence = params.performance_evidence.clone();
+        let safety_notes = params.safety_notes.clone();
+        let result = self
+            .run_blocking(move |_db, cfg| {
+                tools::quality_gate::handle_quality_gate(
+                    &cfg.repo_path,
+                    tools::quality_gate::QualityGateRequest {
+                        task: &task,
+                        plan: &plan,
+                        docs_verified: &docs_verified,
+                        impact_checked: &impact_checked,
+                        tests_run: &tests_run,
+                        performance_evidence: performance_evidence.as_deref(),
+                        safety_notes: safety_notes.as_deref(),
+                    },
+                    git_ref.as_deref(),
+                )
+            })
+            .await?;
         Ok(text_result(result))
     }
 
@@ -2445,6 +2602,9 @@ mod info_tests {
     #[test]
     fn server_instructions_include_rust_quality_gate() {
         let instructions = server_instructions();
+        assert!(instructions.contains("rust_preflight"));
+        assert!(instructions.contains("std_docs"));
+        assert!(instructions.contains("quality_gate"));
         assert!(instructions.contains("make a short plan"));
         assert!(instructions.contains("choose data structures deliberately"));
         assert!(instructions.contains("verify API behavior from documentation"));

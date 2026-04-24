@@ -2,7 +2,7 @@
 
 This project is indexed by illu-rs. Use the following MCP tools to explore the codebase and its dependencies.
 
-## Tools (49 available)
+## Tools (53 available)
 
 ### Search & Navigate
 
@@ -12,6 +12,13 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 - **symbols_at** — Find symbols at a file:line location.
 - **overview** — Public symbols under a path, grouped by file.
 - **tree** — File/module hierarchy.
+
+### Rust Quality
+
+- **axioms** — Rust rules, safety constraints, and best-practice guidance.
+- **rust_preflight** — Required evidence packet before Rust design/code: axioms, symbol context, impact hints, std/dependency docs, and model-failure reminders.
+- **std_docs** — Local standard-library rustdoc lookup for items and methods.
+- **quality_gate** — PASS/WARN/BLOCKED check for Rust diff evidence before final answer or commit.
 
 ### Impact Analysis
 
@@ -78,12 +85,15 @@ This project is indexed by illu-rs. Use the following MCP tools to explore the c
 
 Before writing, modifying, or recommending Rust code, do these in order:
 
-1. Plan first — name the data flow, invariants, failure cases, and the concrete types (structs / enums / newtypes / collections) you will use.
-2. Choose data structures deliberately; prefer representations that make invalid states unrepresentable.
-3. Read the docs before assuming any non-trivial API's behavior. Standard-library items are not exempt.
-4. Query `axioms` twice: once with `planning data structures documentation comments idiomatic rust verification performance` and once with the concrete task context.
-5. Write idiomatic Rust per The Rust Book, Rust for Rustaceans, and illu axioms — ownership/borrowing, enums, iterators, explicit errors.
-6. Comments must explain invariants, safety, ownership rationale, or why the design exists — never narrate syntax.
+1. Run `rust_preflight` first to gather axioms, local symbol evidence, impact hints, std/dependency docs, and model-failure reminders.
+2. Plan first after preflight — name the data flow, invariants, failure cases, and the concrete types (structs / enums / newtypes / collections) you will use.
+3. Choose data structures deliberately; prefer representations that make invalid states unrepresentable.
+4. Read the docs before assuming any non-trivial API's behavior. Standard-library items require `std_docs`; dependencies use `docs`; local types use `context`.
+5. Query `axioms` twice if preflight did not already supply both: once with `planning data structures documentation comments idiomatic rust verification performance` and once with the concrete task context.
+6. Write idiomatic Rust per The Rust Book, Rust for Rustaceans, and illu axioms — ownership/borrowing, enums, iterators, explicit errors.
+7. Comments must explain invariants, safety, ownership rationale, or why the design exists — never narrate syntax.
+
+Before final answer or commit for a Rust diff, run `quality_gate` with the plan, docs verified, impact checked, and tests run. `BLOCKED` means the work is not ready.
 
 Full rules: see the `Rust Design Discipline` section of CLAUDE.md or GEMINI.md in the repo.
 

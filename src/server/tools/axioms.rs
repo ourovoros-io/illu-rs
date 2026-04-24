@@ -9,6 +9,8 @@ use std::sync::OnceLock;
 #[derive(Deserialize, Debug)]
 struct RawAxiom {
     category: String,
+    #[serde(default)]
+    source: Option<String>,
     triggers: Vec<String>,
     rule_summary: String,
     prompt_injection: String,
@@ -18,12 +20,13 @@ struct RawAxiom {
 
 /// In-memory axiom with pre-lowercased fields. Scoring touches every
 /// axiom on every query; lowering once at load time trades ~a few KB
-/// of steady-state memory for avoiding 31 × (n triggers + 2) string
+/// of steady-state memory for avoiding repeated per-query string
 /// allocations per call.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Axiom {
     pub category: String,
+    pub source: Option<String>,
     pub triggers: Vec<String>,
     pub rule_summary: String,
     pub prompt_injection: String,
@@ -41,6 +44,7 @@ impl From<RawAxiom> for Axiom {
         let rule_summary_lower = raw.rule_summary.to_lowercase();
         Self {
             category: raw.category,
+            source: raw.source,
             triggers: raw.triggers,
             rule_summary: raw.rule_summary,
             prompt_injection: raw.prompt_injection,
@@ -55,6 +59,8 @@ impl From<RawAxiom> for Axiom {
 
 // Bake the JSON into the binary; the path is relative to this file.
 const AXIOMS_JSON: &str = include_str!("../../../assets/axioms.json");
+const RUST_QUALITY_AXIOMS_JSON: &str = include_str!("../../../assets/rust_quality_axioms.json");
+const MAX_AXIOM_RESULTS: usize = 16;
 
 /// Parse once, cache forever. Parse failure is returned to the caller on
 /// first call; later calls will retry until one succeeds.
@@ -63,7 +69,10 @@ fn axioms() -> Result<&'static [Axiom], crate::IlluError> {
     if let Some(cached) = AXIOMS.get() {
         return Ok(cached);
     }
-    let raw: Vec<RawAxiom> = serde_json::from_str(AXIOMS_JSON)?;
+    let mut raw: Vec<RawAxiom> = serde_json::from_str(AXIOMS_JSON)?;
+    raw.extend(serde_json::from_str::<Vec<RawAxiom>>(
+        RUST_QUALITY_AXIOMS_JSON,
+    )?);
     let parsed: Vec<Axiom> = raw.into_iter().map(Axiom::from).collect();
     // Lost-race set is fine — the winner's Vec is equivalent to ours.
     let _ = AXIOMS.set(parsed);
@@ -119,13 +128,14 @@ pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
 
     scored.sort_by_key(|&(_, score)| Reverse(score));
 
-    // The top-N is sized to the number of design-category axioms in
-    // `assets/axioms.json` (Design Workflow, Data Modeling, Documentation,
-    // Comments, Idiomatic Rust, Verification Sources, Performance Discipline)
-    // so the baseline quality query returns every design rule alongside
-    // whichever language-mechanics rules also score. Bump in lockstep when a
-    // new design category is added.
-    let top: Vec<&Axiom> = scored.into_iter().take(7).map(|(a, _)| a).collect();
+    // Keep enough matches for the broad baseline quality query to include
+    // both the project-specific design axioms and the stricter Rust API
+    // axioms, while still keeping MCP responses short enough to read.
+    let top: Vec<&Axiom> = scored
+        .into_iter()
+        .take(MAX_AXIOM_RESULTS)
+        .map(|(a, _)| a)
+        .collect();
 
     let mut output = String::new();
     let _ = writeln!(output, "## Rust Axioms matching '{query}'\n");
@@ -140,6 +150,9 @@ pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
 
     for axiom in top {
         let _ = writeln!(output, "### [{}] {}", axiom.category, axiom.rule_summary);
+        if let Some(source) = &axiom.source {
+            let _ = writeln!(output, "_Source: {source}_");
+        }
         let _ = writeln!(output, "> **{}**\n", axiom.prompt_injection);
 
         if !axiom.good_pattern.is_empty() {
@@ -166,6 +179,19 @@ pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
 #[expect(clippy::unwrap_used, reason = "tests")]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    #[derive(Deserialize)]
+    struct TestAxiom {
+        id: String,
+        category: String,
+        source: Option<String>,
+        triggers: Vec<String>,
+        rule_summary: String,
+        prompt_injection: String,
+        anti_pattern: String,
+        good_pattern: String,
+    }
 
     #[test]
     fn test_handle_axioms() {
@@ -182,6 +208,13 @@ mod tests {
     }
 
     #[test]
+    fn test_rust_quality_axioms_are_loaded_with_sources() {
+        let result = handle_axioms("miri undefined behavior impeccable rust").unwrap();
+        assert!(result.contains("Miri"));
+        assert!(result.contains("Source:"));
+    }
+
+    #[test]
     fn test_quality_query_returns_design_axioms() {
         let result = handle_axioms(crate::agents::instruction_md::RUST_QUALITY_QUERY).unwrap();
         assert!(result.contains("Design Workflow"));
@@ -191,5 +224,49 @@ mod tests {
         assert!(result.contains("Idiomatic Rust"));
         assert!(result.contains("Verification Sources"));
         assert!(result.contains("Performance Discipline"));
+    }
+
+    #[test]
+    fn test_axiom_assets_have_unique_ids_and_required_fields() {
+        let mut axioms: Vec<TestAxiom> = serde_json::from_str(AXIOMS_JSON).unwrap();
+        axioms.extend(serde_json::from_str::<Vec<TestAxiom>>(RUST_QUALITY_AXIOMS_JSON).unwrap());
+        let mut ids = BTreeSet::new();
+        let mut rust_quality_axiom_count = 0;
+
+        for axiom in axioms {
+            if axiom.id.starts_with("rust_quality_") {
+                rust_quality_axiom_count += 1;
+                assert!(
+                    axiom
+                        .source
+                        .as_deref()
+                        .is_some_and(|source| !source.trim().is_empty()),
+                    "{}",
+                    axiom.id
+                );
+            }
+            assert!(!axiom.id.trim().is_empty());
+            assert!(
+                ids.insert(axiom.id.clone()),
+                "duplicate axiom id {}",
+                axiom.id
+            );
+            assert!(!axiom.category.trim().is_empty(), "{}", axiom.id);
+            assert!(!axiom.triggers.is_empty(), "{}", axiom.id);
+            assert!(
+                axiom
+                    .triggers
+                    .iter()
+                    .all(|trigger| !trigger.trim().is_empty()),
+                "{}",
+                axiom.id
+            );
+            assert!(!axiom.rule_summary.trim().is_empty(), "{}", axiom.id);
+            assert!(!axiom.prompt_injection.trim().is_empty(), "{}", axiom.id);
+            assert!(!axiom.anti_pattern.trim().is_empty(), "{}", axiom.id);
+            assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
+        }
+
+        assert_eq!(rust_quality_axiom_count, 56);
     }
 }

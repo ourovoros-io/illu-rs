@@ -1,0 +1,562 @@
+[
+  {
+    "id": "rust_quality_01_works_not_broken",
+    "category": "Correctness Mindset",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, Rust Nation UK 2024.",
+    "triggers": ["impeccable rust", "works not broken", "correctness", "paranoia", "evidence"],
+    "rule_summary": "`It works` is not the same as `it is not broken`. Treat passing tests as evidence, not proof, and keep looking for conditions the current evidence does not cover.",
+    "prompt_injection": "MANDATORY RULE: Do not call Rust code correct merely because the happy path or current test suite passes. State what evidence exists and what classes of failure remain untested.",
+    "anti_pattern": "// cargo test passed, so this parser is correct for all inputs.",
+    "good_pattern": "// Evidence: unit tests cover valid/invalid fixtures; property tests cover round-trips.\n// Residual risk: malformed Unicode paths are not generated yet."
+  },
+  {
+    "id": "rust_quality_02_quality_is_recurrent",
+    "category": "Quality Discipline",
+    "source": "Public Compose podcast discussion, August 2024.",
+    "triggers": ["quality", "recurring", "maintenance", "testing arsenal", "budget"],
+    "rule_summary": "Software quality is never finished. Treat documentation, tests, benchmarks, dependency review, and maintenance as recurring work that must be budgeted explicitly.",
+    "prompt_injection": "MANDATORY RULE: When planning Rust work, include the recurring quality follow-up if the current slice cannot cover docs, tests, benchmarks, or dependency review fully.",
+    "anti_pattern": "// One-time cleanup complete; no follow-up needed.",
+    "good_pattern": "// Follow-up: add proptest fixtures for parser edge cases after the first deterministic tests land."
+  },
+  {
+    "id": "rust_quality_03_stagnation_is_choice",
+    "category": "Maintenance Automation",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, maintenance section.",
+    "triggers": ["stagnation", "dependabot", "toolchain", "updates", "maintenance"],
+    "rule_summary": "Make stagnation a deliberate choice, not the default. Automate dependency and toolchain update reminders, and document why an update is skipped.",
+    "prompt_injection": "MANDATORY RULE: If you leave dependencies, toolchains, or lints stale, record the reason and ensure automation will remind maintainers again.",
+    "anti_pattern": "// We have not updated dependencies in a year; nobody noticed.",
+    "good_pattern": "// Dependabot tracks routine bumps. Holding foo 1.2 because 1.3 breaks MSRV; revisit after MSRV moves."
+  },
+  {
+    "id": "rust_quality_04_no_holding_it_wrong",
+    "category": "Misuse Resistance",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, API design section.",
+    "triggers": ["holding it wrong", "misuse resistance", "api design", "path of least resistance"],
+    "rule_summary": "`You are holding it wrong` is not an acceptable API answer. Make the wrong use hard or impossible and the right use obvious.",
+    "prompt_injection": "MANDATORY RULE: If a caller can easily misuse your API, redesign the API before blaming caller discipline.",
+    "anti_pattern": "fn commit(tx: Transaction, already_validated: bool) -> Result<()> { /* caller must know */ }",
+    "good_pattern": "struct OpenTransaction;\nstruct ValidatedTransaction;\nfn validate(tx: OpenTransaction) -> Result<ValidatedTransaction> { /* ... */ }\nfn commit(tx: ValidatedTransaction) -> Result<()> { /* ... */ }"
+  },
+  {
+    "id": "rust_quality_05_document_decisions",
+    "category": "Decision Documentation",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, decision documentation and ADR guidance.",
+    "triggers": ["adr", "decision", "alternatives", "rejected", "rationale"],
+    "rule_summary": "Document decisions while context is fresh, especially rejected alternatives and accepted downsides.",
+    "prompt_injection": "MANDATORY RULE: For non-obvious Rust design choices, write down what alternatives were rejected and why. Future maintainers need the discarded paths more than the final code shape.",
+    "anti_pattern": "// Uses BTreeMap.\nlet entries = BTreeMap::new();",
+    "good_pattern": "// Decision: BTreeMap over HashMap because output order is part of snapshot stability.\n// Rejected HashMap + sort because every query would pay the sort cost."
+  },
+  {
+    "id": "rust_quality_06_document_absence",
+    "category": "Missing Work Documentation",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, `Document what's not there` section.",
+    "triggers": ["document absence", "shortcuts", "todo", "unimplemented", "missing corner cases"],
+    "rule_summary": "Document what is not handled: shortcuts, missing corner cases, missing trait impls, and future optimization opportunities.",
+    "prompt_injection": "MANDATORY RULE: Do not leave partial behavior invisible. Mark unhandled cases explicitly with documentation, TODOs, or `todo!()`/`unimplemented!()` where appropriate.",
+    "anti_pattern": "match format {\n    Format::Json => parse_json(input),\n    Format::Toml => Ok(Config::default()),\n}",
+    "good_pattern": "match format {\n    Format::Json => parse_json(input),\n    Format::Toml => todo!(\"TOML parsing needs dotted-table fixture coverage before shipping\"),\n}"
+  },
+  {
+    "id": "rust_quality_07_newtypes_not_aliases",
+    "category": "Type Safety",
+    "source": "Public Rust quality talk: Towards Impeccable Rust; rust-imap `Seq` and `Uid` pattern.",
+    "triggers": ["newtype", "type alias", "meters", "miles", "uid", "seq"],
+    "rule_summary": "Use newtypes, not type aliases, when the unit or meaning matters. Type aliases do not prevent accidental mixing.",
+    "prompt_injection": "MANDATORY RULE: If two values share a primitive representation but differ semantically, make them distinct newtypes.",
+    "anti_pattern": "type Meters = u64;\ntype Miles = u64;\nfn travel(distance: Meters) {}",
+    "good_pattern": "struct Meters(u64);\nstruct Miles(u64);\nfn travel(distance: Meters) {}"
+  },
+  {
+    "id": "rust_quality_08_typestates_lifecycle",
+    "category": "Typestate",
+    "source": "Public Rust quality talk: Towards Impeccable Rust; rust-imap `Client<T>` to `Session<T>` pattern.",
+    "triggers": ["typestate", "rocket", "lifecycle", "state transition", "client session"],
+    "rule_summary": "Encode lifecycle phases as different types. Legal methods live only on the phase where they can be called, and fallible transitions should return the original value on failure when retry is possible.",
+    "prompt_injection": "MANDATORY RULE: Do not represent lifecycle validity with booleans when distinct Rust types can make invalid calls fail to compile.",
+    "anti_pattern": "struct Rocket { in_air: bool }\nimpl Rocket { fn land(&mut self) { assert!(self.in_air); } }",
+    "good_pattern": "struct Ground;\nstruct Air;\nstruct Rocket<State> { state: State }\nimpl Rocket<Ground> { fn launch(self) -> Result<Rocket<Air>, Rocket<Ground>> { /* ... */ } }"
+  },
+  {
+    "id": "rust_quality_09_two_phase_config",
+    "category": "Configuration Validation",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, two-phase structs example.",
+    "triggers": ["two phase", "toml config", "resolved config", "validation", "defaults"],
+    "rule_summary": "Use separate types for raw user configuration and resolved, defaulted, validated configuration.",
+    "prompt_injection": "MANDATORY RULE: Do not let unvalidated configuration masquerade as validated configuration. Cross the boundary through a fallible conversion.",
+    "anti_pattern": "struct Config { path: String, timeout_ms: Option<u64> }\nfn run(config: Config) -> Result<()> { /* re-checks everywhere */ }",
+    "good_pattern": "struct TomlConfig { path: String, timeout_ms: Option<u64> }\nstruct ResolvedConfig { path: PathBuf, timeout: Duration }\nimpl TryFrom<TomlConfig> for ResolvedConfig { type Error = Error; fn try_from(raw: TomlConfig) -> Result<Self> { /* ... */ } }"
+  },
+  {
+    "id": "rust_quality_10_enums_not_booleans",
+    "category": "API Shape",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, enums-over-booleans section.",
+    "triggers": ["enum not bool", "boolean parameter", "readable call site", "named variants"],
+    "rule_summary": "Prefer named enum variants over boolean parameters so call sites are readable and exhaustive.",
+    "prompt_injection": "MANDATORY RULE: Replace boolean parameters with small enums whenever the call-site meaning is not obvious.",
+    "anti_pattern": "open(path, true, false, true)?;",
+    "good_pattern": "open(path, Create::Yes, Truncate::No, SyncWrites::Yes)?;"
+  },
+  {
+    "id": "rust_quality_11_enums_for_linked_args",
+    "category": "API Shape",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, linked-argument enums section.",
+    "triggers": ["linked arguments", "illegal combinations", "enum variant data", "option with bool"],
+    "rule_summary": "When arguments must vary together, encode the legal combinations as one enum instead of independent parameters.",
+    "prompt_injection": "MANDATORY RULE: If only some combinations of parameters are valid, collapse them into a type that represents only those combinations.",
+    "anti_pattern": "fn cache(enabled: bool, ttl: Option<Duration>) {} // false + Some is illegal",
+    "good_pattern": "enum CacheMode { Disabled, Enabled { ttl: Duration } }\nfn cache(mode: CacheMode) {}"
+  },
+  {
+    "id": "rust_quality_12_unsafe_semantic_signpost",
+    "category": "Semantic Unsafe",
+    "source": "Helsing `sguaba` crate docs and frame-of-reference safety explanation.",
+    "triggers": ["sguaba", "semantic unsafe", "coordinate frame", "units", "safety signpost"],
+    "rule_summary": "In rare high-stakes domains, `unsafe` can signpost semantic obligations such as coordinate frames or units, concentrating auditable promises even when memory safety is not at risk.",
+    "prompt_injection": "MANDATORY RULE: Only use semantic `unsafe` for catastrophic non-memory invariants, and document the exact semantic promise the caller upholds.",
+    "anti_pattern": "fn rigid_body_transform(frame: Frame, data: Matrix) -> Transform { Transform { frame, data } }",
+    "good_pattern": "unsafe fn rigid_body_transform(frame: Frame, data: Matrix) -> Transform {\n    // Caller must prove `data` maps exactly into `frame`.\n    Transform { frame, data }\n}"
+  },
+  {
+    "id": "rust_quality_13_safety_comments",
+    "category": "Unsafe Documentation",
+    "source": "`left-right` source; unsafe blocks carry invariant comments.",
+    "triggers": ["unsafe", "SAFETY", "left-right", "invariant", "pointer"],
+    "rule_summary": "Every unsafe block needs a nearby `// SAFETY:` comment explaining why the invariants are upheld, not merely why unsafe is needed.",
+    "prompt_injection": "MANDATORY RULE: An unsafe block without a reviewable `// SAFETY:` invariant explanation is not acceptable.",
+    "anti_pattern": "// Need unsafe for raw pointer.\nlet value = unsafe { *ptr };",
+    "good_pattern": "// SAFETY: `ptr` points into `storage`; readers cannot advance the epoch until this guard drops.\nlet value = unsafe { *ptr };"
+  },
+  {
+    "id": "rust_quality_14_clippy_api_guidelines",
+    "category": "Lint Discipline",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, Clippy and Rust API Guidelines section.",
+    "triggers": ["clippy", "api guidelines", "idiomatic rust", "lint", "oop smell"],
+    "rule_summary": "Treat Clippy and the Rust API Guidelines as design feedback. Rust that smells like OOP, Python, Java, or C often fights the language.",
+    "prompt_injection": "MANDATORY RULE: Do not dismiss lints as cosmetic until you can explain why the lint's design concern does not apply.",
+    "anti_pattern": "#[allow(clippy::all)]\nmod new_feature;",
+    "good_pattern": "#[expect(clippy::too_many_lines, reason = \"CLI dispatch is clearer as one match\")]\nfn dispatch() { /* ... */ }"
+  },
+  {
+    "id": "rust_quality_15_minimize_public_surface",
+    "category": "Public API Surface",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, stable-core/public-surface section.",
+    "triggers": ["public surface", "pub fields", "impl Trait", "trait impl", "semver"],
+    "rule_summary": "Minimize public API. Prefer hiding implementation details with private fields, non-public helpers, and `impl Trait` returns where the concrete type is not part of the contract.",
+    "prompt_injection": "MANDATORY RULE: Every `pub` item is a commitment. Before adding it, prove external users need it and that its exposed dependencies are stable enough.",
+    "anti_pattern": "pub struct Server { pub db: rusqlite::Connection }\nimpl From<External> for Server { /* public forever */ }",
+    "good_pattern": "pub struct Server { db: Database }\nimpl Server { pub fn stats(&self) -> Stats { self.db.stats() } }"
+  },
+  {
+    "id": "rust_quality_16_public_dependencies",
+    "category": "Public Dependencies",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, dependencies section.",
+    "triggers": ["public dependency", "dependency type", "newtype dependency", "semver"],
+    "rule_summary": "Any dependency type exposed in your public API becomes part of your semver surface. Wrap unstable or fast-moving dependency types before exposing them.",
+    "prompt_injection": "MANDATORY RULE: Do not expose third-party types in public signatures casually; doing so couples your crate's versioning to theirs.",
+    "anti_pattern": "pub fn connection(&self) -> &rusqlite::Connection { &self.conn }",
+    "good_pattern": "pub struct DbConnection { inner: rusqlite::Connection }\npub fn connection(&self) -> &DbConnection { &self.conn }"
+  },
+  {
+    "id": "rust_quality_17_compatibility_automation",
+    "category": "Compatibility Automation",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, cargo-semver-checks and cargo-public-api guidance.",
+    "triggers": ["semver", "cargo-semver-checks", "cargo-public-api", "compatibility", "api breakage"],
+    "rule_summary": "Use automation such as `cargo-semver-checks` and `cargo-public-api` to catch public API breakage humans miss.",
+    "prompt_injection": "MANDATORY RULE: For public API changes, add or run compatibility tooling instead of relying on reviewer memory.",
+    "anti_pattern": "// Public API changed; reviewer will notice if it is breaking.",
+    "good_pattern": "cargo semver-checks check-release\ncargo public-api diff"
+  },
+  {
+    "id": "rust_quality_18_non_exhaustive",
+    "category": "Public API Evolution",
+    "source": "Public Rust library style observed in rust-imap public API.",
+    "triggers": ["non_exhaustive", "public enum", "public struct", "future fields"],
+    "rule_summary": "Use `#[non_exhaustive]` on public enums and structs unless you are certain the shape is final.",
+    "prompt_injection": "MANDATORY RULE: New public data types need either `#[non_exhaustive]` or an explicit frozen-API justification.",
+    "anti_pattern": "pub enum Status { Ready, Busy }",
+    "good_pattern": "#[non_exhaustive]\npub enum Status { Ready, Busy }"
+  },
+  {
+    "id": "rust_quality_19_deny_missing_docs",
+    "category": "API Documentation",
+    "source": "Observed public Rust repositories: rust-imap, inferno, fantoccini, and left-right.",
+    "triggers": ["missing_docs", "deny missing docs", "public docs", "crate docs"],
+    "rule_summary": "Library crates should deny missing docs so every public item has a documented contract.",
+    "prompt_injection": "MANDATORY RULE: Do not add public API without documentation, and prefer making missing docs a hard failure in library crates.",
+    "anti_pattern": "pub fn parse(input: &str) -> Result<Value> { /* undocumented */ }",
+    "good_pattern": "#![deny(missing_docs)]\n\n/// Parses `input` into a validated value.\npub fn parse(input: &str) -> Result<Value> { /* ... */ }"
+  },
+  {
+    "id": "rust_quality_20_standard_crate_lints",
+    "category": "Crate Lints",
+    "source": "Direct inspection of Observed public Rust repositories: inferno, fantoccini, rust-imap, left-right.",
+    "triggers": ["rust_2018_idioms", "missing_debug_implementations", "unreachable_pub", "broken_intra_doc_links", "crate lints"],
+    "rule_summary": "Adopt strict crate-level lints: missing docs, Rust idioms, missing Debug, unreachable public items, and broken intra-doc links.",
+    "prompt_injection": "MANDATORY RULE: New library crates should start with strict documentation and API-shape lints rather than adding them after the API drifts.",
+    "anti_pattern": "#![allow(warnings)]",
+    "good_pattern": "#![deny(missing_docs)]\n#![warn(rust_2018_idioms, missing_debug_implementations, unreachable_pub, broken_intra_doc_links)]"
+  },
+  {
+    "id": "rust_quality_21_dual_license",
+    "category": "Crate Metadata",
+    "source": "Public Rust crate metadata convention across public crates.",
+    "triggers": ["license", "MIT", "Apache-2.0", "crate metadata"],
+    "rule_summary": "Use the Rust ecosystem standard `MIT OR Apache-2.0` dual license unless there is an intentional reason not to.",
+    "prompt_injection": "MANDATORY RULE: Treat crate licensing as a deliberate compatibility decision, not an afterthought.",
+    "anti_pattern": "license = \"MIT\" # chosen accidentally",
+    "good_pattern": "license = \"MIT OR Apache-2.0\""
+  },
+  {
+    "id": "rust_quality_22_assert_invariants",
+    "category": "Invariant Testing",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, testing section.",
+    "triggers": ["assert everything", "assert", "debug_assert", "invariant"],
+    "rule_summary": "Assert everything that must be true. In tests and invariant-heavy code, assertions turn silent drift into local failures.",
+    "prompt_injection": "MANDATORY RULE: If correctness depends on an invariant, assert it where it is established or consumed.",
+    "anti_pattern": "self.len -= 1; // assumes len was non-zero",
+    "good_pattern": "debug_assert!(self.len > 0, \"pop called only after non-empty check\");\nself.len -= 1;"
+  },
+  {
+    "id": "rust_quality_23_miri",
+    "category": "Undefined Behavior Testing",
+    "source": "Public Rust quality talk: Towards Impeccable Rust; left-right safety workflow.",
+    "triggers": ["miri", "cargo miri", "undefined behavior", "ub", "pointer provenance"],
+    "rule_summary": "Run tests under Miri for unsafe or subtle code so undefined behavior surfaces even when normal tests pass.",
+    "prompt_injection": "MANDATORY RULE: For unsafe code, pointer-heavy code, or complex aliasing, `cargo test` is not enough. Add or document a `cargo miri test` path.",
+    "anti_pattern": "// Unsafe pointer code is covered by regular unit tests only.",
+    "good_pattern": "cargo +nightly miri test"
+  },
+  {
+    "id": "rust_quality_24_sanitizers",
+    "category": "Memory Testing",
+    "source": "left-right `.github/workflows/safety.yml` sanitizer workflow.",
+    "triggers": ["asan", "lsan", "sanitizer", "addresssanitizer", "leaksanitizer", "memory"],
+    "rule_summary": "Run sanitizer-backed tests, especially ASan and LSan, when memory behavior or unsafe code matters.",
+    "prompt_injection": "MANDATORY RULE: For unsafe or systems-adjacent code, consider sanitizer CI alongside normal tests and Miri.",
+    "anti_pattern": "// Memory safety checked only by review.",
+    "good_pattern": "RUSTFLAGS=\"-Z sanitizer=address\" cargo +nightly test -Z build-std"
+  },
+  {
+    "id": "rust_quality_25_error_path_tests",
+    "category": "Error Path Testing",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, error-case testing aside.",
+    "triggers": ["error path", "error cases", "failure tests", "negative tests"],
+    "rule_summary": "Test error paths, not only happy paths. Rarely exercised failure branches are where production bugs hide.",
+    "prompt_injection": "MANDATORY RULE: Any new fallible behavior needs tests for at least one success path and the important failure paths.",
+    "anti_pattern": "#[test]\nfn parses_valid_config() { assert!(parse(\"ok\").is_ok()); }",
+    "good_pattern": "#[test]\nfn rejects_missing_required_field() { assert!(matches!(parse(\"{}\"), Err(Error::MissingField(_)))); }"
+  },
+  {
+    "id": "rust_quality_26_chaos_toolbox",
+    "category": "Chaos Testing",
+    "source": "Public Rust quality talk and public Compose podcast discussion.",
+    "triggers": ["turmoil", "shuttle", "quickcheck", "proptest", "cargo-mutants", "chaos"],
+    "rule_summary": "Use the right chaos tool for the risk: `turmoil` or `shuttle` for scheduling, `proptest` or `quickcheck` for input spaces, and `cargo-mutants` to test the tests.",
+    "prompt_injection": "MANDATORY RULE: For high-stakes logic, name which chaos or mutation technique would expose bugs that example tests cannot.",
+    "anti_pattern": "// One hand-written concurrent test is enough.",
+    "good_pattern": "// Add shuttle model test for task interleavings and proptest for generated request sequences."
+  },
+  {
+    "id": "rust_quality_27_exhaustive_testing",
+    "category": "Exhaustive Testing",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, Loom and Kani recommendations.",
+    "triggers": ["loom", "kani", "exhaustive", "symbolic", "interleavings", "concurrent"],
+    "rule_summary": "Where exhaustive exploration is affordable, use it. Loom explores thread interleavings; Kani can prove input-space properties.",
+    "prompt_injection": "MANDATORY RULE: For concurrent or unsafe code, ask whether Loom or Kani can give a stronger guarantee than sampled tests.",
+    "anti_pattern": "// Threading code tested once with two spawned threads.",
+    "good_pattern": "#[test]\nfn loom_model_no_lost_update() {\n    loom::model(|| { /* all relevant interleavings */ });\n}"
+  },
+  {
+    "id": "rust_quality_28_property_tests",
+    "category": "Property Testing",
+    "source": "Public Compose podcast discussion; repeated proptest/quickcheck recommendations.",
+    "triggers": ["property test", "proptest", "quickcheck", "reference implementation", "round trip"],
+    "rule_summary": "Use property tests to assert relationships across large input spaces, especially against a simpler reference implementation when available.",
+    "prompt_injection": "MANDATORY RULE: If the behavior has algebraic, round-trip, ordering, or equivalence properties, add property tests rather than only examples.",
+    "anti_pattern": "#[test]\nfn one_case() { assert_eq!(fast(vec![1, 2]), slow(vec![1, 2])); }",
+    "good_pattern": "proptest! {\n    #[test]\n    fn fast_matches_slow(input in any::<Vec<u8>>()) {\n        prop_assert_eq!(fast(&input), slow(&input));\n    }\n}"
+  },
+  {
+    "id": "rust_quality_29_concolic_symbolic",
+    "category": "Symbolic Execution",
+    "source": "Public Compose podcast discussion, concolic execution discussion.",
+    "triggers": ["concolic", "symbolic execution", "adversarial inputs", "kani"],
+    "rule_summary": "For high-stakes input spaces, consider concolic or symbolic execution to find adversarial cases random generation may never hit.",
+    "prompt_injection": "MANDATORY RULE: When random property testing is too weak for the risk, consider symbolic or concolic exploration and document why it is or is not practical.",
+    "anti_pattern": "// Random tests did not find anything, therefore all inputs are safe.",
+    "good_pattern": "// Kani proof covers all u16 state transitions; proptest remains as a regression harness."
+  },
+  {
+    "id": "rust_quality_30_fault_injection",
+    "category": "Fault Injection",
+    "source": "Public Compose podcast discussion, chaos testing discussion.",
+    "triggers": ["chaos testing", "fault injection", "network partition", "slow disk", "io error"],
+    "rule_summary": "Kill things on purpose and verify recovery. For libraries, inject I/O and dependency failures at arbitrary points.",
+    "prompt_injection": "MANDATORY RULE: If code handles external systems, add tests where those systems fail, stall, or return malformed data.",
+    "anti_pattern": "// File writes are assumed to succeed in tests.",
+    "good_pattern": "let fs = FailingFs::fail_after(2);\nassert!(matches!(save_with_fs(&fs, data), Err(Error::Write(_))));"
+  },
+  {
+    "id": "rust_quality_31_benchmark_shape",
+    "category": "Benchmark Coverage",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, benchmarks section.",
+    "triggers": ["benchmark", "pathological", "micro", "macro", "capacity", "targets"],
+    "rule_summary": "Benchmarks should cover the whole performance shape: pathological inputs, micro and macro paths, under/at/over capacity, and relevant target platforms.",
+    "prompt_injection": "MANDATORY RULE: Do not benchmark only the easy common case when claiming performance. Cover the shape of the workload.",
+    "anti_pattern": "// Benchmarked one small happy-path input, so the parser is faster.",
+    "good_pattern": "// Benchmarks include tiny, median fixture, huge file, deeply nested syntax, and malformed recovery cases."
+  },
+  {
+    "id": "rust_quality_32_trustworthy_measurements",
+    "category": "Benchmark Methodology",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, trustworthy measurements section.",
+    "triggers": ["wall clock", "iai-callgrind", "tango", "noise", "benchmark methodology"],
+    "rule_summary": "Trustworthy measurements matter more than precise-looking noisy numbers. Prefer instruction counts or interleaved comparisons, and reduce ambient noise.",
+    "prompt_injection": "MANDATORY RULE: Do not base performance claims on one wall-clock loop. Use a benchmark method that controls noise and compares fairly.",
+    "anti_pattern": "let start = Instant::now();\nrun_once();\nprintln!(\"fast: {:?}\", start.elapsed());",
+    "good_pattern": "// iai-callgrind tracks instruction counts; tango interleaves old/new runs for fair comparison."
+  },
+  {
+    "id": "rust_quality_33_perf_regression_ci",
+    "category": "Performance CI",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, benchmark regression CI section.",
+    "triggers": ["performance regression", "benchmark ci", "fail ci", "regression"],
+    "rule_summary": "Benchmarks must fail CI on meaningful regressions, or they become decorative and easy to ignore.",
+    "prompt_injection": "MANDATORY RULE: If performance matters enough to benchmark, wire regression detection into review or CI.",
+    "anti_pattern": "// Benchmark output is posted somewhere but nobody checks it.",
+    "good_pattern": "// CI rejects >5% instruction-count regression on the indexed hot path."
+  },
+  {
+    "id": "rust_quality_34_measure_more_than_speed",
+    "category": "Performance Metrics",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, `Speed isn't all` section.",
+    "triggers": ["throughput", "goodput", "memory", "latency", "p95", "p99"],
+    "rule_summary": "Measure what matters, not only speed: throughput, goodput, memory, tail latency, and real-world correctness outcomes.",
+    "prompt_injection": "MANDATORY RULE: Performance evidence must name the metric that matters to users, not only a faster mean runtime.",
+    "anti_pattern": "// Mean runtime improved, so the change is good.",
+    "good_pattern": "// p99 latency dropped from 180ms to 70ms; memory max stayed under 256MiB; output accuracy unchanged."
+  },
+  {
+    "id": "rust_quality_35_simple_benchmarks_lie",
+    "category": "Benchmark Rigor",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, benchmark workload-shape warning.",
+    "triggers": ["simple benchmarks lie", "open load", "closed load", "histogram", "cdf", "representative workload"],
+    "rule_summary": "Simple loop benchmarks lie. Workload model, representativeness, recording method, and statistical comparison determine whether the result means anything.",
+    "prompt_injection": "MANDATORY RULE: Do not accept `new > old` as a benchmark without workload shape and statistical rigor.",
+    "anti_pattern": "// Ran both versions once in a loop; the new number is bigger.",
+    "good_pattern": "// Open-loop load at 50/100/200 rps; CDF reports p50/p95/p99; comparison uses confidence intervals."
+  },
+  {
+    "id": "rust_quality_36_dependency_inventory",
+    "category": "Dependency Inventory",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, dependencies section.",
+    "triggers": ["dependency inventory", "supply chain", "transitive crates", "active deployments"],
+    "rule_summary": "Know every dependency you ship, including transitive versions, and keep the inventory machine-readable.",
+    "prompt_injection": "MANDATORY RULE: Treat the dependency closure as part of the product. You should be able to answer which deployed versions include a vulnerable crate.",
+    "anti_pattern": "// Cargo.lock exists somewhere; inventory is manual.",
+    "good_pattern": "cargo tree --locked\ncargo auditable build"
+  },
+  {
+    "id": "rust_quality_37_rustsec_audit",
+    "category": "Supply Chain Security",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, RUSTSEC/cargo-audit recommendation.",
+    "triggers": ["cargo-audit", "rustsec", "cve", "security advisory", "known issues"],
+    "rule_summary": "Connect dependencies to known issues automatically with RUSTSEC or `cargo-audit` in CI.",
+    "prompt_injection": "MANDATORY RULE: Known dependency vulnerabilities should surface in CI, not only when someone remembers to audit manually.",
+    "anti_pattern": "// Security review happens before releases if we remember.",
+    "good_pattern": "cargo audit --deny warnings"
+  },
+  {
+    "id": "rust_quality_38_cargo_vet",
+    "category": "Supply Chain Review",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, cargo-vet recommendation.",
+    "triggers": ["cargo-vet", "vetting", "unknown issues", "supply chain review"],
+    "rule_summary": "Use `cargo-vet` to accumulate review evidence for crates and versions, covering unknown issues beyond known CVEs.",
+    "prompt_injection": "MANDATORY RULE: For serious software, record dependency review decisions so trust accumulates instead of evaporating between releases.",
+    "anti_pattern": "// Alice looked at that crate once, probably.",
+    "good_pattern": "cargo vet certify important-crate 1.2.3 --criteria safe-to-deploy"
+  },
+  {
+    "id": "rust_quality_39_wrap_unstable_dependencies",
+    "category": "Dependency Boundary",
+    "source": "Public Rust quality talk: Towards Impeccable Rust, upstream changes/no forks guidance.",
+    "triggers": ["wrap dependency", "no forks", "unstable dependency", "upstream"],
+    "rule_summary": "Wrap unstable dependencies behind a thin boundary instead of forking or leaking their churn through your core API.",
+    "prompt_injection": "MANDATORY RULE: If a dependency is unstable or fast-moving, isolate it behind your own module or crate before it infects the public API.",
+    "anti_pattern": "pub use unstable_crate::Client;",
+    "good_pattern": "pub struct Client { inner: unstable_crate::Client }\nimpl Client { pub fn request(&self, request: Request) -> Result<Response> { /* ... */ } }"
+  },
+  {
+    "id": "rust_quality_40_omit_final_return",
+    "category": "Rust Idioms",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["return", "final expression", "idiom", "rust tips"],
+    "rule_summary": "Omit `return` for final expressions in functions, blocks, match arms, and closures.",
+    "prompt_injection": "MANDATORY RULE: Use Rust's expression-oriented style for final values unless early return is intended.",
+    "anti_pattern": "fn add_one(x: u64) -> u64 {\n    return x + 1;\n}",
+    "good_pattern": "fn add_one(x: u64) -> u64 {\n    x + 1\n}"
+  },
+  {
+    "id": "rust_quality_41_pass_methods_directly",
+    "category": "Iterator Idioms",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["method reference", "map str::len", "closure noise", "iterator"],
+    "rule_summary": "Pass methods or functions directly to iterator adapters when that reads clearer than a closure.",
+    "prompt_injection": "MANDATORY RULE: Prefer direct function items over closures that only forward the call.",
+    "anti_pattern": "let lengths: Vec<_> = words.iter().map(|word| word.len()).collect();",
+    "good_pattern": "let lengths: Vec<_> = words.iter().map(String::len).collect();"
+  },
+  {
+    "id": "rust_quality_42_todo_macros",
+    "category": "Panic Discipline",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["todo", "unimplemented", "unreachable", "panic TODO"],
+    "rule_summary": "Use `todo!()` or `unimplemented!()` for not-yet-written code and `unreachable!()` for impossible paths; avoid `panic!(\"TODO\")`.",
+    "prompt_injection": "MANDATORY RULE: Use the specific standard macro that communicates the intent of a hole or impossible branch.",
+    "anti_pattern": "panic!(\"TODO\");",
+    "good_pattern": "todo!(\"support sparse workspace manifests\")"
+  },
+  {
+    "id": "rust_quality_43_option_as_ref",
+    "category": "Option Idioms",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["Option::as_ref", "as_ref", "Option<&T>", "borrow option"],
+    "rule_summary": "Use `Option::as_ref()` when you have `&Option<T>` and need `Option<&T>` for borrowing-oriented combinators.",
+    "prompt_injection": "MANDATORY RULE: Avoid extra pattern-matching indentation when `as_ref`, `map`, and `and_then` express the optional borrow directly.",
+    "anti_pattern": "if let Some(ref value) = self.value {\n    value.render()\n} else {\n    default()\n}",
+    "good_pattern": "self.value.as_ref().map(Value::render).unwrap_or_else(default)"
+  },
+  {
+    "id": "rust_quality_44_entry_api",
+    "category": "Collection Idioms",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["Entry API", "HashMap entry", "insert or update", "or_insert"],
+    "rule_summary": "Use the `Entry` API for check-then-insert or insert-or-update map logic.",
+    "prompt_injection": "MANDATORY RULE: Replace `contains_key`/`get_mut`/`insert` dances with `entry` when updating maps.",
+    "anti_pattern": "if !map.contains_key(&key) { map.insert(key.clone(), Vec::new()); }\nmap.get_mut(&key).unwrap().push(value);",
+    "good_pattern": "map.entry(key).or_insert_with(Vec::new).push(value);"
+  },
+  {
+    "id": "rust_quality_45_collect_type_annotation",
+    "category": "Iterator Idioms",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["collect", "turbofish", "Vec<_>", "type annotation"],
+    "rule_summary": "Prefer `let x: Vec<_> = iter.collect();` over turbofish when the binding type communicates the container shape more clearly.",
+    "prompt_injection": "MANDATORY RULE: Let the binding carry the collection type when that makes `collect` easier to read.",
+    "anti_pattern": "let numbers = (0..10).collect::<Vec<_>>();",
+    "good_pattern": "let numbers: Vec<_> = (0..10).collect();"
+  },
+  {
+    "id": "rust_quality_46_enumerate",
+    "category": "Iterator Idioms",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["enumerate", "manual counter", "index loop", "for loop"],
+    "rule_summary": "Use `.enumerate()` when you need both an index and an element. Avoid manual counters and index loops over collections.",
+    "prompt_injection": "MANDATORY RULE: Do not write manual counters or `0..len` loops when iteration over elements is what you mean.",
+    "anti_pattern": "let mut i = 0;\nfor item in &items {\n    render(i, item);\n    i += 1;\n}",
+    "good_pattern": "for (i, item) in items.iter().enumerate() {\n    render(i, item);\n}"
+  },
+  {
+    "id": "rust_quality_47_cloned",
+    "category": "Iterator Idioms",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["cloned", "clone iterator", "map clone", "iterator"],
+    "rule_summary": "Use `.cloned()` when cloning every element of an iterator over references.",
+    "prompt_injection": "MANDATORY RULE: Prefer the adapter that names the intent over a closure that only calls `clone`.",
+    "anti_pattern": "let owned: Vec<_> = items.iter().map(|item| item.clone()).collect();",
+    "good_pattern": "let owned: Vec<_> = items.iter().cloned().collect();"
+  },
+  {
+    "id": "rust_quality_48_unused_arguments",
+    "category": "Naming",
+    "source": "thesquareplanet.com Rust Tips and Tricks.",
+    "triggers": ["unused arguments", "_", "_name", "allow unused variables"],
+    "rule_summary": "Use `_` for intentionally unused arguments and `_name` when the unused value still deserves a name. Avoid broad unused-variable allows.",
+    "prompt_injection": "MANDATORY RULE: Mark unused parameters locally and intentionally instead of hiding unused-variable warnings for whole functions or modules.",
+    "anti_pattern": "#[allow(unused_variables)]\nfn handle(request: Request, debug: bool) { /* ... */ }",
+    "good_pattern": "fn handle(request: Request, _debug: bool) { /* debug intentionally unused in release path */ }"
+  },
+  {
+    "id": "rust_quality_49_mutual_exclusion_reference",
+    "category": "Borrowing",
+    "source": "Public Rust trivia thread, mutually exclusive reference framing.",
+    "triggers": ["&mut", "mutually exclusive", "borrow checker", "unique reference"],
+    "rule_summary": "Think of `&mut T` as a mutually exclusive reference, not merely a mutable one. The key property is uniqueness of access.",
+    "prompt_injection": "MANDATORY RULE: When reasoning about borrow errors, ask what other access overlaps the exclusive reference, even if the code only reads.",
+    "anti_pattern": "let current = &self.items[0];\nself.items.push(new_item);\nprintln!(\"{}\", current.name);",
+    "good_pattern": "let current_name = self.items[0].name.clone();\nself.items.push(new_item);\nprintln!(\"{}\", current_name);"
+  },
+  {
+    "id": "rust_quality_50_std_tricks",
+    "category": "Standard Library Knowledge",
+    "source": "Public Rust trivia thread collected by rusty-ferris-club.",
+    "triggers": ["standard library tricks", "Option IntoIterator", "debug_struct", "try_from", "nodelay", "compare_exchange_weak"],
+    "rule_summary": "Know small standard-library tools that prevent bugs: `Option` as an iterator, formatter debug builders, `TryFrom` over narrowing `as`, `TcpStream::set_nodelay`, and appropriate atomics.",
+    "prompt_injection": "MANDATORY RULE: Before hand-rolling common patterns, verify whether the standard library already has the safer idiom.",
+    "anti_pattern": "let small = big as u8; // may truncate silently",
+    "good_pattern": "let small = u8::try_from(big).expect(\"value was range-checked before conversion\");"
+  },
+  {
+    "id": "rust_quality_51_document_tradeoffs",
+    "category": "Tradeoff Documentation",
+    "source": "left-right crate-level docs trade-offs section.",
+    "triggers": ["tradeoffs", "drawbacks", "crate docs", "limitations", "left-right"],
+    "rule_summary": "Document design tradeoffs and drawbacks in crate-level docs so users and contributors understand what is intentionally non-negotiable.",
+    "prompt_injection": "MANDATORY RULE: If the design sacrifices memory, determinism, write speed, ergonomics, or scope, say so explicitly where users will see it.",
+    "anti_pattern": "//! Fast cache library.\n//! No mention that writes are single-threaded and memory is doubled.",
+    "good_pattern": "//! # Trade-offs\n//!\n//! - Keeps two copies of state, increasing memory use.\n//! - Optimizes reads at the cost of slower writes."
+  },
+  {
+    "id": "rust_quality_52_link_deeper_explanations",
+    "category": "Documentation Shape",
+    "source": "left-right and sguaba documentation patterns.",
+    "triggers": ["links", "deeper explanation", "background material", "readme", "crate docs"],
+    "rule_summary": "Link to deeper explanations instead of overloading inline docs. API docs should be sufficient to use the crate; background can live elsewhere.",
+    "prompt_injection": "MANDATORY RULE: When a concept is too deep for inline docs, link authoritative background rather than burying a tutorial in a code comment.",
+    "anti_pattern": "/// 200 lines explaining the entire algorithm before a small public type.",
+    "good_pattern": "/// Implements the two-handle read path described in the crate-level `Trade-offs` section.\n/// See the linked design note for the full algorithm."
+  },
+  {
+    "id": "rust_quality_53_full_shape_examples",
+    "category": "Examples",
+    "source": "left-right and rust-imap crate-level examples.",
+    "triggers": ["examples", "full shape", "hello world", "doctest", "api ergonomics"],
+    "rule_summary": "Examples should show the full shape of real API use, not only a tiny hello-world path that hides setup and teardown.",
+    "prompt_injection": "MANDATORY RULE: Public examples should make the real cost and shape of using the API visible.",
+    "anti_pattern": "/// ```\n/// client.fetch();\n/// ```",
+    "good_pattern": "/// ```no_run\n/// # fn main() -> Result<(), Error> {\n/// let mut client = ClientBuilder::new(\"localhost\", 993).connect()?;\n/// let mut session = client.login(\"user\", \"pass\")?;\n/// let inbox = session.select(\"INBOX\")?;\n/// # Ok(())\n/// # }\n/// ```"
+  },
+  {
+    "id": "rust_quality_54_llm_scope",
+    "category": "LLM Use",
+    "source": "Public JetBrains interview and Rust forum follow-ups on LLMs.",
+    "triggers": ["llm", "agent", "reference implementation", "novel work", "verification"],
+    "rule_summary": "LLMs do best on pattern-matched work with references, tests, or feedback loops; they are risky for genuinely novel algorithms or unverifiable claims.",
+    "prompt_injection": "MANDATORY RULE: Before using an LLM-generated design, identify the reference implementation, tests, docs, or verifier that can catch plausible nonsense.",
+    "anti_pattern": "// Agent invented a new algorithm and the output looks plausible.",
+    "good_pattern": "// Agent patch is checked against existing tests, a reference implementation, and a property-test comparison."
+  },
+  {
+    "id": "rust_quality_55_llm_review_not_author",
+    "category": "LLM Workflow",
+    "source": "Public late-2025 stream and `trough` PR audit workflow.",
+    "triggers": ["llm review", "audit pass", "primary author", "claude code"],
+    "rule_summary": "Use LLMs as review, audit, and polish passes when possible; keep design authorship and acceptance decisions with the human.",
+    "prompt_injection": "MANDATORY RULE: For important Rust design, do not let the model be the only designer. Use it to challenge, audit, and refine evidence-backed work.",
+    "anti_pattern": "// Model wrote the design; merged because it compiled.",
+    "good_pattern": "// Human-authored design; model audit produced findings, each accepted only after local verification."
+  },
+  {
+    "id": "rust_quality_56_type_system_business_logic",
+    "category": "Typed Business Logic",
+    "source": "Public Rust forum replies and Helsing Sguaba blog post.",
+    "triggers": ["business logic", "type system", "coordinate system", "chrono timezone", "rayon"],
+    "rule_summary": "Rust can prevent business-logic bugs only when you choose APIs and libraries that encode domain invariants in types.",
+    "prompt_injection": "MANDATORY RULE: Do not assume Rust automatically prevents domain bugs. Architect with typed invariants, or the bug remains a runtime concern.",
+    "anti_pattern": "fn transform(point: [f64; 3], from_frame: &str, to_frame: &str) -> [f64; 3] { /* ... */ }",
+    "good_pattern": "struct Point<Frame> { coords: [f64; 3], frame: PhantomData<Frame> }\nfn transform<A, B>(point: Point<A>, transform: Transform<A, B>) -> Point<B> { /* ... */ }"
+  }
+]

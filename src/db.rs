@@ -95,6 +95,13 @@ fn row_to_doc_result(row: &rusqlite::Row) -> SqlResult<DocResult> {
     })
 }
 
+/// SQLite-backed project index.
+///
+/// `Database` owns a single `rusqlite::Connection`; callers that need to share
+/// it across async tasks must wrap the whole `Database`, not the connection, in
+/// a mutex. All paths stored in the code-index tables are repo-relative. When
+/// opened from `{repo}/.illu/index.db`, `repo_root` records that repo so tools
+/// can recover full source bodies without guessing the current process CWD.
 pub struct Database {
     pub(crate) conn: Connection,
     repo_root: Option<std::path::PathBuf>,
@@ -2281,6 +2288,12 @@ pub struct StoredDep {
     pub features: Option<String>,
 }
 
+/// Symbol row read back from the persistent index.
+///
+/// This mirrors parser-level [`crate::indexer::parser::Symbol`] with database
+/// line numbers (`i64`) and repo-relative paths. `impl_type` is the invariant
+/// that lets tools distinguish `Type::method` from a same-named free function;
+/// preserve it whenever symbols are copied, filtered, or rendered.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct StoredSymbol {

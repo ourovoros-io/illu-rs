@@ -570,5 +570,455 @@
     "prompt_injection": "MANDATORY RULE: Before changing any code for performance, capture (a) a baseline timing of the operation, (b) a profile or per-phase breakdown identifying the actual hotspot, and (c) a benchmark harness that can verify the post-change improvement. State each source in your design note. 'It must be the SQL' or 'this looks N+1' is a hypothesis, not a measurement; ship the measurement first or push back on the brief.",
     "anti_pattern": "// Tool feels slow (~500ms). Refactored callee lookup from per-symbol SQL\n// to one bulk query — that's clearly the N+1 hotspot.\n// (No baseline. No profile. No post-change measurement. The diagnosis\n//  is plausible but unverified; the bottleneck might equally be stdio\n//  serialisation, in which case this refactor is 0% faster.)\nlet rows = db.get_same_file_callees_under(path)?;",
     "good_pattern": "// Baseline: 482ms median over 20 runs (Instant harness, benches/overview.rs).\n// Per-phase: SQL 412ms (85%), filter 8ms, render 62ms.\n// Source: cargo flamegraph output at docs/perf/overview-2026-04-23.svg.\n// Hypothesis: SQL N+1 from per-symbol get_callees. Verified by collapsing\n// the loop to one query and re-measuring: 73ms median.\n// Speedup: 6.6x. New dominant phase: render (62ms of 73ms).\nlet rows = db.get_same_file_callees_under(path)?;"
+  },
+  {
+    "id": "rust_api_axiom_01_illegal_states",
+    "category": "Type-Driven Design",
+    "triggers": [
+      "illegal states",
+      "type system",
+      "newtype",
+      "sentinel",
+      "parse don't validate",
+      "validated data",
+      "bool flag"
+    ],
+    "rule_summary": "Make illegal states unrepresentable. Parse raw input once into precise types, use newtypes for meaningful units, use enums instead of boolean state flags, and use `Option<T>` instead of sentinel values.",
+    "prompt_injection": "MANDATORY RULE: Before adding fields or parameters, ask what invalid states they allow. If a value has been validated, give it a validated type; if it is still raw, do not pretend otherwise.",
+    "anti_pattern": "struct MessageId(u32);\nfn load_message(id: u32, is_uid: bool) -> Result<Message> { /* ... */ }",
+    "good_pattern": "struct Seq(u32);\nstruct Uid(u32);\nenum MessageKey {\n    Sequence(Seq),\n    Uid(Uid),\n}\nfn load_message(key: MessageKey) -> Result<Message> { /* ... */ }"
+  },
+  {
+    "id": "rust_api_axiom_02_typestate",
+    "category": "Typestate",
+    "triggers": [
+      "typestate",
+      "stateful protocol",
+      "lifecycle",
+      "authenticated",
+      "fallible transition",
+      "consume self"
+    ],
+    "rule_summary": "Represent lifecycle phases as different types. Put each method only on the phase where it is legal, and model transitions by consuming `self` and returning the next state.",
+    "prompt_injection": "MANDATORY RULE: If an operation is legal only after a state transition, encode that transition in the type system instead of checking a runtime boolean.",
+    "anti_pattern": "struct Client { authenticated: bool }\nimpl Client {\n    fn select(&mut self, mailbox: &str) -> Result<()> {\n        if !self.authenticated { return Err(Error::NotAuthenticated); }\n        Ok(())\n    }\n}",
+    "good_pattern": "struct Client;\nstruct Session;\nimpl Client {\n    fn login(self) -> Result<Session, (Error, Client)> { /* ... */ }\n}\nimpl Session {\n    fn select(&mut self, mailbox: &str) -> Result<()> { /* ... */ }\n}"
+  },
+  {
+    "id": "rust_api_axiom_03_builder",
+    "category": "Builder Pattern",
+    "triggers": [
+      "builder",
+      "many parameters",
+      "optional config",
+      "must_use",
+      "finish",
+      "execute",
+      "build"
+    ],
+    "rule_summary": "Use a builder when construction has many parameters or optional configuration. Mark command builders that must be finished as `#[must_use]` so dropping them is visible.",
+    "prompt_injection": "MANDATORY RULE: Do not add wide constructors or mysterious boolean parameters. Use a builder with precise setter names, and require an explicit terminal method for side-effecting commands.",
+    "anti_pattern": "fn connect(host: &str, port: u16, tls: bool, timeout_ms: u64, retry: bool) -> Result<Client> { /* ... */ }",
+    "good_pattern": "#[must_use]\nstruct ClientBuilder { /* fields */ }\nimpl ClientBuilder {\n    fn mode(mut self, mode: Mode) -> Self { self.mode = mode; self }\n    fn connect(self) -> Result<Client> { /* ... */ }\n}"
+  },
+  {
+    "id": "rust_api_axiom_04_generic_inputs_concrete_outputs",
+    "category": "API Shape",
+    "triggers": [
+      "AsRef",
+      "IntoIterator",
+      "borrowed input",
+      "concrete output",
+      "&Vec",
+      "&String",
+      "impl Trait"
+    ],
+    "rule_summary": "Accept the most general borrowed or convertible input the function needs, such as `impl AsRef<str>`, `impl IntoIterator`, or `&[T]`. Return concrete, predictable output types unless `impl Trait` hides an implementation detail.",
+    "prompt_injection": "MANDATORY RULE: Parameters should be flexible and borrow-friendly; return types should be specific enough for callers to reason about.",
+    "anti_pattern": "fn select(mailbox: String, flags: Vec<Flag>) -> Result<Vec<Response>> { /* ... */ }",
+    "good_pattern": "fn select(\n    mailbox: impl AsRef<str>,\n    flags: impl IntoIterator<Item = Flag>,\n) -> Result<Responses> { /* ... */ }"
+  },
+  {
+    "id": "rust_api_axiom_05_error_design",
+    "category": "Error Design",
+    "triggers": [
+      "Error",
+      "Result alias",
+      "Display",
+      "From",
+      "non_exhaustive",
+      "thiserror",
+      "anyhow"
+    ],
+    "rule_summary": "Library crates should expose one deliberate `Error` enum and one `Result<T>` alias. Implement `Display`, `std::error::Error`, and `From` for wrapped errors so `?` carries structured context.",
+    "prompt_injection": "MANDATORY RULE: Do not return strings as errors from library APIs. Design a structured crate error type and propagate through `Result<T, Error>`.",
+    "anti_pattern": "pub type Result<T> = std::result::Result<T, String>;\nfn load() -> Result<Data> { Err(\"failed\".to_string()) }",
+    "good_pattern": "pub type Result<T> = std::result::Result<T, Error>;\n#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    Io(std::io::Error),\n    Parse(ParseError),\n}\nimpl From<std::io::Error> for Error {\n    fn from(error: std::io::Error) -> Self { Self::Io(error) }\n}"
+  },
+  {
+    "id": "rust_api_axiom_06_non_exhaustive",
+    "category": "Public API Evolution",
+    "triggers": [
+      "non_exhaustive",
+      "public enum",
+      "public struct",
+      "semver",
+      "future variants",
+      "api evolution"
+    ],
+    "rule_summary": "Mark public structs, enums, and struct variants `#[non_exhaustive]` unless the representation is intentionally frozen. This preserves semver room to add fields or variants later.",
+    "prompt_injection": "MANDATORY RULE: Every new public data type must justify either `#[non_exhaustive]` or a deliberately frozen representation.",
+    "anti_pattern": "pub enum Backend {\n    TreeSitter,\n    RustAnalyzer,\n}",
+    "good_pattern": "#[non_exhaustive]\npub enum Backend {\n    TreeSitter,\n    RustAnalyzer,\n}"
+  },
+  {
+    "id": "rust_api_axiom_07_no_recoverable_panics",
+    "category": "Panic Discipline",
+    "triggers": [
+      "panic",
+      "unwrap",
+      "expect",
+      "recoverable",
+      "drop",
+      "debug_assert"
+    ],
+    "rule_summary": "Never panic in library code for recoverable, user-reachable conditions. Return `Result`, use `expect` only for documented internal invariants, and avoid panicking in `Drop`.",
+    "prompt_injection": "MANDATORY RULE: Treat `unwrap`, `expect`, and `panic!` in non-test library code as defects unless the invariant is local, documented, and not user-triggerable.",
+    "anti_pattern": "fn parse(input: &str) -> Config {\n    serde_json::from_str(input).unwrap()\n}",
+    "good_pattern": "fn parse(input: &str) -> Result<Config> {\n    serde_json::from_str(input).map_err(Error::from)\n}"
+  },
+  {
+    "id": "rust_api_axiom_08_error_propagation",
+    "category": "Error Propagation",
+    "triggers": [
+      "question mark",
+      "?",
+      "map_err",
+      "and_then",
+      "manual match",
+      "error transform"
+    ],
+    "rule_summary": "Use `?` for straight-line error propagation, `From` for common conversions, and `map_err` or combinators at boundaries where context must change.",
+    "prompt_injection": "MANDATORY RULE: Do not hand-write error plumbing when `?`, `From`, `map_err`, or a small combinator expresses the same flow more clearly.",
+    "anti_pattern": "let file = match File::open(path) {\n    Ok(file) => file,\n    Err(error) => return Err(Error::Io(error)),\n};",
+    "good_pattern": "let file = File::open(path)?;"
+  },
+  {
+    "id": "rust_api_axiom_09_cow",
+    "category": "Borrowing",
+    "triggers": [
+      "Cow",
+      "borrowed or owned",
+      "allocation",
+      "into_owned",
+      "custom string",
+      "lifetime escape"
+    ],
+    "rule_summary": "Use `Cow<'a, str>` or `Cow<'a, [T]>` when data is usually borrowed but sometimes must be owned. Provide an `into_owned` escape hatch when values need to outlive the input.",
+    "prompt_injection": "MANDATORY RULE: Do not force allocations for values that are usually borrowed, and do not fake `'static` lifetimes when ownership is the right answer.",
+    "anti_pattern": "enum Flag {\n    Custom(String),\n}",
+    "good_pattern": "enum Flag<'a> {\n    Custom(std::borrow::Cow<'a, str>),\n}\nimpl Flag<'_> {\n    fn into_owned(self) -> Flag<'static> { /* ... */ }\n}"
+  },
+  {
+    "id": "rust_api_axiom_10_owned_data_borrowed_views",
+    "category": "Parser Ownership",
+    "triggers": [
+      "borrowed views",
+      "owned data",
+      "parser return",
+      "self-referential",
+      "ouroboros",
+      "input lifetime"
+    ],
+    "rule_summary": "Parser APIs that expose borrowed views must either return an owner that keeps the backing bytes alive or return fully owned data. Do not force callers to manually preserve hidden input lifetimes.",
+    "prompt_injection": "MANDATORY RULE: When returning parsed structures with references, design the ownership story first. The returned value must be safe to move, store, and use without hidden lifetime traps.",
+    "anti_pattern": "fn parse<'a>(input: &'a [u8]) -> Vec<Item<'a>> { /* caller must keep input alive */ }",
+    "good_pattern": "struct ParsedItems { raw: Vec<u8>, items: Vec<OwnedItem> }\nfn parse(input: &[u8]) -> Result<ParsedItems> { /* ... */ }"
+  },
+  {
+    "id": "rust_api_axiom_11_small_traits",
+    "category": "Trait Design",
+    "triggers": [
+      "small trait",
+      "focused trait",
+      "associated type",
+      "trait responsibility",
+      "fat trait"
+    ],
+    "rule_summary": "Keep traits small and focused. A trait should represent one capability, usually with one to three methods, and use associated types when implementors need flexibility.",
+    "prompt_injection": "MANDATORY RULE: Split broad traits into focused capabilities before adding more required methods. A large trait is usually several traits disguised as one.",
+    "anti_pattern": "trait Backend {\n    fn parse(&self);\n    fn render(&self);\n    fn store(&self);\n    fn serve(&self);\n    fn authenticate(&self);\n}",
+    "good_pattern": "trait Authenticator {\n    type Response: AsRef<[u8]>;\n    fn process(&self, challenge: &[u8]) -> Self::Response;\n}"
+  },
+  {
+    "id": "rust_api_axiom_12_deref_sparingly",
+    "category": "Deref Discipline",
+    "triggers": [
+      "Deref",
+      "DerefMut",
+      "smart pointer",
+      "transparent wrapper",
+      "inheritance",
+      "coercion"
+    ],
+    "rule_summary": "Use `Deref` and `DerefMut` only for smart pointers or transparent wrappers that truly behave like the target. Do not use deref coercion as inheritance or general delegation.",
+    "prompt_injection": "MANDATORY RULE: Before implementing `Deref`, prove that exposing the entire target API is correct for the wrapper. Otherwise write explicit forwarding methods.",
+    "anti_pattern": "impl std::ops::Deref for Server {\n    type Target = Database;\n    fn deref(&self) -> &Database { &self.db }\n}",
+    "good_pattern": "impl Server {\n    fn database(&self) -> &Database { &self.db }\n}"
+  },
+  {
+    "id": "rust_api_axiom_13_raii_cleanup",
+    "category": "RAII",
+    "triggers": [
+      "RAII",
+      "Drop",
+      "cleanup",
+      "close",
+      "finish",
+      "resource",
+      "fallible cleanup"
+    ],
+    "rule_summary": "Use RAII for resources that must be released. If cleanup can fail, provide an explicit fallible `close` or `finish` and let `Drop` perform only best-effort cleanup without panicking.",
+    "prompt_injection": "MANDATORY RULE: If forgetting cleanup would break invariants, encode cleanup in ownership. Never rely only on callers remembering a method unless the type also documents and guards the fallback.",
+    "anti_pattern": "struct Transaction;\nimpl Transaction {\n    fn commit(self) -> Result<()> { /* ... */ }\n    fn rollback(self) -> Result<()> { /* caller must remember */ }\n}",
+    "good_pattern": "struct Transaction { committed: bool }\nimpl Transaction {\n    fn commit(mut self) -> Result<()> { self.committed = true; Ok(()) }\n}\nimpl Drop for Transaction {\n    fn drop(&mut self) { if !self.committed { let _ = self.rollback_best_effort(); } }\n}"
+  },
+  {
+    "id": "rust_api_axiom_14_missing_docs",
+    "category": "API Documentation",
+    "triggers": [
+      "missing_docs",
+      "docs",
+      "documentation",
+      "public item",
+      "Errors section",
+      "Panics section",
+      "doctest"
+    ],
+    "rule_summary": "Public API documentation is part of the contract. Document what each item does, its invariants, errors, panics, and examples when useful; prefer enforcing this with `#![deny(missing_docs)]` in library crates.",
+    "prompt_injection": "MANDATORY RULE: Do not add public Rust API without first-class docs. A comment written only to silence a lint is not documentation.",
+    "anti_pattern": "pub fn index(path: &Path) -> Result<()> { /* ... */ }",
+    "good_pattern": "/// Indexes Rust files under `path` and stores discovered symbols.\n///\n/// # Errors\n///\n/// Returns an error if the path cannot be read or database writes fail.\npub fn index(path: &Path) -> Result<()> { /* ... */ }"
+  },
+  {
+    "id": "rust_api_axiom_15_feature_flags",
+    "category": "Feature Flags",
+    "triggers": [
+      "feature flag",
+      "optional dependency",
+      "default features",
+      "docs.rs",
+      "all-features"
+    ],
+    "rule_summary": "Put optional dependencies and optional functionality behind explicit feature flags. Defaults should match the common path, and docs should make enabled surfaces visible.",
+    "prompt_injection": "MANDATORY RULE: Heavy or opinionated dependencies must be opt-in and documented. Do not smuggle functionality through transitive feature activation.",
+    "anti_pattern": "[dependencies]\nheavy-backend = \"1\"\n# Always compiled even when only the lightweight backend is used.",
+    "good_pattern": "[features]\ndefault = [\"sqlite\"]\nra = [\"dep:rust-analyzer\"]\n\n[package.metadata.docs.rs]\nall-features = true"
+  },
+  {
+    "id": "rust_api_axiom_16_cfg_not_runtime_branch",
+    "category": "Conditional Compilation",
+    "triggers": [
+      "cfg",
+      "feature-specific",
+      "platform-specific",
+      "runtime branch",
+      "unused import"
+    ],
+    "rule_summary": "Gate feature- and platform-specific code with `#[cfg(...)]` so disabled features do not compile unused or unavailable references.",
+    "prompt_injection": "MANDATORY RULE: If code only exists for a feature or platform, guard it at compile time. Do not rely on runtime checks to hide code that should not compile.",
+    "anti_pattern": "fn connect() {\n    if rustls_enabled() {\n        rustls::ClientConfig::new();\n    }\n}",
+    "good_pattern": "#[cfg(feature = \"rustls\")]\nfn connect() {\n    rustls::ClientConfig::new();\n}"
+  },
+  {
+    "id": "rust_api_axiom_17_iterators_when_clear",
+    "category": "Iterators",
+    "triggers": [
+      "iterator",
+      "indexing",
+      "combinator",
+      "sum",
+      "find",
+      "any",
+      "all",
+      "partition"
+    ],
+    "rule_summary": "Prefer iterators, named combinators, and collection methods when they read linearly. Keep explicit loops when the transformation has enough steps that a loop is clearer.",
+    "prompt_injection": "MANDATORY RULE: Use iterator methods for simple transformations and queries, but do not turn clear multi-step logic into a puzzle chain.",
+    "anti_pattern": "let mut found = false;\nfor item in items {\n    if item.is_ready() { found = true; break; }\n}",
+    "good_pattern": "let found = items.iter().any(Item::is_ready);"
+  },
+  {
+    "id": "rust_api_axiom_18_impl_trait",
+    "category": "Impl Trait",
+    "triggers": [
+      "impl Trait",
+      "argument position",
+      "return position",
+      "iterator adapter",
+      "box dyn"
+    ],
+    "rule_summary": "Use `impl Trait` in arguments to accept flexible inputs and in returns to hide irrelevant concrete adapter types. Use named generics when relationships between types matter.",
+    "prompt_injection": "MANDATORY RULE: Do not expose implementation-detail iterator types or over-generic signatures. Use `impl Trait` when it makes the API simpler and preserves the right constraints.",
+    "anti_pattern": "fn ready_items<'a>(&'a self) -> std::iter::Filter<std::slice::Iter<'a, Item>, fn(&&Item) -> bool> { /* ... */ }",
+    "good_pattern": "fn ready_items(&self) -> impl Iterator<Item = &Item> + '_ {\n    self.items.iter().filter(|item| item.is_ready())\n}"
+  },
+  {
+    "id": "rust_api_axiom_19_lifetime_precision",
+    "category": "Lifetimes",
+    "triggers": [
+      "lifetime",
+      "elision",
+      "'static",
+      "named lifetime",
+      "borrow relationship"
+    ],
+    "rule_summary": "Elide lifetimes when the relationship is obvious; name them when multiple inputs or stored references make the relationship part of the contract. Do not use `'static` as an escape hatch.",
+    "prompt_injection": "MANDATORY RULE: Lifetime annotations should explain real borrowing relationships. If you are reaching for `'static` to satisfy the compiler, reconsider ownership.",
+    "anti_pattern": "fn label(value: &str) -> &'static str {\n    Box::leak(value.to_string().into_boxed_str())\n}",
+    "good_pattern": "fn label(value: &str) -> &str { value }\nstruct View<'a> { label: &'a str }"
+  },
+  {
+    "id": "rust_api_axiom_20_minimize_public_surface",
+    "category": "Public Surface",
+    "triggers": [
+      "public surface",
+      "pub(crate)",
+      "private fields",
+      "accessor",
+      "re-export",
+      "semver"
+    ],
+    "rule_summary": "Keep APIs private or `pub(crate)` until external users need them. Prefer private fields plus accessors, and re-export the few types callers should commonly use.",
+    "prompt_injection": "MANDATORY RULE: Every `pub` item is a compatibility promise. Start private, widen deliberately, and document the reason.",
+    "anti_pattern": "pub struct Registry {\n    pub db: Database,\n    pub caches: HashMap<String, Cache>,\n}",
+    "good_pattern": "pub struct Registry {\n    db: Database,\n    caches: HashMap<String, Cache>,\n}\nimpl Registry {\n    pub fn database(&self) -> &Database { &self.db }\n}"
+  },
+  {
+    "id": "rust_api_axiom_21_precise_naming",
+    "category": "Naming",
+    "triggers": [
+      "naming",
+      "new",
+      "with",
+      "from",
+      "into",
+      "as",
+      "try",
+      "getter"
+    ],
+    "rule_summary": "Use Rust naming conventions precisely: `new` for canonical construction, `with_x` for configured construction, `from_x`/`into_x`/`as_x` for conversions, `try_x` for fallible variants, and getters named after the field.",
+    "prompt_injection": "MANDATORY RULE: Names should communicate ownership, fallibility, and conversion cost at the call site. Do not use `new` as a vague catch-all.",
+    "anti_pattern": "fn new_from_path(path: &Path) -> Result<Self> { /* ... */ }\nfn get_name(&self) -> &str { &self.name }",
+    "good_pattern": "fn from_path(path: &Path) -> Result<Self> { /* ... */ }\nfn name(&self) -> &str { &self.name }"
+  },
+  {
+    "id": "rust_api_axiom_22_derive_semantically",
+    "category": "Derives",
+    "triggers": [
+      "derive",
+      "Debug",
+      "Clone",
+      "Copy",
+      "Default",
+      "PartialEq",
+      "Hash"
+    ],
+    "rule_summary": "Derive common traits when they are semantically true. Public types should usually derive `Debug`; derive `Copy` only when implicit duplication is cheap and unsurprising.",
+    "prompt_injection": "MANDATORY RULE: Do not hand-write trait impls that can be derived, and do not derive traits that misrepresent ownership, cost, or identity.",
+    "anti_pattern": "#[derive(Copy, Clone)]\npub struct LargeConfig { data: [u8; 4096] }",
+    "good_pattern": "#[derive(Debug, Clone, PartialEq, Eq)]\npub struct SymbolName(String);"
+  },
+  {
+    "id": "rust_api_axiom_23_composition",
+    "category": "Composition",
+    "triggers": [
+      "composition",
+      "inheritance",
+      "trait hierarchy",
+      "delegation",
+      "contains"
+    ],
+    "rule_summary": "Prefer composition over inheritance-like trait hierarchies. Put the needed collaborators in fields and forward behavior explicitly when that is the clearer contract.",
+    "prompt_injection": "MANDATORY RULE: Do not simulate object-oriented inheritance with deep trait hierarchies or broad `Deref`. Compose concrete capabilities instead.",
+    "anti_pattern": "trait Server: Auth + Storage + Render + Index + Network {}",
+    "good_pattern": "struct Server<A, S> {\n    auth: A,\n    storage: S,\n}"
+  },
+  {
+    "id": "rust_api_axiom_24_rust_2018_idioms",
+    "category": "Lint Discipline",
+    "triggers": [
+      "rust_2018_idioms",
+      "lint",
+      "warnings",
+      "edition idioms",
+      "ci"
+    ],
+    "rule_summary": "Enable `#![warn(rust_2018_idioms)]` or stronger idiom lints in library crates and keep CI warning-clean.",
+    "prompt_injection": "MANDATORY RULE: Treat idiom warnings as design feedback, not cosmetic noise. Fix them instead of suppressing them casually.",
+    "anti_pattern": "#![allow(warnings)]",
+    "good_pattern": "#![warn(rust_2018_idioms)]"
+  },
+  {
+    "id": "rust_api_axiom_25_validate_boundary",
+    "category": "Boundary Validation",
+    "triggers": [
+      "validate boundary",
+      "validated type",
+      "parse once",
+      "input validation",
+      "boundary",
+      "trust internal"
+    ],
+    "rule_summary": "Validate untrusted input at the boundary, convert it into a typed representation once, then let internal code trust the type rather than re-checking raw values everywhere.",
+    "prompt_injection": "MANDATORY RULE: Do not pass raw strings, paths, or IDs deep into the system after validation. Convert them at the boundary and make invalid states unrepresentable.",
+    "anti_pattern": "fn save(name: &str) -> Result<()> {\n    if name.contains('\\n') { return Err(Error::InvalidName); }\n    write_name(name)\n}",
+    "good_pattern": "struct ValidName(String);\nimpl ValidName {\n    fn parse(raw: &str) -> Result<Self> { /* validate once */ }\n}\nfn save(name: &ValidName) -> Result<()> { write_name(name) }"
+  },
+  {
+    "id": "rust_api_axiom_26_unsafe_isolation",
+    "category": "Unsafe Rust",
+    "triggers": [
+      "unsafe",
+      "SAFETY",
+      "safe abstraction",
+      "ffi",
+      "raw pointer",
+      "invariant"
+    ],
+    "rule_summary": "Avoid `unsafe` unless safe Rust cannot express the operation. When necessary, isolate it behind the smallest safe abstraction and place a `// SAFETY:` comment above each unsafe block.",
+    "prompt_injection": "MANDATORY RULE: Every unsafe block must have a nearby `// SAFETY:` justification that states the exact invariants upheld by the safe wrapper.",
+    "anti_pattern": "let value = unsafe { *ptr };",
+    "good_pattern": "// SAFETY: `ptr` comes from `slice.as_ptr()` and `index < slice.len()` was checked above.\nlet value = unsafe { *ptr.add(index) };"
+  },
+  {
+    "id": "rust_api_axiom_27_async_lane",
+    "category": "Async Design",
+    "triggers": [
+      "async",
+      "sync",
+      "feature flag",
+      "colored API",
+      "runtime"
+    ],
+    "rule_summary": "Choose sync or async as an explicit API lane. If both are needed, separate them by crate or clear feature surface rather than mixing ad hoc async and sync methods by default.",
+    "prompt_injection": "MANDATORY RULE: Do not casually add async to a sync API or sync wrappers to an async API. Make the concurrency model a deliberate public contract.",
+    "anti_pattern": "impl Client {\n    fn fetch(&self) -> Result<Data> { /* ... */ }\n    async fn fetch_async(&self) -> Result<Data> { /* ... */ }\n}",
+    "good_pattern": "#[cfg(feature = \"async\")]\npub mod async_client;\n#[cfg(not(feature = \"async\"))]\npub mod blocking_client;"
+  },
+  {
+    "id": "rust_api_axiom_28_test_placement",
+    "category": "Testing Layout",
+    "triggers": [
+      "unit test",
+      "integration test",
+      "doctest",
+      "tests module",
+      "test placement"
+    ],
+    "rule_summary": "Put unit tests next to the code they exercise, integration tests under `tests/`, and public API examples in doctests when they should compile forever.",
+    "prompt_injection": "MANDATORY RULE: Choose the test location based on what contract is being tested: private behavior stays in module tests, public behavior belongs in integration tests or doctests.",
+    "anti_pattern": "tests/private_parser.rs // reaches into private parser internals through temporary pub exports",
+    "good_pattern": "#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn parses_private_helper_case() { /* ... */ }\n}"
   }
 ]
