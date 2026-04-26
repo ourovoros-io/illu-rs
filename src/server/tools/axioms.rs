@@ -253,6 +253,36 @@ mod tests {
     }
 
     #[test]
+    fn test_error_handling_axioms_batch_2_present() {
+        let result = handle_axioms(
+            "error category io domain invariant Other variant stringly typed catchall",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Error Category Structure"),
+            "Error Category Structure missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "backtrace Backtrace::capture stack context RUST_BACKTRACE error origin stack walk",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Backtrace Policy"),
+            "Backtrace Policy missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "non_exhaustive insufficient stable variant error contract semver library error stability",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Error Stability"),
+            "Error Stability missing in focused query"
+        );
+    }
+
+    #[test]
     fn test_axiom_assets_have_unique_ids_and_required_fields() {
         let mut axioms: Vec<TestAxiom> = serde_json::from_str(AXIOMS_JSON).unwrap();
         axioms.extend(serde_json::from_str::<Vec<TestAxiom>>(RUST_QUALITY_AXIOMS_JSON).unwrap());
@@ -293,6 +323,6 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 59);
+        assert_eq!(rust_quality_axiom_count, 62);
     }
 }

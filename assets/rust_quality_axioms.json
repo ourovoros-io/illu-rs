@@ -588,5 +588,35 @@
     "prompt_injection": "MANDATORY RULE: Name error variants for the failure condition, not the operation that failed. Format `Display` output as a noun-phrase or short clause: lowercase, no trailing period, no struct dumps. Internal detail belongs in `Debug` or in `source()` chains.",
     "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    FailedToParseUtf8 { bytes: Vec<u8>, position: usize },\n    CouldNotFindField,\n}\nimpl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        write!(f, \"Error: {self:?}.\")\n    }\n}",
     "good_pattern": "#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    InvalidUtf8 { position: usize },\n    MissingField(&'static str),\n}\nimpl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Error::InvalidUtf8 { position } => write!(f, \"invalid UTF-8 at byte {position}\"),\n            Error::MissingField(name) => write!(f, \"missing required field `{name}`\"),\n        }\n    }\n}"
+  },
+  {
+    "id": "rust_quality_60_error_categories",
+    "category": "Error Category Structure",
+    "source": "Rust for Rustaceans, ch. 4 §Error Hierarchies",
+    "triggers": ["error category", "io vs domain", "invariant violation", "Other variant", "stringly typed error", "error catchall"],
+    "rule_summary": "Distinguish failure categories — I/O, parse, domain, and invariant violations — as distinct variants or sub-enums. Never collapse them into a single `Other(String)` or `Internal(String)` catch-all.",
+    "prompt_injection": "MANDATORY RULE: Each error variant should let a caller decide whether to retry, surface, or abort. Variants that erase that distinction (`Other(String)`, `Internal(String)`) push the work back to the caller through string parsing. Add a real variant or sub-enum instead.",
+    "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    Other(String),\n}\n// Caller has to grep `Display` to know if this was retry-able I/O or a parse bug.",
+    "good_pattern": "#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    Io(std::io::Error),\n    Parse(ParseError),\n    Schema(SchemaError),\n    Invariant(&'static str),\n}\n// Each variant tells the caller what kind of failure it is."
+  },
+  {
+    "id": "rust_quality_61_backtrace_capture",
+    "category": "Backtrace Policy",
+    "source": "Rust for Rustaceans, ch. 4 §Backtraces",
+    "triggers": ["backtrace", "Backtrace::capture", "stack context", "RUST_BACKTRACE", "error origin", "stack walk"],
+    "rule_summary": "Capture `std::backtrace::Backtrace` only at the boundary where stack context would otherwise be lost — typically the lowest-level error variant or the first conversion away from the originating frame. Avoid capturing on every wrap.",
+    "prompt_injection": "MANDATORY RULE: Backtraces are expensive (a stack walk plus optional symbolication). Capture them once, at the deepest layer that owns the original failure, not at every wrapping site. Application code is more permissive than library code; libraries should let the caller opt in.",
+    "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    Io { source: io::Error, backtrace: Backtrace },\n    Parse { source: ParseError, backtrace: Backtrace },\n    Domain { source: DomainError, backtrace: Backtrace },\n}\n// A single failure walks the stack three times as it is wrapped.",
+    "good_pattern": "#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Domain { source: DomainError, backtrace: Backtrace },\n}\n// Capture once, at the boundary that owns the originating failure."
+  },
+  {
+    "id": "rust_quality_62_stable_error_semantics",
+    "category": "Error Stability",
+    "source": "Rust for Rustaceans, ch. 4 §Error Stability and ch. 8 §Versioning Surface",
+    "triggers": ["non_exhaustive insufficient", "stable variant", "error contract", "semver error", "library error stability"],
+    "rule_summary": "`#[non_exhaustive]` lets you add variants without a major bump, but does not document which existing variants callers may match on as a stable contract. Document each variant's stability explicitly.",
+    "prompt_injection": "MANDATORY RULE: Treat each public error variant as either a stable contract (callers may match on it) or an internal-detail variant (rendered through `Display` only, may be split or removed). Document the distinction in rustdoc; do not let it default to ambiguity.",
+    "anti_pattern": "#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n}\n// No documentation. Callers do not know whether matching `Network` is supported.",
+    "good_pattern": "/// # Stability\n///\n/// `Io`, `Parse`, and `Network` are stable contract — callers may match on\n/// them. `Internal` (and any future variants gated by `#[non_exhaustive]`) is\n/// internal detail and may be split, merged, or removed in any minor release.\n#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n    #[doc(hidden)]\n    Internal(InternalKind),\n}"
   }
 ]
