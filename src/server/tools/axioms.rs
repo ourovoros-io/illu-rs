@@ -283,6 +283,36 @@ mod tests {
     }
 
     #[test]
+    fn test_error_handling_axioms_batch_3_present() {
+        let result = handle_axioms(
+            "error context typed format string eyre context structured error context fields",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Error Context"),
+            "Error Context missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "Box dyn Error internal helper library private function anyhow internally structured error",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Error Type Discipline"),
+            "Error Type Discipline missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "From impl error conversion auto convert error public surface conversion graph error From",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Error Conversion Surface"),
+            "Error Conversion Surface missing in focused query"
+        );
+    }
+
+    #[test]
     fn test_axiom_assets_have_unique_ids_and_required_fields() {
         let mut axioms: Vec<TestAxiom> = serde_json::from_str(AXIOMS_JSON).unwrap();
         axioms.extend(serde_json::from_str::<Vec<TestAxiom>>(RUST_QUALITY_AXIOMS_JSON).unwrap());
@@ -323,6 +353,6 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 62);
+        assert_eq!(rust_quality_axiom_count, 65);
     }
 }

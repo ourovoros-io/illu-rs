@@ -618,5 +618,35 @@
     "prompt_injection": "MANDATORY RULE: Treat each public error variant as either a stable contract (callers may match on it) or an internal-detail variant (rendered through `Display` only, may be split or removed). Document the distinction in rustdoc; do not let it default to ambiguity.",
     "anti_pattern": "#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n}\n// No documentation. Callers do not know whether matching `Network` is supported.",
     "good_pattern": "/// # Stability\n///\n/// `Io`, `Parse`, and `Network` are stable contracts — callers may match on\n/// them. `Internal` (and any future variants gated by `#[non_exhaustive]`) is\n/// internal detail and may be split, merged, or removed in any minor release.\n#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n    #[doc(hidden)]\n    Internal(InternalKind),\n}"
+  },
+  {
+    "id": "rust_quality_63_error_context_typed",
+    "category": "Error Context",
+    "source": "Rust for Rustaceans, ch. 4 §Carrying Context",
+    "triggers": ["error context", "format string error", "eyre context", "typed context", "structured error", "context fields"],
+    "rule_summary": "Carry error context as typed fields on the variant, not as `format!`-built strings. Reserve `eyre`/`anyhow` chained-string context for application code where the caller never needs to inspect the parts.",
+    "prompt_injection": "MANDATORY RULE: If a caller might want to programmatically inspect what failed (which path, which line, which key), put that information in fields on the error variant. `format!`-built context strings discard the data and force string parsing later.",
+    "anti_pattern": "return Err(Error::Parse(format!(\n    \"failed at {path:?}:{line}: unexpected token {tok:?}\"\n)));",
+    "good_pattern": "return Err(Error::Parse(ParseError {\n    path: path.to_owned(),\n    line,\n    kind: ParseErrorKind::UnexpectedToken(tok),\n}));"
+  },
+  {
+    "id": "rust_quality_64_no_box_dyn_error_internal",
+    "category": "Error Type Discipline",
+    "source": "Rust for Rustaceans, ch. 4 §Library Error Types",
+    "triggers": ["Box dyn Error", "internal helper", "library error", "private function error", "anyhow internally", "structured error"],
+    "rule_summary": "Library code should not use `Box<dyn Error>` even in private helpers: it leaks anyhow-style erasure into the call graph and prevents callers (including your own code) from reasoning about variants. Build the structured type once and use it everywhere.",
+    "prompt_injection": "MANDATORY RULE: If you have a structured `Error` enum for the public API, use it in private helpers too. `Box<dyn Error>` in a private signature is a tell that you have not finished designing the variant; finish the design.",
+    "anti_pattern": "fn parse_record(input: &str) -> Result<Record, Box<dyn std::error::Error>> {\n    /* private helper inside a library */\n}",
+    "good_pattern": "fn parse_record(input: &str) -> Result<Record, ParseError> {\n    /* same helper, structured error type used everywhere */\n}"
+  },
+  {
+    "id": "rust_quality_65_from_impls_public_api",
+    "category": "Error Conversion Surface",
+    "source": "Rust for Rustaceans, ch. 4 §From Conversions and ch. 8 §Public Surface",
+    "triggers": ["From impl", "error conversion", "auto convert error", "public surface", "conversion graph", "error From"],
+    "rule_summary": "Every `From<E>` for your error type widens the conversion graph and becomes part of the public API: callers' types now flow through `?` into yours. Review each one as a deliberate API decision, not as a convenience for `?`.",
+    "prompt_injection": "MANDATORY RULE: Adding `impl From<UpstreamError> for MyError` is a public API change even when the wrapping variant is internal-detail. Decide whether the upstream error genuinely belongs in your domain before adding the conversion.",
+    "anti_pattern": "// Added because `?` complained.\nimpl From<reqwest::Error> for ConfigError {\n    fn from(error: reqwest::Error) -> Self {\n        ConfigError::Other(error.to_string())\n    }\n}",
+    "good_pattern": "// Decision: ConfigError owns network failures because the loader fetches\n// remote includes. Reviewed in PR #142.\nimpl From<reqwest::Error> for ConfigError {\n    fn from(error: reqwest::Error) -> Self {\n        ConfigError::Network(error)\n    }\n}"
   }
 ]
