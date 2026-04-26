@@ -313,6 +313,44 @@ mod tests {
     }
 
     #[test]
+    fn test_error_handling_axioms_batch_4_present() {
+        let result = handle_axioms(
+            "test error variant is_err assert matches failure path coverage matches macro",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Error Path Specificity"),
+            "Error Path Specificity missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_error_handling_demo_query_returns_new_axioms() {
+        let result = handle_axioms("error source chain wrap propagate variant naming").unwrap();
+        // Expect at least 3 of the new categories to surface in the top results.
+        let new_categories = [
+            "Error Source Chain",
+            "Error Boundary Discipline",
+            "Error API Surface",
+            "Error Category Structure",
+            "Backtrace Policy",
+            "Error Stability",
+            "Error Context",
+            "Error Type Discipline",
+            "Error Conversion Surface",
+            "Error Path Specificity",
+        ];
+        let surfaced = new_categories
+            .iter()
+            .filter(|cat| result.contains(*cat))
+            .count();
+        assert!(
+            surfaced >= 3,
+            "expected at least 3 new categories in demo query, got {surfaced}"
+        );
+    }
+
+    #[test]
     fn test_axiom_assets_have_unique_ids_and_required_fields() {
         let mut axioms: Vec<TestAxiom> = serde_json::from_str(AXIOMS_JSON).unwrap();
         axioms.extend(serde_json::from_str::<Vec<TestAxiom>>(RUST_QUALITY_AXIOMS_JSON).unwrap());
@@ -353,6 +391,6 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 65);
+        assert_eq!(rust_quality_axiom_count, 66);
     }
 }

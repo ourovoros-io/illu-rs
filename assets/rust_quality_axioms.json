@@ -648,5 +648,15 @@
     "prompt_injection": "MANDATORY RULE: Adding `impl From<UpstreamError> for MyError` is a public API change even when the wrapping variant is internal-detail. Decide whether the upstream error genuinely belongs in your domain before adding the conversion.",
     "anti_pattern": "// Added because `?` complained.\nimpl From<reqwest::Error> for ConfigError {\n    fn from(error: reqwest::Error) -> Self {\n        ConfigError::Other(error.to_string())\n    }\n}",
     "good_pattern": "// Decision: ConfigError owns network failures because the loader fetches\n// remote includes. Reviewed in PR #142.\nimpl From<reqwest::Error> for ConfigError {\n    fn from(error: reqwest::Error) -> Self {\n        ConfigError::Network(error)\n    }\n}"
+  },
+  {
+    "id": "rust_quality_66_test_failure_variant",
+    "category": "Error Path Specificity",
+    "source": "Rust for Rustaceans, ch. 6 §Testing Errors",
+    "triggers": ["test error variant", "is_err", "assert matches", "failure path test", "error path coverage", "matches macro"],
+    "rule_summary": "Tests of failure paths must assert on the specific error variant, not just `is_err()`. A test that passes for any failure cannot tell when a refactor silently flips one failure cause into another.",
+    "prompt_injection": "MANDATORY RULE: For every fallible behavior under test, assert `matches!(result, Err(Error::ExpectedVariant(..)))` or destructure to inspect fields. `assert!(result.is_err())` lets two unrelated bugs satisfy the same test.",
+    "anti_pattern": "#[test]\nfn rejects_missing_field() {\n    assert!(parse(\"{}\").is_err());\n}",
+    "good_pattern": "#[test]\nfn rejects_missing_field() {\n    let err = parse(\"{}\").unwrap_err();\n    assert!(matches!(err, ParseError::MissingField(name) if name == \"id\"));\n}"
   }
 ]
