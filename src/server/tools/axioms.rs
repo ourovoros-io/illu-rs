@@ -227,6 +227,26 @@ mod tests {
     }
 
     #[test]
+    fn test_error_handling_axioms_batch_1_present() {
+        let result = handle_axioms(
+            "error source chain wrap propagate variant naming Error::source map_err InvalidUtf8 Display",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Error Source Chain"),
+            "missing category Error Source Chain"
+        );
+        assert!(
+            result.contains("Error Boundary Discipline"),
+            "missing category Error Boundary Discipline"
+        );
+        assert!(
+            result.contains("Error API Surface"),
+            "missing category Error API Surface"
+        );
+    }
+
+    #[test]
     fn test_axiom_assets_have_unique_ids_and_required_fields() {
         let mut axioms: Vec<TestAxiom> = serde_json::from_str(AXIOMS_JSON).unwrap();
         axioms.extend(serde_json::from_str::<Vec<TestAxiom>>(RUST_QUALITY_AXIOMS_JSON).unwrap());
@@ -267,6 +287,6 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 56);
+        assert_eq!(rust_quality_axiom_count, 59);
     }
 }

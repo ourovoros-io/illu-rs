@@ -558,5 +558,35 @@
     "prompt_injection": "MANDATORY RULE: Do not assume Rust automatically prevents domain bugs. Architect with typed invariants, or the bug remains a runtime concern.",
     "anti_pattern": "fn transform(point: [f64; 3], from_frame: &str, to_frame: &str) -> [f64; 3] { /* ... */ }",
     "good_pattern": "struct Point<Frame> { coords: [f64; 3], frame: PhantomData<Frame> }\nfn transform<A, B>(point: Point<A>, transform: Transform<A, B>) -> Point<B> { /* ... */ }"
+  },
+  {
+    "id": "rust_quality_57_error_source_chain",
+    "category": "Error Source Chain",
+    "source": "Rust for Rustaceans, ch. 4 §Error Source",
+    "triggers": ["error source", "Error::source", "error chain", "wrapped error", "underlying cause", "source method"],
+    "rule_summary": "Library error variants that wrap an upstream error must implement `Error::source()` so callers can walk the cause chain. Do not flatten the underlying cause into a `Display` string.",
+    "prompt_injection": "MANDATORY RULE: When an error variant wraps another error, return the wrapped error from `source()`. Never collapse the cause into a formatted string in `Display`; the message describes this layer's failure, the chain carries the rest.",
+    "anti_pattern": "impl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Error::Read(io) => write!(f, \"failed to read: {io}\"),\n        }\n    }\n}\nimpl std::error::Error for Error {}",
+    "good_pattern": "impl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Error::Read(_) => f.write_str(\"failed to read configuration\"),\n        }\n    }\n}\nimpl std::error::Error for Error {\n    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {\n        match self {\n            Error::Read(io) => Some(io),\n        }\n    }\n}"
+  },
+  {
+    "id": "rust_quality_58_wrap_vs_propagate",
+    "category": "Error Boundary Discipline",
+    "source": "Rust for Rustaceans, ch. 4 §Error Conversion",
+    "triggers": ["wrap error", "propagate error", "map_err", "boundary context", "preserve original", "domain boundary"],
+    "rule_summary": "Use `?` (with `From`) to propagate errors through layers that share a domain. Use `map_err` only at module or domain boundaries where the calling layer needs different context. Do not apply both at the same call site without justification.",
+    "prompt_injection": "MANDATORY RULE: `?` and `map_err` answer different questions. Use `?` when the caller's domain matches yours. Use `map_err` only when crossing into a layer that owns a different error type. If you find yourself adding context strings inside one domain, extend the underlying error variant instead.",
+    "anti_pattern": "fn read_config(path: &Path) -> Result<Config, ConfigError> {\n    let raw = std::fs::read_to_string(path)\n        .map_err(|e| ConfigError::Other(format!(\"read failed: {e}\")))?;\n    parse(&raw).map_err(|e| ConfigError::Other(format!(\"parse failed: {e}\")))\n}",
+    "good_pattern": "fn read_config(path: &Path) -> Result<Config, ConfigError> {\n    let raw = std::fs::read_to_string(path).map_err(ConfigError::Read)?;\n    parse(&raw).map_err(ConfigError::Parse)\n}"
+  },
+  {
+    "id": "rust_quality_59_error_variant_naming",
+    "category": "Error API Surface",
+    "source": "Rust for Rustaceans, ch. 4 §Error Display; Rust API Guidelines C-WORD-ORDER.",
+    "triggers": ["variant naming", "error name", "error display", "InvalidUtf8", "Display impl", "error message style"],
+    "rule_summary": "Error variant names are nouns naming the failure (`InvalidUtf8`, `MissingField`), not verb phrases (`FailedToParseUtf8`). `Display` produces one short clause without trailing punctuation and without leaking internal state callers cannot use.",
+    "prompt_injection": "MANDATORY RULE: Name error variants for the failure condition, not the operation that failed. Format `Display` output as a noun-phrase or short clause: lowercase, no trailing period, no struct dumps. Internal detail belongs in `Debug` or in `source()` chains.",
+    "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    FailedToParseUtf8 { bytes: Vec<u8>, position: usize },\n    CouldNotFindField,\n}\nimpl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        write!(f, \"Error: {self:?}.\")\n    }\n}",
+    "good_pattern": "#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    InvalidUtf8 { position: usize },\n    MissingField(&'static str),\n}\nimpl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Error::InvalidUtf8 { position } => write!(f, \"invalid UTF-8 at byte {position}\"),\n            Error::MissingField(name) => write!(f, \"missing required field `{name}`\"),\n        }\n    }\n}"
   }
 ]
