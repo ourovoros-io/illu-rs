@@ -606,7 +606,7 @@
     "triggers": ["backtrace", "Backtrace::capture", "stack context", "RUST_BACKTRACE", "error origin", "stack walk"],
     "rule_summary": "Capture `std::backtrace::Backtrace` only at the boundary where stack context would otherwise be lost — typically the lowest-level error variant or the first conversion away from the originating frame. Avoid capturing on every wrap.",
     "prompt_injection": "MANDATORY RULE: Backtraces are expensive (a stack walk plus optional symbolication). Capture them once, at the deepest layer that owns the original failure, not at every wrapping site. Application code is more permissive than library code; libraries should let the caller opt in.",
-    "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    Io { source: io::Error, backtrace: Backtrace },\n    Parse { source: ParseError, backtrace: Backtrace },\n    Domain { source: DomainError, backtrace: Backtrace },\n}\n// A single failure walks the stack three times as it is wrapped.",
+    "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    Io { source: io::Error, backtrace: Backtrace },\n    Parse { source: ParseError, backtrace: Backtrace },\n    Domain { source: DomainError, backtrace: Backtrace },\n}\n// Three capture sites; any wrapping chain pays a stack walk at each site.",
     "good_pattern": "#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Domain { source: DomainError, backtrace: Backtrace },\n}\n// Capture once, at the boundary that owns the originating failure."
   },
   {
@@ -617,6 +617,6 @@
     "rule_summary": "`#[non_exhaustive]` lets you add variants without a major bump, but does not document which existing variants callers may match on as a stable contract. Document each variant's stability explicitly.",
     "prompt_injection": "MANDATORY RULE: Treat each public error variant as either a stable contract (callers may match on it) or an internal-detail variant (rendered through `Display` only, may be split or removed). Document the distinction in rustdoc; do not let it default to ambiguity.",
     "anti_pattern": "#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n}\n// No documentation. Callers do not know whether matching `Network` is supported.",
-    "good_pattern": "/// # Stability\n///\n/// `Io`, `Parse`, and `Network` are stable contract — callers may match on\n/// them. `Internal` (and any future variants gated by `#[non_exhaustive]`) is\n/// internal detail and may be split, merged, or removed in any minor release.\n#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n    #[doc(hidden)]\n    Internal(InternalKind),\n}"
+    "good_pattern": "/// # Stability\n///\n/// `Io`, `Parse`, and `Network` are stable contracts — callers may match on\n/// them. `Internal` (and any future variants gated by `#[non_exhaustive]`) is\n/// internal detail and may be split, merged, or removed in any minor release.\n#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n    #[doc(hidden)]\n    Internal(InternalKind),\n}"
   }
 ]
