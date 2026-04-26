@@ -626,7 +626,7 @@
     "triggers": ["error context", "format string error", "eyre context", "typed context", "structured error", "context fields"],
     "rule_summary": "Carry error context as typed fields on the variant, not as `format!`-built strings. Reserve `eyre`/`anyhow` chained-string context for application code where the caller never needs to inspect the parts.",
     "prompt_injection": "MANDATORY RULE: If a caller might want to programmatically inspect what failed (which path, which line, which key), put that information in fields on the error variant. `format!`-built context strings discard the data and force string parsing later.",
-    "anti_pattern": "return Err(Error::Parse(format!(\n    \"failed at {path:?}:{line}: unexpected token {tok:?}\"\n)));",
+    "anti_pattern": "// `Error::Parse` wraps a formatted string, discarding inspectable parts.\nenum Error { Parse(String) }\nreturn Err(Error::Parse(format!(\n    \"failed at {path:?}:{line}: unexpected token {tok:?}\"\n)));",
     "good_pattern": "return Err(Error::Parse(ParseError {\n    path: path.to_owned(),\n    line,\n    kind: ParseErrorKind::UnexpectedToken(tok),\n}));"
   },
   {
