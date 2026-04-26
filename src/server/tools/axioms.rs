@@ -228,21 +228,27 @@ mod tests {
 
     #[test]
     fn test_error_handling_axioms_batch_1_present() {
-        let result = handle_axioms(
-            "error source chain wrap propagate variant naming Error::source map_err InvalidUtf8 Display",
-        )
-        .unwrap();
+        // Per-axiom focused queries: each new entry must rank within
+        // MAX_AXIOM_RESULTS for a query built from its own triggers.
+        // Combined-broad queries are fragile against crowding from later batches.
+        let result =
+            handle_axioms("Error::source error chain source method wrapped error").unwrap();
         assert!(
             result.contains("Error Source Chain"),
-            "missing category Error Source Chain"
+            "Error Source Chain missing in focused query"
         );
+
+        let result = handle_axioms("map_err propagate boundary domain context wrap error").unwrap();
         assert!(
             result.contains("Error Boundary Discipline"),
-            "missing category Error Boundary Discipline"
+            "Error Boundary Discipline missing in focused query"
         );
+
+        let result =
+            handle_axioms("variant naming InvalidUtf8 Display impl error message style").unwrap();
         assert!(
             result.contains("Error API Surface"),
-            "missing category Error API Surface"
+            "Error API Surface missing in focused query"
         );
     }
 

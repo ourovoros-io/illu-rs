@@ -57,26 +57,35 @@ Expected: `56`. If different, update the IDs in the drafts below to start at `<m
 
 - [ ] **Step 2: Write the failing batch-1 coverage test**
 
-Open `src/server/tools/axioms.rs`. Find the `#[cfg(test)]` module at the bottom (after `handle_axioms`). Add this test function inside the existing `mod tests` block, alongside the other `test_*` functions:
+Open `src/server/tools/axioms.rs`. Find the `#[cfg(test)]` module at the bottom (after `handle_axioms`). Add this test function inside the existing `mod tests` block, alongside the other `test_*` functions.
+
+**Per-axiom focused queries.** Each new entry must surface in the top `MAX_AXIOM_RESULTS = 16` for a query built from its own triggers, independent of other axioms. The combined-broad-query approach is fragile against trigger crowding as later batches add more error axioms; per-axiom focused queries are robust.
 
 ```rust
     #[test]
     fn test_error_handling_axioms_batch_1_present() {
-        let result = handle_axioms(
-            "error source chain wrap propagate variant naming Error::source map_err InvalidUtf8 Display",
-        )
-        .unwrap();
+        // Per-axiom focused queries: each new entry must rank within
+        // MAX_AXIOM_RESULTS for a query built from its own triggers.
+        // Combined-broad queries are fragile against crowding from later batches.
+        let result =
+            handle_axioms("Error::source error chain source method wrapped error").unwrap();
         assert!(
             result.contains("Error Source Chain"),
-            "missing category Error Source Chain"
+            "Error Source Chain missing in focused query"
         );
+
+        let result =
+            handle_axioms("map_err propagate boundary domain context wrap error").unwrap();
         assert!(
             result.contains("Error Boundary Discipline"),
-            "missing category Error Boundary Discipline"
+            "Error Boundary Discipline missing in focused query"
         );
+
+        let result =
+            handle_axioms("variant naming InvalidUtf8 Display impl error message style").unwrap();
         assert!(
             result.contains("Error API Surface"),
-            "missing category Error API Surface"
+            "Error API Surface missing in focused query"
         );
     }
 ```
@@ -201,26 +210,35 @@ EOF
 
 - [ ] **Step 1: Write the failing batch-2 coverage test**
 
-Add inside `mod tests` in `src/server/tools/axioms.rs`:
+Add inside `mod tests` in `src/server/tools/axioms.rs`. Use per-axiom focused queries (same pattern as batch 1; see Task 1 Step 2 for rationale):
 
 ```rust
     #[test]
     fn test_error_handling_axioms_batch_2_present() {
+        let result =
+            handle_axioms("error category io domain invariant Other variant stringly typed catchall")
+                .unwrap();
+        assert!(
+            result.contains("Error Category Structure"),
+            "Error Category Structure missing in focused query"
+        );
+
         let result = handle_axioms(
-            "error category io domain invariant Other variant catchall backtrace capture stable non_exhaustive contract",
+            "backtrace Backtrace::capture stack context RUST_BACKTRACE error origin stack walk",
         )
         .unwrap();
         assert!(
-            result.contains("Error Category Structure"),
-            "missing category Error Category Structure"
-        );
-        assert!(
             result.contains("Backtrace Policy"),
-            "missing category Backtrace Policy"
+            "Backtrace Policy missing in focused query"
         );
+
+        let result = handle_axioms(
+            "non_exhaustive insufficient stable variant error contract semver library error stability",
+        )
+        .unwrap();
         assert!(
             result.contains("Error Stability"),
-            "missing category Error Stability"
+            "Error Stability missing in focused query"
         );
     }
 ```
@@ -332,26 +350,36 @@ EOF
 
 - [ ] **Step 1: Write the failing batch-3 coverage test**
 
-Add inside `mod tests` in `src/server/tools/axioms.rs`:
+Add inside `mod tests` in `src/server/tools/axioms.rs`. Per-axiom focused queries (same pattern as batches 1 and 2):
 
 ```rust
     #[test]
     fn test_error_handling_axioms_batch_3_present() {
         let result = handle_axioms(
-            "error context typed format string Box dyn Error library internal helper From impl conversion graph",
+            "error context typed format string eyre context structured error context fields",
         )
         .unwrap();
         assert!(
             result.contains("Error Context"),
-            "missing category Error Context"
+            "Error Context missing in focused query"
         );
+
+        let result = handle_axioms(
+            "Box dyn Error internal helper library private function anyhow internally structured error",
+        )
+        .unwrap();
         assert!(
             result.contains("Error Type Discipline"),
-            "missing category Error Type Discipline"
+            "Error Type Discipline missing in focused query"
         );
+
+        let result = handle_axioms(
+            "From impl error conversion auto convert error public surface conversion graph error From",
+        )
+        .unwrap();
         assert!(
             result.contains("Error Conversion Surface"),
-            "missing category Error Conversion Surface"
+            "Error Conversion Surface missing in focused query"
         );
     }
 ```
@@ -457,18 +485,18 @@ EOF
 
 - [ ] **Step 1: Write the failing batch-4 coverage test**
 
-Add inside `mod tests`:
+Add inside `mod tests`. Per-axiom focused query (same pattern as batches 1–3):
 
 ```rust
     #[test]
     fn test_error_handling_axioms_batch_4_present() {
         let result = handle_axioms(
-            "test failure variant is_err assert matches error path coverage",
+            "test error variant is_err assert matches failure path coverage matches macro",
         )
         .unwrap();
         assert!(
             result.contains("Error Path Specificity"),
-            "missing category Error Path Specificity"
+            "Error Path Specificity missing in focused query"
         );
     }
 ```
