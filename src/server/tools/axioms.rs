@@ -3,11 +3,12 @@ use std::cmp::Reverse;
 use std::fmt::Write;
 use std::sync::OnceLock;
 
-/// On-disk JSON shape. Fields we never query (`id`) are not deserialised.
-/// serde silently skips unknown keys, so dropping `id` from the struct
-/// keeps the JSON authoritative without forcing a dead field.
+/// On-disk JSON shape. The `id` is preserved on the parsed [`Axiom`] so
+/// other modules (e.g. `exemplars`) can cross-reference axioms by stable
+/// identifier; serde still silently skips any other unknown keys.
 #[derive(Deserialize, Debug)]
 struct RawAxiom {
+    id: String,
     category: String,
     #[serde(default)]
     source: Option<String>,
@@ -25,6 +26,7 @@ struct RawAxiom {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Axiom {
+    pub id: String,
     pub category: String,
     pub source: Option<String>,
     pub triggers: Vec<String>,
@@ -43,6 +45,7 @@ impl From<RawAxiom> for Axiom {
         let triggers_lower = raw.triggers.iter().map(|t| t.to_lowercase()).collect();
         let rule_summary_lower = raw.rule_summary.to_lowercase();
         Self {
+            id: raw.id,
             category: raw.category,
             source: raw.source,
             triggers: raw.triggers,
@@ -84,6 +87,21 @@ fn axioms() -> Result<&'static [Axiom], crate::IlluError> {
         // rather than any domain category.
         crate::IlluError::Other("axioms cache not initialised after set".to_string())
     })
+}
+
+/// Test-only handle to the parsed axiom corpus, used by sibling tool tests
+/// that cross-reference axioms by stable `id` (e.g. the exemplars manifest).
+/// Cross-module tests cannot reach the private [`axioms`] cache, so this
+/// `pub(crate)` helper exposes the same slice without widening the runtime
+/// API. Panic on parse failure is acceptable here because the same parse
+/// already runs in [`handle_axioms`] in production paths.
+#[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    reason = "test helper; parse failure aborts the test run intentionally"
+)]
+pub(crate) fn axioms_for_test() -> &'static [Axiom] {
+    axioms().expect("axioms parse for tests")
 }
 
 pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
