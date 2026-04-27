@@ -98,6 +98,15 @@ fn lookup_code(slug: &str) -> Option<&'static str> {
         "types/extension_trait" => Some(include_str!(
             "../../../assets/rust_exemplars/types/extension_trait.rs"
         )),
+        "perf/closed_dispatch" => Some(include_str!(
+            "../../../assets/rust_exemplars/perf/closed_dispatch.rs"
+        )),
+        "unsafe_ffi/maybe_uninit_init" => Some(include_str!(
+            "../../../assets/rust_exemplars/unsafe_ffi/maybe_uninit_init.rs"
+        )),
+        "unsafe_ffi/c_string_wrapper" => Some(include_str!(
+            "../../../assets/rust_exemplars/unsafe_ffi/c_string_wrapper.rs"
+        )),
         _ => None,
     }
 }
@@ -319,6 +328,63 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_exemplars_batch_3_present() {
+        let result = handle_exemplars(
+            "enum dispatch example match closed set command pattern enum no dyn dispatch",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Enum Dispatch"),
+            "Enum Dispatch exemplar missing in focused query"
+        );
+
+        let result = handle_exemplars(
+            "MaybeUninit example raw mut init pattern field by field init incremental struct init",
+        )
+        .unwrap();
+        assert!(
+            result.contains("MaybeUninit Init"),
+            "MaybeUninit Init exemplar missing in focused query"
+        );
+
+        let result = handle_exemplars(
+            "FFI string wrapper extern C string ownership CStr CString example FFI safe panic",
+        )
+        .unwrap();
+        assert!(
+            result.contains("FFI Strings Example"),
+            "FFI Strings Example exemplar missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_exemplar_demo_query_returns_new_exemplars() {
+        let result = handle_exemplars(
+            "idiomatic Rust integrated patterns error Cow drop guard sealed trait builder enum dispatch MaybeUninit FFI",
+        )
+        .unwrap();
+        let expected_categories = [
+            "Error Design",
+            "Cow Strings",
+            "RAII Drop Guard",
+            "Sealed Trait",
+            "Type-state Builder",
+            "Extension Trait",
+            "Enum Dispatch",
+            "MaybeUninit Init",
+            "FFI Strings Example",
+        ];
+        let surfaced = expected_categories
+            .iter()
+            .filter(|cat| result.contains(*cat))
+            .count();
+        assert!(
+            surfaced >= 3,
+            "expected at least 3 exemplar categories in demo query, got {surfaced}"
+        );
+    }
+
     /// Compile-check that every exemplar file is real Rust. Each is a
     /// separate child module so unrelated identifiers don't collide. Dead
     /// code is allowed because exemplars are demonstrations, not callable
@@ -346,6 +412,15 @@ mod tests {
         }
         mod types_extension_trait {
             include!("../../../assets/rust_exemplars/types/extension_trait.rs");
+        }
+        mod perf_closed_dispatch {
+            include!("../../../assets/rust_exemplars/perf/closed_dispatch.rs");
+        }
+        mod unsafe_ffi_maybe_uninit_init {
+            include!("../../../assets/rust_exemplars/unsafe_ffi/maybe_uninit_init.rs");
+        }
+        mod unsafe_ffi_c_string_wrapper {
+            include!("../../../assets/rust_exemplars/unsafe_ffi/c_string_wrapper.rs");
         }
     }
 }
