@@ -820,6 +820,12 @@ struct ExemplarsParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct CritiqueParams {
+    /// Unified-diff output (e.g. from `git diff`).
+    diff: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct DecisionsParams {
     /// Search term for decisions
     query: String,
@@ -1007,6 +1013,21 @@ impl IlluServer {
         tracing::info!(query = %params.query, "Tool call: exemplars");
         let _guard = crate::status::StatusGuard::new(&format!("exemplars ▸ {}", params.query));
         let result = tools::exemplars::handle_exemplars(&params.query).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "critique",
+        description = "Critique a unified diff for potential axiom violations. Runs a small menu of regex-based detectors over added lines and returns a Markdown summary listing each potential violation by file:line, axiom ID + title, and severity (info/warning/error). Detectors cover unsafe block discipline, unsafe fn contracts, Box<CopyType>, and mem::uninitialized. Output is advisory — false positives exist."
+    )]
+    async fn critique(
+        &self,
+        Parameters(params): Parameters<CritiqueParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(diff_len = params.diff.len(), "Tool call: critique");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("critique ▸ {} bytes", params.diff.len()));
+        let result = tools::critique::handle_critique(&params.diff).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
