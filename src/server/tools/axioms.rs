@@ -973,14 +973,23 @@ mod tests {
                 note: String::new(),
             },
         );
-        let result = handle_axioms_with_style(
-            "Error::source error chain source method wrapped error",
-            &style,
-        )
-        .unwrap();
+        // Differential assertion: run the same query with and without the
+        // override and assert the axiom's category heading appears in
+        // the unfiltered result but NOT in the filtered one. The
+        // formatter does not emit literal axiom IDs for universal
+        // axioms, so asserting on the heading anchor `[Error Source
+        // Chain]` (unique to axiom 57) is the only way to detect
+        // whether `Ignored` actually fired.
+        let query = "Error::source error chain source method wrapped error";
+        let unfiltered = handle_axioms_with_style(query, &ProjectStyle::default()).unwrap();
+        let filtered = handle_axioms_with_style(query, &style).unwrap();
         assert!(
-            !result.contains("rust_quality_57_error_source_chain"),
-            "ignored axiom must not appear in result, got: {result}"
+            unfiltered.contains("[Error Source Chain]"),
+            "sanity: axiom 57 should match this query without overrides; got: {unfiltered}"
+        );
+        assert!(
+            !filtered.contains("[Error Source Chain]"),
+            "ignored axiom 57 must not appear with the override; got: {filtered}"
         );
     }
 
@@ -1002,25 +1011,30 @@ mod tests {
                 note: String::new(),
             },
         );
-        // Query that hits both axioms; with overrides, 87 should rank above 85.
+        // Query that hits both axioms. Anchor on `[Allocation Discipline]`
+        // and `[Iterator Codegen]` — both unique substrings in the corpus
+        // (single occurrence each), so we don't false-match other
+        // allocation-flavored or iterator-flavored axioms. With overrides
+        // applied, 87 (elevated) should rank above 85 (demoted).
         let result = handle_axioms_with_style(
             "allocation iterator preallocate hot path with_capacity bounds check",
             &style,
         )
         .unwrap();
-        let pos_85 = result.find("Allocation");
-        let pos_87 = result.find("Iterator");
-        if let (Some(p85), Some(p87)) = (pos_85, pos_87) {
-            assert!(
-                p87 < p85,
-                "elevated iterator-codegen axiom should appear before demoted \
-                 allocation-hot-paths axiom; result: {result}"
-            );
-        } else {
-            // If neither axiom matched (unlikely for this query), the test
-            // is noise; just assert the run produced output.
-            assert!(!result.is_empty());
-        }
+        assert!(
+            result.contains("[Allocation Discipline]"),
+            "axiom 85 must appear in result for this query; got: {result}"
+        );
+        assert!(
+            result.contains("[Iterator Codegen]"),
+            "axiom 87 must appear in result for this query; got: {result}"
+        );
+        let pos_85 = result.find("[Allocation Discipline]").unwrap();
+        let pos_87 = result.find("[Iterator Codegen]").unwrap();
+        assert!(
+            pos_87 < pos_85,
+            "elevated axiom 87 should appear before demoted axiom 85; result: {result}"
+        );
     }
 
     #[test]
