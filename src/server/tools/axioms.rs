@@ -120,6 +120,16 @@ pub(crate) fn axioms_for_test() -> &'static [Axiom] {
     axioms().expect("axioms parse for tests")
 }
 
+/// Production-time cross-module accessor for the parsed universal corpus.
+///
+/// Used by `project_style::init` to validate that override IDs resolve.
+/// Returns `Err` instead of panicking so a malformed bundled corpus
+/// doesn't bring down server startup; the caller is expected to log and
+/// proceed. The same parse-once cache as [`handle_axioms`] backs this.
+pub(crate) fn axioms_for_runtime() -> Result<&'static [Axiom], crate::IlluError> {
+    axioms()
+}
+
 /// Public entry point used by the `mcp__illu__axioms` tool. Reads the
 /// process-global [`ProjectStyle`] populated at server startup and forwards
 /// to [`handle_axioms_with_style`]. The cached style is empty by default,

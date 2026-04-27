@@ -56,6 +56,7 @@ struct RawAxiomOverride {
 /// cannot float a no-match axiom into the result set.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Severity {
     /// Filter the axiom out entirely; it never appears in `handle_axioms`
     /// results regardless of how strongly the query matches.
@@ -80,6 +81,7 @@ pub enum Severity {
 /// which keeps the lookup paths in [`ProjectStyle::note_for`] branch-free
 /// on the hot path.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AxiomOverride {
     pub severity: Severity,
     pub note: String,
@@ -97,6 +99,7 @@ pub struct AxiomOverride {
 /// observable output. `local_axioms` is a `Vec` because the scoring loop
 /// iterates linearly and the display surface preserves declaration order.
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct ProjectStyle {
     /// Map from universal-axiom id to its override.
     pub overrides: HashMap<String, AxiomOverride>,
@@ -174,6 +177,27 @@ pub fn init(repo_root: &Path) -> Result<(), crate::IlluError> {
     } else {
         ProjectStyle::default()
     };
+
+    // Warn about override entries whose id no longer resolves to a
+    // universal axiom. The trust model says project files are tolerated
+    // through corpus renames (so we don't fail server startup), but a
+    // silent no-op leaves operators wondering why their override has
+    // no effect — log so they can repair the file.
+    if !style.overrides.is_empty()
+        && let Ok(universal) = crate::server::tools::axioms::axioms_for_runtime()
+    {
+        let known: std::collections::HashSet<&str> =
+            universal.iter().map(|a| a.id.as_str()).collect();
+        for id in style.overrides.keys() {
+            if !known.contains(id.as_str()) {
+                tracing::warn!(
+                    %id,
+                    "axiom_overrides[].id does not resolve to a universal axiom; the override will silently no-op"
+                );
+            }
+        }
+    }
+
     // `init` is intended to be called exactly once per `IlluServer`
     // lifetime (from `IlluServer::new`). If a test calls `init` again
     // with a different path, the second call's value is discarded —
