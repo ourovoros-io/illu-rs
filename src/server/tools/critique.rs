@@ -144,14 +144,31 @@ fn detectors() -> &'static [DetectorEntry] {
     })
 }
 
+/// Defense-in-depth cap on the `diff` parameter the MCP tool accepts.
+///
+/// `parse_unified_diff` clones each added/context line into an owned
+/// `String`, so a multi-GB diff allocates ~1.5–2× its size in resident
+/// memory. The MCP transport imposes no per-tool size limit; this cap
+/// prevents a misbehaving (or malicious) client from exhausting the
+/// server's memory with a single oversized request. 16 MiB is several
+/// orders of magnitude larger than any realistic `git diff` output.
+const MAX_DIFF_BYTES: usize = 16 * 1024 * 1024;
+
 /// Public entry point used by the `mcp__illu__critique` MCP tool.
 ///
 /// # Errors
 ///
-/// Returns an error only if formatting fails (`std::fmt::Error`); the
-/// detector pipeline itself is infallible. The signature mirrors sibling
-/// tool handlers so the MCP layer can treat it uniformly.
+/// Returns `IlluError::Other` when `diff` exceeds [`MAX_DIFF_BYTES`].
+/// The detector pipeline itself is infallible; below the cap, this
+/// function always returns `Ok`.
 pub fn handle_critique(diff: &str) -> Result<String, crate::IlluError> {
+    if diff.len() > MAX_DIFF_BYTES {
+        return Err(crate::IlluError::Other(format!(
+            "diff length {} bytes exceeds the {} MiB limit; pre-filter and resubmit smaller chunks",
+            diff.len(),
+            MAX_DIFF_BYTES / (1024 * 1024),
+        )));
+    }
     let hunks = parse_unified_diff(diff);
     let mut all = Vec::new();
     for entry in detectors() {
@@ -703,5 +720,35 @@ mod tests {
         );
         let result = handle_critique(&d).unwrap();
         assert!(!result.contains("rust_quality_94_unsafe_block_discipline"));
+    }
+
+    // ---- Defense-in-depth: oversized diff is rejected ----
+
+    #[test]
+    fn test_handle_critique_rejects_oversized_diff() {
+        // Construct a string just over the cap to verify the early return
+        // path. We don't need to actually populate it with valid diff
+        // content — the size check fires before parsing.
+        let oversized = "x".repeat(MAX_DIFF_BYTES + 1);
+        let err = handle_critique(&oversized).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("exceeds"),
+            "expected size-cap error, got: {msg}"
+        );
+        assert!(
+            msg.contains(&format!("{}", MAX_DIFF_BYTES + 1)),
+            "error must name the offending size; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_handle_critique_accepts_diff_at_cap() {
+        // A diff exactly at the cap is allowed (the check is `>`, not `>=`).
+        // Use whitespace so it parses to zero hunks rather than panicking
+        // somewhere downstream.
+        let at_cap = " ".repeat(MAX_DIFF_BYTES);
+        let result = handle_critique(&at_cap).unwrap();
+        assert!(result.contains("No potential axiom violations"));
     }
 }

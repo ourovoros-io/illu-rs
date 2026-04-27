@@ -53,7 +53,14 @@ pub unsafe extern "C" fn ffi_string_free(s: *mut c_char) {
     if s.is_null() {
         return;
     }
-    // SAFETY: caller-documented provenance precondition: `s` was produced
-    // by `CString::into_raw` in `ffi_string_make` and has not been freed.
-    drop(unsafe { CString::from_raw(s) });
+    // CString::Drop is dealloc-only and unlikely to panic, but every
+    // extern "C" fn body should be panic-isolated per axiom 100 — a panic
+    // unwinding into C is UB under the default extern "C" ABI. The
+    // exemplar should demonstrate the pattern consistently across all
+    // three FFI functions, not just two.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: caller-documented provenance precondition: `s` was produced
+        // by `CString::into_raw` in `ffi_string_make` and has not been freed.
+        drop(unsafe { CString::from_raw(s) });
+    }));
 }
