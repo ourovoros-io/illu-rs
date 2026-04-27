@@ -23,6 +23,36 @@ use regex_lite::Regex;
 use std::fmt::Write;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock};
+use thiserror::Error;
+
+/// Failure categories for [`handle_critique`] input validation.
+///
+/// Detector execution itself is infallible (regex passes either match or
+/// they don't); this enum carries the pre-detector input rejections.
+/// `#[non_exhaustive]` because future input checks (e.g. unsupported
+/// diff format detected) can be added without breaking downstream
+/// `match` statements.
+///
+/// Wrapped as [`crate::IlluError::CritiqueInput`] when bubbled across
+/// the module boundary; tests can match the precise variant directly
+/// for [`Error Path Specificity`].
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum CritiqueInputError {
+    /// `diff` length exceeds [`MAX_DIFF_BYTES`]. Carries `actual` and
+    /// `limit_mib` as typed fields so callers can render a tailored
+    /// message or decide programmatically whether to chunk and retry.
+    #[error(
+        "diff length {actual} bytes exceeds the {limit_mib} MiB limit; \
+         pre-filter and resubmit smaller chunks"
+    )]
+    DiffTooLarge {
+        /// Observed length of the rejected diff, in bytes.
+        actual: usize,
+        /// Cap in mebibytes; mirrors [`MAX_DIFF_BYTES`] / `1024 * 1024`.
+        limit_mib: usize,
+    },
+}
 
 /// Severity tier for a detected critique. Maps roughly to clippy's
 /// info/warn/deny tiers but is advisory only — the tool returns
@@ -158,16 +188,20 @@ const MAX_DIFF_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// # Errors
 ///
-/// Returns `IlluError::Other` when `diff` exceeds [`MAX_DIFF_BYTES`].
-/// The detector pipeline itself is infallible; below the cap, this
-/// function always returns `Ok`.
+/// Returns [`crate::IlluError::CritiqueInput`] wrapping
+/// [`CritiqueInputError::DiffTooLarge`] when `diff` exceeds
+/// [`MAX_DIFF_BYTES`]. The detector pipeline itself is infallible;
+/// below the cap, this function always returns `Ok`.
 pub fn handle_critique(diff: &str) -> Result<String, crate::IlluError> {
     if diff.len() > MAX_DIFF_BYTES {
-        return Err(crate::IlluError::Other(format!(
-            "diff length {} bytes exceeds the {} MiB limit; pre-filter and resubmit smaller chunks",
-            diff.len(),
-            MAX_DIFF_BYTES / (1024 * 1024),
-        )));
+        // `into()` triggers `IlluError: From<CritiqueInputError>` so
+        // the typed category survives the boundary and tests can match
+        // on `CritiqueInputError::DiffTooLarge { .. }` directly.
+        return Err(CritiqueInputError::DiffTooLarge {
+            actual: diff.len(),
+            limit_mib: MAX_DIFF_BYTES / (1024 * 1024),
+        }
+        .into());
     }
     let hunks = parse_unified_diff(diff);
     let mut all = Vec::new();
@@ -731,14 +765,22 @@ mod tests {
         // content — the size check fires before parsing.
         let oversized = "x".repeat(MAX_DIFF_BYTES + 1);
         let err = handle_critique(&oversized).unwrap_err();
-        let msg = format!("{err}");
+        // [Error Path Specificity]: assert the exact variant + payload.
+        // A test that only checked `is_err()` or substring of `Display`
+        // would silently pass if the cap path collapsed into a different
+        // failure category during a refactor.
         assert!(
-            msg.contains("exceeds"),
-            "expected size-cap error, got: {msg}"
-        );
-        assert!(
-            msg.contains(&format!("{}", MAX_DIFF_BYTES + 1)),
-            "error must name the offending size; got: {msg}"
+            matches!(
+                err,
+                crate::IlluError::CritiqueInput(CritiqueInputError::DiffTooLarge {
+                    actual,
+                    limit_mib,
+                }) if actual == MAX_DIFF_BYTES + 1
+                    && limit_mib == MAX_DIFF_BYTES / (1024 * 1024)
+            ),
+            "expected DiffTooLarge {{ actual: {}, limit_mib: {} }}, got: {err:?}",
+            MAX_DIFF_BYTES + 1,
+            MAX_DIFF_BYTES / (1024 * 1024)
         );
     }
 

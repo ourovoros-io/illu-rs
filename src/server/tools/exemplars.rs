@@ -10,6 +10,44 @@ use serde::Deserialize;
 use std::cmp::Reverse;
 use std::fmt::Write;
 use std::sync::OnceLock;
+use thiserror::Error;
+
+/// Failure categories for loading the embedded exemplar manifest.
+///
+/// All three variants represent build-time-shaped invariants: the
+/// manifest JSON, the slug→source mapping, and the cache itself are
+/// all baked into the binary, so reaching any of these errors at
+/// runtime indicates an illu-rs build defect rather than a user
+/// configuration issue. They are still surfaced as typed variants
+/// (rather than `panic!`) so MCP callers see a structured error
+/// instead of a server abort.
+///
+/// `#[non_exhaustive]` because future runtime checks (e.g. signature
+/// verification on the manifest) can be added without breaking
+/// downstream `match`.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ExemplarManifestError {
+    /// Embedded `manifest.json` failed to parse. Should never trigger
+    /// in a release build because the manifest is validated by tests.
+    /// Wraps [`serde_json::Error`] in `source()` for the chain walk.
+    #[error("failed to parse rust_exemplars/manifest.json")]
+    Parse(#[from] serde_json::Error),
+
+    /// Manifest references a slug that has no embedded source file.
+    /// `lookup_code` is hand-maintained alongside the manifest;
+    /// `test_every_exemplar_slug_has_code` enforces parity at test
+    /// time, so this should never fire in production.
+    #[error("exemplar slug `{0}` has no entry in lookup_code")]
+    MissingSource(String),
+
+    /// Cache `OnceLock::get` returned `None` immediately after `set`
+    /// — only possible if a concurrent thread cleared it (which the
+    /// type doesn't allow). Defensive variant kept to avoid
+    /// `unwrap()` in the cache-fill path.
+    #[error("exemplars OnceLock unexpectedly empty")]
+    CacheUninit,
+}
 
 /// Top-level manifest shape: a single object whose `exemplars` array holds
 /// each entry. Wrapping the array in an object reserves room for sibling
@@ -114,6 +152,14 @@ fn lookup_code(slug: &str) -> Option<&'static str> {
 /// Returns the parsed exemplar corpus. Cached after first call. Parse
 /// failure is surfaced to the caller; a later call retries until one
 /// succeeds, mirroring [`crate::server::tools::axioms`].
+///
+/// # Errors
+///
+/// Returns [`crate::IlluError::ExemplarManifest`] wrapping an
+/// [`ExemplarManifestError`] tagged with the precise failure category.
+/// All three categories indicate a build-time invariant violation
+/// (manifest authoring, `lookup_code` parity, or cache plumbing), so
+/// they should never fire in a tested release build.
 fn exemplars() -> Result<&'static [Exemplar], crate::IlluError> {
     static EXEMPLARS: OnceLock<Vec<Exemplar>> = OnceLock::new();
 
@@ -121,18 +167,18 @@ fn exemplars() -> Result<&'static [Exemplar], crate::IlluError> {
         return Ok(parsed.as_slice());
     }
 
-    let raw: RawManifest = serde_json::from_str(MANIFEST_JSON).map_err(|e| {
-        crate::IlluError::Other(format!("failed to parse rust_exemplars/manifest.json: {e}"))
-    })?;
+    // `?` triggers `ExemplarManifestError: From<serde_json::Error>`
+    // (via the `Parse` variant's `#[from]`), then
+    // `IlluError: From<ExemplarManifestError>` to reach the
+    // crate-wide error type — preserving the original parse error in
+    // `source()`.
+    let raw: RawManifest =
+        serde_json::from_str(MANIFEST_JSON).map_err(ExemplarManifestError::from)?;
 
     let mut parsed = Vec::with_capacity(raw.exemplars.len());
     for entry in raw.exemplars {
-        let code = lookup_code(&entry.slug).ok_or_else(|| {
-            crate::IlluError::Other(format!(
-                "exemplar slug `{}` has no entry in lookup_code",
-                entry.slug
-            ))
-        })?;
+        let code = lookup_code(&entry.slug)
+            .ok_or_else(|| ExemplarManifestError::MissingSource(entry.slug.clone()))?;
         parsed.push(Exemplar::from_raw(entry, code));
     }
 
@@ -141,7 +187,7 @@ fn exemplars() -> Result<&'static [Exemplar], crate::IlluError> {
     EXEMPLARS
         .get()
         .map(Vec::as_slice)
-        .ok_or_else(|| crate::IlluError::Other("exemplars OnceLock unexpectedly empty".into()))
+        .ok_or(ExemplarManifestError::CacheUninit.into())
 }
 
 /// Score a single exemplar against a query. Mirrors
@@ -227,6 +273,59 @@ mod tests {
     #[test]
     fn test_exemplar_manifest_parses() {
         let _ = exemplars().unwrap();
+    }
+
+    #[test]
+    fn test_exemplar_manifest_error_variants_wire_through_illu_error() {
+        // The three variants represent build-time invariants — they
+        // are unreachable in a tested release build. Construct each
+        // directly and verify the wrapping into [`IlluError`] preserves
+        // the typed category so a future refactor cannot collapse the
+        // chain into the legacy `IlluError::Other` path unnoticed.
+        use std::error::Error as _;
+
+        let parse_err: crate::IlluError = ExemplarManifestError::Parse(
+            serde_json::from_str::<RawManifest>("not json").unwrap_err(),
+        )
+        .into();
+        assert!(
+            matches!(
+                parse_err,
+                crate::IlluError::ExemplarManifest(ExemplarManifestError::Parse(_))
+            ),
+            "Parse must wrap into IlluError::ExemplarManifest"
+        );
+
+        let missing: crate::IlluError =
+            ExemplarManifestError::MissingSource("fake/slug".to_string()).into();
+        assert!(
+            matches!(
+                &missing,
+                crate::IlluError::ExemplarManifest(ExemplarManifestError::MissingSource(slug))
+                    if slug == "fake/slug"
+            ),
+            "expected ExemplarManifest(MissingSource(`fake/slug`)), got: {missing:?}"
+        );
+
+        let cache: crate::IlluError = ExemplarManifestError::CacheUninit.into();
+        assert!(
+            matches!(
+                cache,
+                crate::IlluError::ExemplarManifest(ExemplarManifestError::CacheUninit)
+            ),
+            "CacheUninit must wrap into IlluError::ExemplarManifest"
+        );
+
+        // Source-chain check: `Parse` must expose the underlying
+        // serde_json::Error via `source()`. Without this the
+        // [Error Source Chain] axiom would silently regress.
+        let parse_inner = ExemplarManifestError::Parse(
+            serde_json::from_str::<RawManifest>("not json").unwrap_err(),
+        );
+        assert!(
+            parse_inner.source().is_some(),
+            "Parse must expose the wrapped serde_json::Error via source()"
+        );
     }
 
     #[test]
