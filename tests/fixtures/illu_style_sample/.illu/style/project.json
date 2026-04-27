@@ -4,7 +4,7 @@
     {
       "id": "rust_quality_64_no_box_dyn_error_internal",
       "severity": "ignored",
-      "note": "we use anyhow project-wide; thiserror is not the convention here"
+      "note": "this codebase deliberately erases internal errors to Box<dyn Error> in private conversion helpers to keep cross-module coupling minimal; not enforcing this rule"
     },
     {
       "id": "rust_quality_85_allocation_hot_paths",

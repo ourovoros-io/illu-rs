@@ -174,8 +174,12 @@ pub fn init(repo_root: &Path) -> Result<(), crate::IlluError> {
     } else {
         ProjectStyle::default()
     };
-    // Lost-race set is fine — the winner stored an equivalent value
-    // (same path, deterministic parse).
+    // `init` is intended to be called exactly once per `IlluServer`
+    // lifetime (from `IlluServer::new`). If a test calls `init` again
+    // with a different path, the second call's value is discarded —
+    // `OnceLock::set` rejects writes after the first success. Tests
+    // that want to swap configs should use [`load_from_path`] directly
+    // and pass the resulting `ProjectStyle` to scoring helpers.
     let _ = PROJECT_STYLE.set(style);
     Ok(())
 }
@@ -198,17 +202,29 @@ pub fn load_from_path(path: &Path) -> Result<ProjectStyle, crate::IlluError> {
 
 /// Parse and validate a `project.json` document.
 ///
-/// Validation rules:
+/// Validation rules enforced here:
 ///
 /// - `version` must be `1` (the only schema version recognised today).
 /// - Every `local_axioms[].id` must start with `project_` so it cannot
 ///   collide with universal `rust_quality_*` ids.
 /// - Local axiom ids must be unique within the file.
+/// - The same id cannot appear in both `axiom_overrides` and
+///   `local_axioms` — overriding a project-local axiom is meaningless
+///   because the project owns it directly.
+///
+/// Two related invariants are enforced as *test*-time checks rather
+/// than at parse time, because `parse` does not have access to the
+/// universal axiom corpus:
+///
+/// - `axiom_overrides[].id` resolves to a real `rust_quality_*` axiom.
+/// - `local_axioms[].id` does not shadow a universal `rust_quality_*`
+///   axiom.
 ///
 /// # Errors
 ///
 /// Returns [`crate::IlluError::Other`] on JSON parse failure, version
-/// mismatch, an unprefixed local id, or a duplicate local id.
+/// mismatch, unprefixed local id, duplicate local id, or an id that
+/// appears in both `axiom_overrides` and `local_axioms`.
 fn parse(json: &str) -> Result<ProjectStyle, crate::IlluError> {
     let raw: RawProjectStyle = serde_json::from_str(json)
         .map_err(|e| crate::IlluError::Other(format!("failed to parse project.json: {e}")))?;
@@ -241,19 +257,29 @@ fn parse(json: &str) -> Result<ProjectStyle, crate::IlluError> {
         local_axioms.push(Axiom::from(raw_axiom));
     }
 
-    let overrides = raw
-        .axiom_overrides
-        .into_iter()
-        .map(|o| {
-            (
-                o.id,
-                AxiomOverride {
-                    severity: o.severity,
-                    note: o.note,
-                },
-            )
-        })
-        .collect();
+    // An id may live in `axiom_overrides` (referring to a universal
+    // axiom) or in `local_axioms` (a project-defined axiom), but not
+    // both. The prefix discipline makes accidental collision unlikely,
+    // but a project author could write `axiom_overrides[].id` with a
+    // `project_*` value that also exists locally; reject that.
+    let mut overrides = std::collections::HashMap::with_capacity(raw.axiom_overrides.len());
+    for o in raw.axiom_overrides {
+        if local_ids.contains(&o.id) {
+            return Err(crate::IlluError::Other(format!(
+                "id `{}` appears in both axiom_overrides and local_axioms; \
+                 overriding a project-local axiom is meaningless because \
+                 the project owns it directly",
+                o.id
+            )));
+        }
+        overrides.insert(
+            o.id,
+            AxiomOverride {
+                severity: o.severity,
+                note: o.note,
+            },
+        );
+    }
 
     Ok(ProjectStyle {
         overrides,
@@ -453,7 +479,38 @@ mod tests {
     }
 
     #[test]
-    fn test_adjust_score_filters_ignored() {
+    fn test_project_style_rejects_override_id_in_local_axioms() {
+        // Same id appearing in both arrays is a schema violation: the
+        // project owns its local axioms directly, so overriding them is
+        // meaningless.
+        let json = r#"{
+            "version": 1,
+            "axiom_overrides": [
+                { "id": "project_collision", "severity": "demoted" }
+            ],
+            "local_axioms": [
+                {
+                    "id": "project_collision",
+                    "category": "X",
+                    "source": "test",
+                    "triggers": ["x"],
+                    "rule_summary": "x",
+                    "prompt_injection": "x",
+                    "anti_pattern": "x",
+                    "good_pattern": "x"
+                }
+            ]
+        }"#;
+        let err = parse(json).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("both axiom_overrides and local_axioms"),
+            "expected collision error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_project_style_adjust_score_filters_ignored() {
         let mut s = ProjectStyle::default();
         s.overrides.insert(
             "rust_quality_64_no_box_dyn_error_internal".into(),
@@ -469,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn test_adjust_score_demotes_and_elevates() {
+    fn test_project_style_adjust_score_demotes_and_elevates() {
         let mut s = ProjectStyle::default();
         s.overrides.insert(
             "a".into(),
