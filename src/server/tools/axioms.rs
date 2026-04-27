@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 78);
+        assert_eq!(rust_quality_axiom_count, 81);
     }
 
     #[test]
@@ -535,6 +535,36 @@ mod tests {
         assert!(
             result.contains("Object-Safe API Design"),
             "Object-Safe API Design missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_types_axioms_batch_2_present() {
+        let result = handle_axioms(
+            "generic vs dyn static dispatch dynamic dispatch monomorphization vtable binary size dispatch",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Static vs Dynamic Dispatch"),
+            "Static vs Dynamic Dispatch missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "associated type generic parameter Iterator Item Add Output type relation one impl per type",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Associated Types"),
+            "Associated Types missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "HRTB for<'a> higher-ranked trait bound callback any lifetime Fn arbitrary lifetime borrow checker callback",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Higher-Ranked Trait Bounds"),
+            "Higher-Ranked Trait Bounds missing in focused query"
         );
     }
 }

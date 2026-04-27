@@ -778,5 +778,35 @@
     "prompt_injection": "MANDATORY RULE: When designing a public trait, decide upfront whether `dyn Trait` is in scope. If yes, keep methods object-safe and put generic helpers on a separate `*Ext` extension trait with `impl<T: BaseTrait + ?Sized> Ext for T {}`. If no, document the decision in rustdoc — callers cannot store `Box<dyn YourTrait>`.",
     "anti_pattern": "// Trait meant for plugins, accidentally not object-safe due to a generic method.\npub trait LoggerPlugin {\n    fn name(&self) -> &str;                          // object-safe\n    fn log<W: Write>(&self, msg: &str, sink: W);     // generic: breaks dyn\n}",
     "good_pattern": "pub trait LoggerPlugin {\n    fn name(&self) -> &str;\n    fn log(&self, msg: &str, sink: &mut dyn Write);\n}\n// Generic helper as extension trait with blanket impl:\npub trait LoggerPluginExt: LoggerPlugin {\n    fn log_to<W: Write>(&self, msg: &str, mut sink: W) {\n        self.log(msg, &mut sink as &mut dyn Write);\n    }\n}\nimpl<T: LoggerPlugin + ?Sized> LoggerPluginExt for T {}"
+  },
+  {
+    "id": "rust_quality_79_static_vs_dynamic_dispatch",
+    "category": "Static vs Dynamic Dispatch",
+    "source": "Rust for Rustaceans, ch. 2 §Generics vs Trait Objects; Rust Book ch. 17",
+    "triggers": ["generic vs dyn", "static dispatch", "dynamic dispatch", "monomorphization", "vtable", "binary size dispatch"],
+    "rule_summary": "Pick generics (`fn foo<T: Trait>(x: T)`) for hot paths and homogeneous types: monomorphization, inlining, no indirect call. Pick trait objects (`fn foo(x: &dyn Trait)`) for heterogeneous collections, plugin boundaries, and binary-size budgets: single code copy, vtable indirection. Mixing both in one API is rarely the right answer.",
+    "prompt_injection": "MANDATORY RULE: Default to generics for performance-sensitive code that handles a single type per call site. Use `dyn Trait` only when you need heterogeneous collections, plugin boundaries that decouple consumers from concrete types, or to keep binary size bounded. Document the choice when it is non-obvious.",
+    "anti_pattern": "// Heterogeneous renderable items forced through monomorphization — Vec<T> can hold only one T.\nfn render_all<T: Render>(items: Vec<T>) { /* one concrete type per call */ }\n\n// Hot-path callback through dyn — indirect call, missed inlining.\nfn for_each(callback: &dyn Fn(usize), n: usize) {\n    for i in 0..n { callback(i); }\n}",
+    "good_pattern": "// Heterogeneous: dyn.\nfn render_all(items: Vec<Box<dyn Render>>) { /* mixed concrete types in one Vec */ }\n\n// Hot-path: generic, monomorphized per F.\nfn for_each<F: Fn(usize)>(callback: F, n: usize) {\n    for i in 0..n { callback(i); }\n}"
+  },
+  {
+    "id": "rust_quality_80_associated_types",
+    "category": "Associated Types",
+    "source": "Rust for Rustaceans, ch. 2 §Associated Types vs Generics; Rust Book ch. 19",
+    "triggers": ["associated type", "generic parameter", "Iterator Item", "Add Output", "type relation", "one impl per type"],
+    "rule_summary": "Use an associated type when the trait has one logical impl per type (`Iterator::Item` is determined by the iterator). Use a generic parameter when the caller picks (`Add<RHS>` lets one type implement addition with multiple right-hand-side types). Don't mix both unless the relation requires it.",
+    "prompt_injection": "MANDATORY RULE: Decide for each trait whether the related type is determined by the implementor (associated type) or chosen by the caller (generic parameter). If implementors have exactly one natural choice, an associated type spares callers from spelling it out. If multiple choices coexist on one type, a generic parameter is necessary.",
+    "anti_pattern": "// Generic parameter when only one impl per type makes sense — caller forced to spell\n// the only valid choice every time.\ntrait Container<Item> {\n    fn add(&mut self, x: Item);\n}\nimpl Container<u32> for MyVec { /* the only impl */ }\nfn use_it<C: Container<u32>>(c: &mut C) { /* must spell u32 every time */ }",
+    "good_pattern": "// Associated type: one Item per Container type; caller does not spell it.\ntrait Container {\n    type Item;\n    fn add(&mut self, x: Self::Item);\n}\nimpl Container for MyVec { type Item = u32; /* ... */ }\nfn use_it<C: Container<Item = u32>>(c: &mut C) { /* spelled when caller pins it */ }\nfn use_it_any<C: Container>(c: &mut C, x: C::Item) { /* opaque to caller */ }"
+  },
+  {
+    "id": "rust_quality_81_hrtbs",
+    "category": "Higher-Ranked Trait Bounds",
+    "source": "Rust for Rustaceans, ch. 2 §HRTBs; Rust Reference §Higher-Rank Trait Bounds; Crust of Rust: Lifetime Annotations",
+    "triggers": ["HRTB", "for<'a>", "higher-ranked trait bound", "callback any lifetime", "Fn arbitrary lifetime", "borrow checker callback"],
+    "rule_summary": "`for<'a> Fn(&'a T) -> &'a U` declares the callback works for any caller-chosen lifetime, not a single named lifetime fixed at the bound site. Use HRTBs when a function passes borrowed data into a callback whose lifetime cannot be tied to the function's own type parameters.",
+    "prompt_injection": "MANDATORY RULE: When a callback bound describes a closure or function pointer that the implementation will invoke with locally-borrowed data, write the bound as `for<'a> Fn(&'a T) -> ...` (HRTB). A single named lifetime tied to the outer function's type parameters constrains the callback to one specific lifetime, which usually fails when the implementation has only a shorter borrow to offer.",
+    "anti_pattern": "// Single named lifetime: caller picks 'a, function is locked to that lifetime.\n// Trying to call f on a locally-borrowed value fails (E0597) because the local\n// borrow's scope is shorter than 'a.\nfn process<'a, F>(input: &'a str, f: F)\nwhere F: Fn(&'a str) -> bool\n{\n    let scratch = format!(\"[{input}]\"); // owned, function-local\n    if f(&scratch) {                     // ERROR: scratch's borrow shorter than 'a\n        /* ... */\n    }\n}",
+    "good_pattern": "// HRTB: callback works for any lifetime — including scratch's local one.\nfn process<F>(input: &str, f: F)\nwhere F: for<'a> Fn(&'a str) -> bool\n{\n    let scratch = format!(\"[{input}]\");\n    if f(&scratch) {                     // OK: HRTB accepts any &str\n        /* ... */\n    }\n}"
   }
 ]
