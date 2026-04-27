@@ -6,6 +6,7 @@ pub mod callpath;
 pub mod context;
 pub mod crate_graph;
 pub mod crate_impact;
+pub mod critique;
 pub mod cross_callpath;
 pub mod cross_deps;
 pub mod cross_impact;

@@ -108,6 +108,11 @@ pub mod server {
             pub use crate::server::tools::crate_impact::handle_crate_impact;
         }
 
+        /// Diff critique tool.
+        pub mod critique {
+            pub use crate::server::tools::critique::handle_critique;
+        }
+
         /// Cross-repository call-path tool.
         pub mod cross_callpath {
             pub use crate::server::tools::cross_callpath::handle_cross_callpath;
