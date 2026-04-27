@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 75);
+        assert_eq!(rust_quality_axiom_count, 78);
     }
 
     #[test]
@@ -505,6 +505,36 @@ mod tests {
         assert!(
             surfaced >= 3,
             "expected at least 3 new ownership categories in demo query, got {surfaced}"
+        );
+    }
+
+    #[test]
+    fn test_types_axioms_batch_1_present() {
+        let result = handle_axioms(
+            "sealed trait private super trait block external impl pub trait extension prevention",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Sealed Traits"),
+            "Sealed Traits missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "object safety dyn compatible Self Sized escape dispatchable receiver generic methods trait object",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Object Safety"),
+            "Object Safety missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "object-safe API design preserve object safety extension trait dyn plugin trait deliberate non-object-safe",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Object-Safe API Design"),
+            "Object-Safe API Design missing in focused query"
         );
     }
 }

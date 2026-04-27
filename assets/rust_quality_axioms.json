@@ -748,5 +748,35 @@
     "prompt_injection": "MANDATORY RULE: When implementing `Future::poll` directly or designing a self-referential type, take the `Pin<&mut Self>` contract seriously: do not move out of `self`, do not return a `&mut` to a self-referential field without `pin_project`, and do not assume the type is `Unpin` unless you have an explicit `impl Unpin for ...` with documented soundness. For everything else, normal `&mut self` methods are fine because most types are auto-`Unpin`.",
     "anti_pattern": "use std::future::Future;\nuse std::pin::Pin;\nuse std::task::{Context, Poll};\nstruct MyFuture { /* ... */ }\nimpl Future for MyFuture {\n    type Output = ();\n    // Wrong signature: Future::poll takes Pin<&mut Self>, not &mut Self.\n    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<()> { Poll::Ready(()) }\n}",
     "good_pattern": "use std::future::Future;\nuse std::pin::Pin;\nuse std::task::{Context, Poll};\nstruct MyFuture { state: u32 }\nimpl Future for MyFuture {\n    type Output = ();\n    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {\n        // MyFuture has no self-references, so Pin is just a marker here.\n        // For self-referential futures use pin-project to get safe field access.\n        Poll::Ready(())\n    }\n}"
+  },
+  {
+    "id": "rust_quality_76_sealed_traits",
+    "category": "Sealed Traits",
+    "source": "Rust for Rustaceans, ch. 2 §Coherence; rust-imap pattern; Rust API Guidelines C-SEALED",
+    "triggers": ["sealed trait", "private super trait", "block external impl", "pub trait", "extension prevention", "trait sealing"],
+    "rule_summary": "Use a private super trait to seal a public trait: external crates can call methods on it but cannot implement it. Pattern: a private module containing a `Sealed` trait, then `pub trait Foo: private::Sealed {}` plus `impl private::Sealed for ...` only for the types you control.",
+    "prompt_injection": "MANDATORY RULE: When you publish a trait whose set of implementors must remain bounded (closed-set extensions over std types, library-controlled implementations only), seal it with a private super trait. Without sealing, every minor-version method addition risks breaking external implementors.",
+    "anti_pattern": "// Unsealed: external crate can `impl Pretty for u32 { ... }`, and any future\n// minor-version method addition would break that external impl.\npub trait Pretty {\n    fn pretty(&self) -> String;\n}",
+    "good_pattern": "mod private {\n    pub trait Sealed {}\n}\n\npub trait Pretty: private::Sealed {\n    fn pretty(&self) -> String;\n}\n\n// We control all impls.\nimpl private::Sealed for String {}\nimpl Pretty for String {\n    fn pretty(&self) -> String { format!(\"\\\"{self}\\\"\") }\n}\n// External crates can call .pretty() but cannot impl Pretty for their own types\n// because they cannot impl private::Sealed."
+  },
+  {
+    "id": "rust_quality_77_object_safety",
+    "category": "Object Safety",
+    "source": "Rust Reference §Object Safety; Crust of Rust: Trait Objects",
+    "triggers": ["object safety", "dyn compatible", "dyn Trait", "Self: Sized escape", "dispatchable receiver", "generic methods trait object"],
+    "rule_summary": "A trait is object-safe (dyn-compatible) only if every method either has a dispatchable receiver and no generic type parameters, or is excluded from the vtable via `where Self: Sized`. `Self` may not appear by value in returns. Dispatchable receivers: `&self`, `&mut self`, `Box<Self>`, `Rc<Self>`, `Arc<Self>`, `Pin<P>`.",
+    "prompt_injection": "MANDATORY RULE: If callers may use your trait as `dyn Trait`, design every method to be dispatchable (no generic params, dispatchable receiver, no Self by value) or gate it behind `where Self: Sized` so it is excluded from the vtable. Adding a generic method later silently breaks `dyn Trait` usage at every call site.",
+    "anti_pattern": "pub trait Render {\n    fn into_string(self) -> String;        // Self by value: not object-safe\n    fn fmt<W: Write>(&self, w: &mut W);   // generic method: not object-safe\n}\nlet r: Box<dyn Render> = /* ... */;       // ERROR: trait `Render` is not dyn compatible",
+    "good_pattern": "pub trait Render {\n    fn fmt(&self, w: &mut dyn Write);                 // dispatchable, no generics\n    fn into_string(self) -> String where Self: Sized; // gated: not on the vtable\n}\nlet r: Box<dyn Render> = /* ... */;                   // OK\nr.fmt(&mut buf);                                       // works through the vtable\n// r.into_string() is unavailable through dyn (Sized-gated) but works on concrete T."
+  },
+  {
+    "id": "rust_quality_78_object_safe_api_design",
+    "category": "Object-Safe API Design",
+    "source": "Rust for Rustaceans, ch. 2 §Trait Objects and Object Safety",
+    "triggers": ["object-safe API", "preserve object safety", "extension trait dyn", "plugin trait", "deliberate non-object-safe", "ext trait pattern"],
+    "rule_summary": "Design traits to be object-safe by default; give it up only when the trait is genuinely a static-only abstraction. For traits exposed to user-defined plugins or heterogeneous collections, object safety is required. Provide generic conveniences via a separate extension trait with a blanket impl, so the core stays dyn-compatible.",
+    "prompt_injection": "MANDATORY RULE: When designing a public trait, decide upfront whether `dyn Trait` is in scope. If yes, keep methods object-safe and put generic helpers on a separate `*Ext` extension trait with `impl<T: BaseTrait + ?Sized> Ext for T {}`. If no, document the decision in rustdoc — callers cannot store `Box<dyn YourTrait>`.",
+    "anti_pattern": "// Trait meant for plugins, accidentally not object-safe due to a generic method.\npub trait LoggerPlugin {\n    fn name(&self) -> &str;                          // object-safe\n    fn log<W: Write>(&self, msg: &str, sink: W);     // generic: breaks dyn\n}",
+    "good_pattern": "pub trait LoggerPlugin {\n    fn name(&self) -> &str;\n    fn log(&self, msg: &str, sink: &mut dyn Write);\n}\n// Generic helper as extension trait with blanket impl:\npub trait LoggerPluginExt: LoggerPlugin {\n    fn log_to<W: Write>(&self, msg: &str, mut sink: W) {\n        self.log(msg, &mut sink as &mut dyn Write);\n    }\n}\nimpl<T: LoggerPlugin + ?Sized> LoggerPluginExt for T {}"
   }
 ]
