@@ -2,8 +2,8 @@
 // When the variant set is fixed at the library boundary, an enum compiles
 // to direct branches (or a jump table for larger sets) — no vtable, no
 // indirect call, exhaustive matches surface missed variants at compile
-// time, and `Vec<Command>` packs each element into one variant slot
-// rather than indirecting through a fat pointer.
+// time, and a `Vec<Command>` or `&[Command]` packs each element into one
+// variant slot rather than indirecting through a fat pointer.
 //
 // Use `Box<dyn Trait>` only when external code must add new variants;
 // for closed sets that the library owns, the enum representation is

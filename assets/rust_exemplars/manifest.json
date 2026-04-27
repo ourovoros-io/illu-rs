@@ -58,9 +58,9 @@
       "slug": "perf/closed_dispatch",
       "category": "Enum Dispatch",
       "title": "Closed-set command dispatch via enum + match",
-      "description": "Counter that processes a stream of commands via an enum + match rather than Box<dyn Command>. No vtable, no indirect call; the match compiles to direct branches; Vec<Command> packs each element rather than indirecting through a fat pointer.",
+      "description": "Counter that processes a stream of commands via an enum + match rather than Box<dyn Command>. No vtable, no indirect call; the match compiles to direct branches; a Vec<Command> or &[Command] packs each element rather than indirecting through a fat pointer.",
       "triggers": ["enum dispatch example", "match closed set", "command pattern enum", "no dyn dispatch"],
-      "axioms_demonstrated": ["rust_quality_90_enum_dispatch"],
+      "axioms_demonstrated": ["rust_quality_90_enum_dispatch", "rust_quality_79_static_vs_dynamic_dispatch"],
       "source": "Rust for Rustaceans, ch. 2 §Trait Objects; enum_dispatch crate"
     },
     {

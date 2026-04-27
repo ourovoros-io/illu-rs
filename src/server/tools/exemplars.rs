@@ -388,8 +388,9 @@ mod tests {
     /// Compile-check that every exemplar file is real Rust. Each is a
     /// separate child module so unrelated identifiers don't collide. Dead
     /// code is allowed because exemplars are demonstrations, not callable
-    /// from the rest of the crate. Tasks 2 and 3 may need to broaden this
-    /// `expect` set when they add modules that use `unused_*` patterns.
+    /// from the rest of the crate. Future exemplars that exercise
+    /// `unused_imports`/`unused_variables`/`unused_mut` patterns may need
+    /// to broaden the `expect` set below.
     #[expect(
         dead_code,
         reason = "exemplars are demonstrations, not callable from the rest of the crate"
