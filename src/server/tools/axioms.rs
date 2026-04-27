@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 90);
+        assert_eq!(rust_quality_axiom_count, 93);
     }
 
     #[test]
@@ -681,6 +681,63 @@ mod tests {
         assert!(
             result.contains("Enum Dispatch"),
             "Enum Dispatch missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_perf_axioms_batch_3_present() {
+        let result = handle_axioms(
+            "struct layout field reorder padding alignment repr(C) size_of cache line",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Struct Layout"),
+            "Struct Layout missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "atomic ordering Relaxed Acquire Release SeqCst memory ordering atomic synchronization",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Atomic Ordering"),
+            "Atomic Ordering missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "Box small T stack vs heap unnecessary Box Box Copy type heap indirection",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Heap Allocation Discipline"),
+            "Heap Allocation Discipline missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_perf_demo_query_returns_new_axioms() {
+        let result = handle_axioms(
+            "performance allocation hot path string Cow iterator monomorphization inline enum dispatch struct layout atomic ordering Box heap",
+        )
+        .unwrap();
+        let new_categories = [
+            "Allocation Discipline",
+            "String Allocation",
+            "Iterator Codegen",
+            "Monomorphization Cost",
+            "Inline Hints",
+            "Enum Dispatch",
+            "Struct Layout",
+            "Atomic Ordering",
+            "Heap Allocation Discipline",
+        ];
+        let surfaced = new_categories
+            .iter()
+            .filter(|cat| result.contains(*cat))
+            .count();
+        assert!(
+            surfaced >= 3,
+            "expected at least 3 new perf categories in demo query, got {surfaced}"
         );
     }
 }
