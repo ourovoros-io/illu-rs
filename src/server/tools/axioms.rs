@@ -189,20 +189,42 @@ fn score_axiom(axiom: &Axiom, query_terms: &[&str], query_lower: &str) -> usize 
 /// Heuristic: `ceil(bytes / 4)` — for English markdown a real tokenizer
 /// (GPT-4-style BPE, Claude's tokenizer) averages ~3.5 chars per token.
 /// We use 4 and round up so the estimator under-fills the budget rather
-/// than over-spending. A fixed `MARKDOWN_OVERHEAD_BYTES` covers the
-/// per-axiom rendering chrome (headings, source line, separator).
+/// than over-spending. `MARKDOWN_OVERHEAD_BYTES` covers the per-axiom
+/// rendering chrome (worst-case ~88 bytes: heading + source line +
+/// prompt block + good/anti pattern fences + separator).
+///
+/// `style` is consulted so the estimator includes the bytes of the
+/// project-local axiom footer (`_Project-local axiom: …_`) for any
+/// axiom with a `project_*` id, and the `**Project note:** …` line
+/// for any axiom whose override severity is `Noted`. Without these,
+/// project-style users would see budget overrun on exactly the
+/// axioms that Phase 3 enables.
 ///
 /// This is intentionally not a real tokenizer call — adding `tiktoken-rs`
 /// or `tokenizers` would pull in megabytes of vocabulary data for ~10%
 /// accuracy improvement that callers can clamp downstream if they need.
-fn estimate_tokens(axiom: &Axiom) -> usize {
-    const MARKDOWN_OVERHEAD_BYTES: usize = 80;
-    let body_bytes = axiom.category.len()
+fn estimate_tokens(
+    axiom: &Axiom,
+    style: &crate::server::tools::project_style::ProjectStyle,
+) -> usize {
+    const MARKDOWN_OVERHEAD_BYTES: usize = 88;
+    const PROJECT_LOCAL_FOOTER_CHROME: usize = 28; // "_Project-local axiom: ``_\n"
+    const NOTE_LINE_CHROME: usize = 17; // "**Project note:** \n"
+
+    let mut body_bytes = axiom.category.len()
         + axiom.rule_summary.len()
         + axiom.prompt_injection.len()
         + axiom.anti_pattern.len()
         + axiom.good_pattern.len()
         + axiom.source.as_ref().map_or(0, String::len);
+
+    if axiom.id.starts_with("project_") {
+        body_bytes += PROJECT_LOCAL_FOOTER_CHROME + axiom.id.len();
+    }
+    if let Some(note) = style.note_for(&axiom.id) {
+        body_bytes += NOTE_LINE_CHROME + note.len();
+    }
+
     (body_bytes + MARKDOWN_OVERHEAD_BYTES).div_ceil(4)
 }
 
@@ -279,7 +301,7 @@ pub(crate) fn handle_axioms_with_style(
             let mut spent: usize = 0;
             let mut chosen = Vec::new();
             for (axiom, _) in scored {
-                let cost = estimate_tokens(axiom);
+                let cost = estimate_tokens(axiom, style);
                 // Strict: stop on the first axiom that would push us past
                 // the budget rather than skipping it for a cheaper later
                 // entry. Score-order priority is more useful to callers
@@ -302,13 +324,15 @@ pub(crate) fn handle_axioms_with_style(
 
     if top.is_empty() {
         // Distinguish "no matches at all" from "matches existed but the
-        // budget couldn't fit any of them". The latter names the budget
-        // and the cost floor so the caller can raise `max_tokens`.
+        // budget couldn't fit any of them". `top_match` is the
+        // *highest-scoring* matching axiom (not the cheapest); naming
+        // it tells the caller what the strict score-order budget walk
+        // would have selected first and how much budget it needed.
         if let (Some(budget), Some(axiom)) = (max_tokens, top_match) {
-            let cost = estimate_tokens(axiom);
+            let cost = estimate_tokens(axiom, style);
             let _ = writeln!(
                 output,
-                "No matching axioms fit within max_tokens={budget} (smallest matching axiom estimated at ~{cost} tokens)."
+                "No matching axioms fit within max_tokens={budget} (top-scored matching axiom estimated at ~{cost} tokens; raise the budget to receive results in score order)."
             );
             return Ok(output);
         }
@@ -1172,15 +1196,26 @@ mod tests {
 
     #[test]
     fn test_axioms_max_tokens_none_unchanged() {
-        // No-budget code path is byte-for-byte identical to the prior
-        // implementation. Run twice to confirm determinism, and verify
-        // the result is non-empty for a representative query.
+        // No-budget code path is identical to the prior implementation.
+        // Two checks: (1) the same call is deterministic, and (2) the
+        // public wrapper handle_axioms (which threads None through and
+        // reads the global ProjectStyle, which defaults to empty) is
+        // byte-for-byte equivalent to handle_axioms_with_style with the
+        // default style and None budget. (2) is the real "unchanged
+        // from prior phases" invariant — (1) alone would pass even if
+        // the wrapper diverged.
         use crate::server::tools::project_style::ProjectStyle;
         let style = ProjectStyle::default();
-        let a = handle_axioms_with_style("error handling", &style, None).unwrap();
-        let b = handle_axioms_with_style("error handling", &style, None).unwrap();
-        assert_eq!(a, b);
-        assert!(!a.is_empty());
+        let direct_a = handle_axioms_with_style("error handling", &style, None).unwrap();
+        let direct_b = handle_axioms_with_style("error handling", &style, None).unwrap();
+        assert_eq!(direct_a, direct_b, "direct calls must be deterministic");
+        assert!(!direct_a.is_empty());
+
+        let wrapped = handle_axioms("error handling").unwrap();
+        assert_eq!(
+            direct_a, wrapped,
+            "wrapper handle_axioms must match _with_style(default, None)"
+        );
     }
 
     #[test]
@@ -1268,7 +1303,10 @@ mod tests {
             + axiom.anti_pattern.len()
             + axiom.good_pattern.len()
             + axiom.source.as_ref().map_or(0, String::len);
-        let estimated = estimate_tokens(axiom);
+        let estimated = estimate_tokens(
+            axiom,
+            &crate::server::tools::project_style::ProjectStyle::default(),
+        );
         let body_tokens = body_bytes.div_ceil(4);
         let lower = body_tokens / 2;
         let upper = body_tokens * 2;
