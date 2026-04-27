@@ -22,8 +22,72 @@ use crate::server::tools::axioms::{Axiom, RawAxiom};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use thiserror::Error;
+
+/// Failure categories for loading and validating `.illu/style/project.json`.
+///
+/// Distinct variants let callers (and tests) decide how to react without
+/// parsing `Display` strings. Wrapped as
+/// [`crate::IlluError::ProjectStyle`] when bubbled across the module
+/// boundary; inside this module, [`parse`] returns this type directly so
+/// [`Error Path Specificity`] tests can match the precise category.
+///
+/// The enum is `#[non_exhaustive]` so future categories (e.g. a new
+/// schema-version mismatch with a richer payload) can be added without
+/// breaking downstream `match` statements.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ProjectStyleError {
+    /// JSON-level parse failure. The wrapped [`serde_json::Error`] is
+    /// returned via [`std::error::Error::source`] so callers can walk the
+    /// chain rather than re-parsing a formatted message.
+    #[error("failed to parse project.json")]
+    Json(#[from] serde_json::Error),
+
+    /// `version` field present and parsed but does not match the schema
+    /// version this build understands (currently only `1`). Wraps the
+    /// rejected version so callers can distinguish "config too new"
+    /// from "config too old" if multiple versions ever ship.
+    #[error("unsupported project.json version: {0} (only 1 is recognized)")]
+    UnsupportedVersion(u32),
+
+    /// `local_axioms[].id` is missing the mandatory `project_` prefix.
+    /// The prefix is what keeps project-local axiom ids from colliding
+    /// with universal `rust_quality_*` ids.
+    #[error("local axiom id `{0}` must start with `project_`")]
+    UnprefixedLocalId(String),
+
+    /// Two `local_axioms[]` entries share the same id. Each id must be
+    /// unique within the file; otherwise scoring becomes ambiguous.
+    #[error("duplicate local axiom id `{0}`")]
+    DuplicateLocalId(String),
+
+    /// An id appears in both `axiom_overrides[]` (which references a
+    /// universal axiom) and `local_axioms[]` (which defines a project
+    /// axiom). Overriding a project-local axiom is meaningless because
+    /// the project owns the axiom directly — the schema rejects this to
+    /// surface the author's intent rather than silently picking one.
+    #[error(
+        "id `{0}` appears in both axiom_overrides and local_axioms; \
+         overriding a project-local axiom is meaningless because the \
+         project owns it directly"
+    )]
+    OverrideShadowsLocal(String),
+
+    /// Filesystem read of the configured path failed. Carries the path
+    /// as a typed field so callers can log which file went missing
+    /// without re-parsing the message.
+    #[error("failed to read {path}", path = path.display())]
+    Read {
+        /// Absolute or repo-relative path the loader attempted to read.
+        path: PathBuf,
+        /// Underlying I/O error returned by `std::fs::read_to_string`.
+        #[source]
+        source: std::io::Error,
+    },
+}
 
 /// On-disk shape of the project style file. `axiom_overrides` and
 /// `local_axioms` both default to empty, so `{ "version": 1 }` alone is a
@@ -216,12 +280,19 @@ pub fn init(repo_root: &Path) -> Result<(), crate::IlluError> {
 ///
 /// # Errors
 ///
-/// Returns [`crate::IlluError::Other`] if the file cannot be read or if
-/// its contents fail validation (see [`parse`] for the rules).
+/// Returns [`crate::IlluError::ProjectStyle`] wrapping a
+/// [`ProjectStyleError`] tagged with the precise failure category — read
+/// failure, JSON parse failure, or any of the validation rules listed in
+/// [`parse`].
 pub fn load_from_path(path: &Path) -> Result<ProjectStyle, crate::IlluError> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| crate::IlluError::Other(format!("failed to read {}: {e}", path.display())))?;
-    parse(&text)
+    let text = std::fs::read_to_string(path).map_err(|source| ProjectStyleError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    // `parse` returns `ProjectStyleError`; the `?` here triggers
+    // `IlluError: From<ProjectStyleError>` so the typed category
+    // survives the boundary into the crate-wide error.
+    Ok(parse(&text)?)
 }
 
 /// Parse and validate a `project.json` document.
@@ -246,18 +317,20 @@ pub fn load_from_path(path: &Path) -> Result<ProjectStyle, crate::IlluError> {
 ///
 /// # Errors
 ///
-/// Returns [`crate::IlluError::Other`] on JSON parse failure, version
-/// mismatch, unprefixed local id, duplicate local id, or an id that
-/// appears in both `axiom_overrides` and `local_axioms`.
-fn parse(json: &str) -> Result<ProjectStyle, crate::IlluError> {
-    let raw: RawProjectStyle = serde_json::from_str(json)
-        .map_err(|e| crate::IlluError::Other(format!("failed to parse project.json: {e}")))?;
+/// Returns [`ProjectStyleError`] tagged with the precise failure
+/// category. Returning the module-local error rather than
+/// [`crate::IlluError`] lets [`Error Path Specificity`] tests destructure
+/// the failure without going through the `IlluError::ProjectStyle`
+/// wrapper. The `?` operator at [`load_from_path`] converts to
+/// [`crate::IlluError`] at the module boundary.
+fn parse(json: &str) -> Result<ProjectStyle, ProjectStyleError> {
+    // `?` triggers `ProjectStyleError: From<serde_json::Error>` via
+    // the `Json` variant's `#[from]`, preserving the original parse
+    // error in `source()` rather than stringifying it.
+    let raw: RawProjectStyle = serde_json::from_str(json)?;
 
     if raw.version != 1 {
-        return Err(crate::IlluError::Other(format!(
-            "unsupported project.json version: {} (only 1 is recognized)",
-            raw.version
-        )));
+        return Err(ProjectStyleError::UnsupportedVersion(raw.version));
     }
 
     // Local axioms must be `project_*`-prefixed (avoids namespace
@@ -267,16 +340,10 @@ fn parse(json: &str) -> Result<ProjectStyle, crate::IlluError> {
     let mut local_axioms = Vec::with_capacity(raw.local_axioms.len());
     for raw_axiom in raw.local_axioms {
         if !raw_axiom.id.starts_with("project_") {
-            return Err(crate::IlluError::Other(format!(
-                "local axiom id `{}` must start with `project_`",
-                raw_axiom.id
-            )));
+            return Err(ProjectStyleError::UnprefixedLocalId(raw_axiom.id));
         }
         if !local_ids.insert(raw_axiom.id.clone()) {
-            return Err(crate::IlluError::Other(format!(
-                "duplicate local axiom id `{}`",
-                raw_axiom.id
-            )));
+            return Err(ProjectStyleError::DuplicateLocalId(raw_axiom.id));
         }
         local_axioms.push(Axiom::from(raw_axiom));
     }
@@ -289,12 +356,7 @@ fn parse(json: &str) -> Result<ProjectStyle, crate::IlluError> {
     let mut overrides = std::collections::HashMap::with_capacity(raw.axiom_overrides.len());
     for o in raw.axiom_overrides {
         if local_ids.contains(&o.id) {
-            return Err(crate::IlluError::Other(format!(
-                "id `{}` appears in both axiom_overrides and local_axioms; \
-                 overriding a project-local axiom is meaningless because \
-                 the project owns it directly",
-                o.id
-            )));
+            return Err(ProjectStyleError::OverrideShadowsLocal(o.id));
         }
         overrides.insert(
             o.id,
@@ -474,10 +536,25 @@ mod tests {
     #[test]
     fn test_project_style_rejects_unknown_version() {
         let err = parse(r#"{"version": 2}"#).unwrap_err();
-        let msg = format!("{err}");
+        // [Error Path Specificity]: assert the precise variant + its
+        // payload, not a substring of `Display`. A refactor that flips
+        // the error category but happens to keep the word "unsupported"
+        // in the message would silently pass an `is_err()` test.
         assert!(
-            msg.contains("unsupported"),
-            "expected unsupported-version error, got: {msg}"
+            matches!(err, ProjectStyleError::UnsupportedVersion(2)),
+            "expected UnsupportedVersion(2), got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_project_style_rejects_malformed_json() {
+        // Adjacent failure path: a malformed JSON document must surface
+        // as `Json(_)`, not `UnsupportedVersion`. Without this case the
+        // refactor could collapse both into one variant unnoticed.
+        let err = parse("not json").unwrap_err();
+        assert!(
+            matches!(err, ProjectStyleError::Json(_)),
+            "expected Json(_), got: {err:?}"
         );
     }
 
@@ -499,7 +576,44 @@ mod tests {
             ]
         }"#;
         let err = parse(json).unwrap_err();
-        assert!(format!("{err}").contains("project_"));
+        assert!(
+            matches!(&err, ProjectStyleError::UnprefixedLocalId(id) if id == "not_prefixed"),
+            "expected UnprefixedLocalId(`not_prefixed`), got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_project_style_rejects_duplicate_local_id() {
+        let json = r#"{
+            "version": 1,
+            "local_axioms": [
+                {
+                    "id": "project_dup",
+                    "category": "X",
+                    "source": "test",
+                    "triggers": ["x"],
+                    "rule_summary": "x",
+                    "prompt_injection": "x",
+                    "anti_pattern": "x",
+                    "good_pattern": "x"
+                },
+                {
+                    "id": "project_dup",
+                    "category": "Y",
+                    "source": "test",
+                    "triggers": ["y"],
+                    "rule_summary": "y",
+                    "prompt_injection": "y",
+                    "anti_pattern": "y",
+                    "good_pattern": "y"
+                }
+            ]
+        }"#;
+        let err = parse(json).unwrap_err();
+        assert!(
+            matches!(&err, ProjectStyleError::DuplicateLocalId(id) if id == "project_dup"),
+            "expected DuplicateLocalId(`project_dup`), got: {err:?}"
+        );
     }
 
     #[test]
@@ -526,10 +640,26 @@ mod tests {
             ]
         }"#;
         let err = parse(json).unwrap_err();
-        let msg = format!("{err}");
         assert!(
-            msg.contains("both axiom_overrides and local_axioms"),
-            "expected collision error, got: {msg}"
+            matches!(&err, ProjectStyleError::OverrideShadowsLocal(id) if id == "project_collision"),
+            "expected OverrideShadowsLocal(`project_collision`), got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_project_style_load_from_path_missing_file_is_typed() {
+        // `load_from_path` crosses the module boundary into IlluError.
+        // The wrapped category must still be reachable via the inner
+        // ProjectStyleError so callers can react to "missing file"
+        // distinctly from "parse failure".
+        let missing = PathBuf::from("/definitely/does/not/exist/project.json");
+        let err = load_from_path(&missing).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                crate::IlluError::ProjectStyle(ProjectStyleError::Read { .. })
+            ),
+            "expected IlluError::ProjectStyle(Read), got: {err:?}"
         );
     }
 

@@ -23,8 +23,62 @@ use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use thiserror::Error;
+
+/// Failure categories for loading and parsing decision records.
+///
+/// Distinct variants let callers (and tests) decide how to react without
+/// parsing `Display` strings. Wrapped as
+/// [`crate::IlluError::Decision`] when bubbled across the module
+/// boundary; inside this module, [`parse_decision`] returns this type
+/// directly so [`Error Path Specificity`] tests can match the precise
+/// category.
+///
+/// `#[non_exhaustive]` so future categories (e.g. a richer status
+/// validation error) can be added without breaking downstream `match`.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum DecisionError {
+    /// JSON-level parse failure. The wrapped [`serde_json::Error`] is
+    /// returned via [`std::error::Error::source`] so the caller can walk
+    /// the chain. `Display` describes only this layer.
+    #[error("failed to parse decision JSON")]
+    Json(#[from] serde_json::Error),
+
+    /// `id` field present but missing the mandatory `decision_` prefix.
+    /// The prefix keeps decision ids in their own namespace and prevents
+    /// accidental shadowing with axiom ids.
+    #[error("decision id `{0}` must start with `decision_`")]
+    UnprefixedId(String),
+
+    /// `date` field is not a `YYYY-MM-DD` string. The validator is
+    /// regex-light (no calendar correctness), so any 10-character
+    /// `\d{{4}}-\d{{2}}-\d{{2}}` is accepted; anything else is rejected.
+    #[error("decision `{id}` has malformed date `{date}`; expected YYYY-MM-DD")]
+    MalformedDate {
+        /// Decision id whose date failed validation; lets callers point
+        /// to the offending file without parsing the message.
+        id: String,
+        /// The literal date string that failed validation.
+        date: String,
+    },
+
+    /// Filesystem read of the decisions directory failed. Carries the
+    /// path as a typed field. Per-file read failures inside the
+    /// directory walk are logged at `warn` and skipped (so one bad file
+    /// does not disable the whole directory) rather than surfacing
+    /// here — this variant is reserved for the directory-level failure.
+    #[error("failed to read {path}", path = path.display())]
+    Read {
+        /// Path the loader attempted to read (the decisions directory).
+        path: PathBuf,
+        /// Underlying I/O error returned by `std::fs::read_dir`.
+        #[source]
+        source: std::io::Error,
+    },
+}
 
 #[derive(Debug, Deserialize)]
 struct RawDecision {
@@ -213,9 +267,20 @@ pub fn init(repo_root: &Path) -> Result<(), crate::IlluError> {
 /// Public for tests. Walks `dir`, parses each `*.json` file. Per-file
 /// parse failures log `warn` and are skipped. Duplicate IDs across files
 /// log `warn` and the second occurrence is dropped (first wins).
+///
+/// # Errors
+///
+/// Returns [`crate::IlluError::Decision`] wrapping
+/// [`DecisionError::Read`] when the directory itself cannot be read
+/// (typically: missing, permission denied, or a non-directory at that
+/// path). Per-file failures inside the walk are not propagated — they
+/// are logged at `warn` and the file is skipped.
 pub fn load_from_dir(dir: &Path) -> Result<Vec<Decision>, crate::IlluError> {
     let mut entries: Vec<_> = fs::read_dir(dir)
-        .map_err(|e| crate::IlluError::Other(format!("failed to read {}: {e}", dir.display())))?
+        .map_err(|source| DecisionError::Read {
+            path: dir.to_path_buf(),
+            source,
+        })?
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| {
@@ -258,20 +323,32 @@ pub fn load_from_dir(dir: &Path) -> Result<Vec<Decision>, crate::IlluError> {
     Ok(out)
 }
 
-fn parse_decision(json: &str) -> Result<Decision, crate::IlluError> {
-    let raw: RawDecision = serde_json::from_str(json)
-        .map_err(|e| crate::IlluError::Other(format!("failed to parse decision: {e}")))?;
+/// Parse and validate a single decision record.
+///
+/// Returns the module-local [`DecisionError`] rather than
+/// [`crate::IlluError`] so [`Error Path Specificity`] tests can match
+/// the precise category. The directory walker [`load_from_dir`]
+/// handles the conversion at the module boundary.
+///
+/// # Errors
+///
+/// Returns [`DecisionError::Json`] on malformed JSON,
+/// [`DecisionError::UnprefixedId`] when the id is missing the
+/// `decision_` prefix, or [`DecisionError::MalformedDate`] when the
+/// `date` field is not a `YYYY-MM-DD` string.
+fn parse_decision(json: &str) -> Result<Decision, DecisionError> {
+    // `?` triggers `DecisionError: From<serde_json::Error>` via the
+    // `Json` variant's `#[from]`, preserving the original parse error
+    // in `source()` rather than stringifying it.
+    let raw: RawDecision = serde_json::from_str(json)?;
     if !raw.id.starts_with("decision_") {
-        return Err(crate::IlluError::Other(format!(
-            "decision id `{}` must start with `decision_`",
-            raw.id
-        )));
+        return Err(DecisionError::UnprefixedId(raw.id));
     }
     if !is_iso_date(&raw.date) {
-        return Err(crate::IlluError::Other(format!(
-            "decision `{}` has malformed date `{}`; expected YYYY-MM-DD",
-            raw.id, raw.date
-        )));
+        return Err(DecisionError::MalformedDate {
+            id: raw.id,
+            date: raw.date,
+        });
     }
     Ok(Decision::from_raw(raw))
 }
@@ -471,6 +548,11 @@ mod tests {
 
     #[test]
     fn test_decisions_status_enum_validates() {
+        // serde rejects an unknown enum tag at JSON parse time, so the
+        // failure category is `Json(_)`, not a hypothetical
+        // `UnknownStatus` variant. [Error Path Specificity] catches a
+        // future regression that mistakenly treats this as a domain
+        // validation error rather than a parse error.
         let bad = r#"{
             "id": "decision_bad_status",
             "title": "X",
@@ -480,7 +562,29 @@ mod tests {
             "decision": "x",
             "consequences": "x"
         }"#;
-        assert!(parse_decision(bad).is_err());
+        let err = parse_decision(bad).unwrap_err();
+        assert!(
+            matches!(err, DecisionError::Json(_)),
+            "expected Json(_), got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_decisions_rejects_unprefixed_id() {
+        let bad = r#"{
+            "id": "not_prefixed",
+            "title": "X",
+            "status": "accepted",
+            "date": "2026-04-27",
+            "context": "x",
+            "decision": "x",
+            "consequences": "x"
+        }"#;
+        let err = parse_decision(bad).unwrap_err();
+        assert!(
+            matches!(&err, DecisionError::UnprefixedId(id) if id == "not_prefixed"),
+            "expected UnprefixedId(`not_prefixed`), got: {err:?}"
+        );
     }
 
     #[test]
@@ -496,13 +600,34 @@ mod tests {
             "consequences": "x"
         }"#;
         let err = parse_decision(bad).unwrap_err();
-        assert!(format!("{err}").contains("YYYY-MM-DD"));
+        assert!(
+            matches!(
+                &err,
+                DecisionError::MalformedDate { id, date }
+                    if id == "decision_bad_date" && date == "April 2026"
+            ),
+            "expected MalformedDate {{ decision_bad_date, April 2026 }}, got: {err:?}"
+        );
 
         // Accept well-formed dates (no calendar correctness check).
         assert!(is_iso_date("2026-04-15"));
         assert!(is_iso_date("2026-02-30")); // not a real date but the format is right
         assert!(!is_iso_date("2026-4-15"));
         assert!(!is_iso_date("April 2026"));
+    }
+
+    #[test]
+    fn test_decisions_load_from_dir_missing_is_typed() {
+        // Directory-level read failure crosses into IlluError; the
+        // wrapped category must remain reachable so callers can react
+        // to a missing decisions directory distinctly from a parse
+        // failure inside a present directory.
+        let missing = PathBuf::from("/definitely/does/not/exist/decisions");
+        let err = load_from_dir(&missing).unwrap_err();
+        assert!(
+            matches!(err, crate::IlluError::Decision(DecisionError::Read { .. })),
+            "expected IlluError::Decision(Read), got: {err:?}"
+        );
     }
 
     #[test]

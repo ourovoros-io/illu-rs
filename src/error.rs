@@ -143,6 +143,37 @@ pub enum IlluError {
     #[error("docs: {0}")]
     Docs(String),
 
+    /// `.illu/style/project.json` failed to load or validate. The inner
+    /// [`ProjectStyleError`](crate::server::tools::project_style::ProjectStyleError)
+    /// tags the failure category (JSON parse, unsupported version,
+    /// unprefixed/duplicate local id, override shadowing, or read).
+    /// Callers can `matches!(err, IlluError::ProjectStyle(ProjectStyleError::DuplicateLocalId(_)))`
+    /// to react to specific failures without parsing `Display`.
+    #[error(transparent)]
+    ProjectStyle(#[from] crate::server::tools::project_style::ProjectStyleError),
+
+    /// `.illu/style/decisions/*.json` failed to parse. The inner
+    /// [`DecisionError`](crate::server::tools::decisions::DecisionError)
+    /// tags the failure category (JSON parse, unprefixed id, malformed
+    /// date, or read).
+    #[error(transparent)]
+    Decision(#[from] crate::server::tools::decisions::DecisionError),
+
+    /// `mcp__illu__critique` rejected its input before running detectors.
+    /// The inner
+    /// [`CritiqueInputError`](crate::server::tools::critique::CritiqueInputError)
+    /// tags the failure category (currently only oversized diff).
+    #[error(transparent)]
+    CritiqueInput(#[from] crate::server::tools::critique::CritiqueInputError),
+
+    /// `assets/rust_exemplars/manifest.json` failed to load or reference
+    /// a known source. The inner
+    /// [`ExemplarManifestError`](crate::server::tools::exemplars::ExemplarManifestError)
+    /// tags the failure category (JSON parse, missing source, cache
+    /// uninitialised).
+    #[error(transparent)]
+    ExemplarManifest(#[from] crate::server::tools::exemplars::ExemplarManifestError),
+
     /// Untyped escape hatch. Prefer a domain variant when adding new sites;
     /// this is retained for the one-shot string-error sites that would
     /// otherwise need a variant per call. See the module-level doc for the
