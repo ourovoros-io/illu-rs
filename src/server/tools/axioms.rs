@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 81);
+        assert_eq!(rust_quality_axiom_count, 84);
     }
 
     #[test]
@@ -565,6 +565,63 @@ mod tests {
         assert!(
             result.contains("Higher-Ranked Trait Bounds"),
             "Higher-Ranked Trait Bounds missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_types_axioms_batch_3_present() {
+        let result = handle_axioms(
+            "?Sized DST dynamically sized type implicit Sized Box T ?Sized Arc T ?Sized",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Sized Bound"),
+            "Sized Bound missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "ZST zero-sized type unit struct compile-time marker type witness Vec () no allocation",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Zero-Sized Types"),
+            "Zero-Sized Types missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "auto trait Send Sync auto marker trait Eq Hash coherence derive Eq Hash agree manual auto trait",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Marker and Auto Traits"),
+            "Marker and Auto Traits missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_types_demo_query_returns_new_axioms() {
+        let result = handle_axioms(
+            "trait object generic dyn associated type sealed Sized HRTB ZST marker Send Sync",
+        )
+        .unwrap();
+        let new_categories = [
+            "Sealed Traits",
+            "Object Safety",
+            "Object-Safe API Design",
+            "Static vs Dynamic Dispatch",
+            "Associated Types",
+            "Higher-Ranked Trait Bounds",
+            "Sized Bound",
+            "Zero-Sized Types",
+            "Marker and Auto Traits",
+        ];
+        let surfaced = new_categories
+            .iter()
+            .filter(|cat| result.contains(*cat))
+            .count();
+        assert!(
+            surfaced >= 3,
+            "expected at least 3 new types categories in demo query, got {surfaced}"
         );
     }
 }

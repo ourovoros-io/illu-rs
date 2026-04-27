@@ -808,5 +808,35 @@
     "prompt_injection": "MANDATORY RULE: When a callback bound describes a closure or function pointer that the implementation will invoke with locally-borrowed data, write the bound as `for<'a> Fn(&'a T) -> ...` (HRTB). A single named lifetime tied to the outer function's type parameters constrains the callback to one specific lifetime, which usually fails when the implementation has only a shorter borrow to offer.",
     "anti_pattern": "// Single named lifetime: caller picks 'a, function is locked to that lifetime.\n// Trying to call f on a locally-borrowed value fails (E0597) because the local\n// borrow's scope is shorter than 'a.\nfn process<'a, F>(input: &'a str, f: F)\nwhere F: Fn(&'a str) -> bool\n{\n    let scratch = format!(\"[{input}]\"); // owned, function-local\n    if f(&scratch) {                     // ERROR: scratch's borrow shorter than 'a\n        /* ... */\n    }\n}",
     "good_pattern": "// HRTB: callback works for any lifetime — including scratch's local one.\nfn process<F>(input: &str, f: F)\nwhere F: for<'a> Fn(&'a str) -> bool\n{\n    let scratch = format!(\"[{input}]\");\n    if f(&scratch) {                     // OK: HRTB accepts any &str\n        /* ... */\n    }\n}"
+  },
+  {
+    "id": "rust_quality_82_sized_bound",
+    "category": "Sized Bound",
+    "source": "Rust for Rustaceans, ch. 2 §Sized and DSTs; Rustonomicon §Exotically Sized Types",
+    "triggers": ["?Sized", "DST", "dynamically sized type", "implicit Sized", "Box T ?Sized", "Arc T ?Sized"],
+    "rule_summary": "Generic type parameters carry an implicit `Sized` bound. Relax it with `T: ?Sized` to accept dynamically-sized types (`str`, `[T]`, `dyn Trait`). The cost is that the parameter can only be used through references or owning pointers (`&T`, `&mut T`, `Box<T>`, `Arc<T>`, `Rc<T>`); never by value, since the size is unknown at compile time.",
+    "prompt_injection": "MANDATORY RULE: For container or wrapper types that should accept DSTs, write the parameter as `T: ?Sized` and use it only through references or owning smart pointers. For parameters used by value (returned, moved, stored inline), keep the implicit `Sized` bound.",
+    "anti_pattern": "// Implicit Sized: cannot wrap str or dyn Trait.\nstruct Wrapper<T> { inner: Box<T> }\nlet w: Wrapper<str> = /* ... */;        // ERROR: str is not Sized\nlet w: Wrapper<dyn Display> = /* ... */; // ERROR: dyn Display is not Sized",
+    "good_pattern": "struct Wrapper<T: ?Sized> { inner: Box<T> }\nlet w: Wrapper<str> = Wrapper { inner: \"hi\".to_owned().into_boxed_str() };\nlet w: Wrapper<dyn std::fmt::Display> = Wrapper { inner: Box::new(42_u32) };\n// Methods that move T by value still need T: Sized; reference-based methods are fine."
+  },
+  {
+    "id": "rust_quality_83_zst_markers",
+    "category": "Zero-Sized Types",
+    "source": "Rust for Rustaceans, ch. 2 §Zero-Sized Types; Rust Book ch. 5",
+    "triggers": ["ZST", "zero-sized type", "unit struct", "compile-time marker", "type witness", "Vec () no allocation"],
+    "rule_summary": "A zero-sized type (`struct A;`, `()`, `PhantomData<T>`, structs with all-ZST fields) costs no memory at runtime but carries information at compile time. Use them for typestate phases, capability tokens, type-level booleans, and marker bounds. `Vec<()>` never allocates element storage — pushes only update the length counter.",
+    "prompt_injection": "MANDATORY RULE: When you need a compile-time witness that an operation has happened or that a value belongs to a category, use a ZST. Unit structs, `PhantomData`, and ZST-only fields encode information in the type system at zero runtime cost.",
+    "anti_pattern": "// Runtime boolean to indicate an authentication state that is statically known.\nstruct Connection { authenticated: bool }\nimpl Connection {\n    fn send(&self, _msg: &str) {\n        assert!(self.authenticated, \"not authenticated\"); // runtime check\n    }\n}",
+    "good_pattern": "use std::marker::PhantomData;\n// ZST markers + typestate: invalid state unrepresentable at compile time.\nstruct Anon;        // 0 bytes\nstruct Authed;      // 0 bytes\nstruct Connection<S> { _state: PhantomData<S> }\nimpl Connection<Anon> {\n    fn login(self) -> Connection<Authed> {\n        Connection { _state: PhantomData }\n    }\n}\nimpl Connection<Authed> {\n    fn send(&self, _msg: &str) { /* compile-time guaranteed authenticated */ }\n}"
+  },
+  {
+    "id": "rust_quality_84_marker_auto_traits",
+    "category": "Marker and Auto Traits",
+    "source": "Rust for Rustaceans, ch. 2 §Auto Traits and Markers; Rust Reference §Auto Traits",
+    "triggers": ["auto trait", "Send Sync auto", "marker trait", "Eq Hash coherence", "derive Eq Hash agree", "manual auto trait"],
+    "rule_summary": "Auto traits (`Send`, `Sync`, `Sized`, `Unpin`, `UnwindSafe`, `RefUnwindSafe`) are inferred by the compiler from the fields of your type. Do not impl them explicitly except `unsafe impl` for the rare type that wraps a raw pointer or other `!Send`/`!Sync` primitive whose external invariants you have audited. Non-auto coherence-bound traits (`Hash` and `Eq` must agree, `Ord` and `PartialOrd` must agree) require deliberate alignment when hand-implemented.",
+    "prompt_injection": "MANDATORY RULE: Do not explicitly impl auto traits for normal types — let the compiler propagate them from fields. Use `unsafe impl Send`/`Sync` only for types that wrap raw pointers or other `!Send`/`!Sync` primitives whose invariants you have audited. For non-auto coherence-bound traits (`Hash`/`Eq`, `Ord`/`PartialOrd`), keep manual impls in agreement so `a == b` implies `hash(a) == hash(b)` and `cmp(a, b)` implies `partial_cmp(a, b)`.",
+    "anti_pattern": "// Hand-implemented Hash that disagrees with derived Eq: Eq compares both fields,\n// but Hash only mixes one — items that are Eq can hash differently, breaking the\n// HashMap contract.\n#[derive(PartialEq, Eq)]\nstruct Item { id: u64, version: u64 }\nimpl std::hash::Hash for Item {\n    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {\n        self.id.hash(state); // ignores version that Eq compares\n    }\n}",
+    "good_pattern": "// Default: derive both, fields agree.\n#[derive(PartialEq, Eq, Hash)]\nstruct Item { id: u64, version: u64 }\n\n// Or: id-only identity, with Hash and Eq aligned manually.\nstruct Item2 { id: u64, version: u64 }\nimpl PartialEq for Item2 { fn eq(&self, o: &Self) -> bool { self.id == o.id } }\nimpl Eq for Item2 {}\nimpl std::hash::Hash for Item2 {\n    fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.id.hash(state); }\n}\n// Now: a == b ⟺ hash(a) == hash(b). Contract preserved."
   }
 ]
