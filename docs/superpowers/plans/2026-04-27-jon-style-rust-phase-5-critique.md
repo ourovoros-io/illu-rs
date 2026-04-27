@@ -2,11 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task.
 
-**Goal:** Add `mcp__illu__critique` MCP tool that takes a unified-diff string and returns potential axiom violations detected by 5 regex-based detectors.
+> **Reconciliation note (2026-04-27):** During Step 1 verification the proposed fifth detector (`unwrap_in_non_test`) was dropped because the universal axiom corpus has no rule about `.unwrap()`/`.expect()` discipline. Axiom 25 (`rust_quality_25_error_path_tests`) covers test error paths, and axiom 42 (`rust_quality_42_todo_macros`) covers `todo!()`/`unimplemented!()`/`unreachable!()` — neither maps to unwrap/expect. The shipped tool registers four detectors, includes 12 tests (10 from the original plan plus two extras: a non-Rust-file-skip case and a hunk-local SAFETY context-line negative). The shipped code uses the project's existing `regex_lite` dependency with the established `LazyLock<regex_lite::Regex>` + `#[expect(clippy::expect_used, reason = "...")]` pattern (see `src/indexer/tauri_bridge.rs::INVOKE_PATTERN`) rather than the `regex` + `unwrap_or_else` fallback shape sketched below.
 
-**Architecture:** Single new module `src/server/tools/critique.rs` with a hand-written unified-diff parser, 5 detector functions, a registry holding axiom metadata, and a Markdown formatter. Stateless — no `init`, no asset directory, no JSON schema. New MCP tool registered alongside the existing four.
+**Goal:** Add `mcp__illu__critique` MCP tool that takes a unified-diff string and returns potential axiom violations detected by 4 regex-based detectors. (Originally drafted for 5 detectors; see reconciliation note.)
 
-**Tech Stack:** Rust 2024, `regex` crate (already a workspace dependency for indexing), `rmcp` macros. No new external dependencies.
+**Architecture:** Single new module `src/server/tools/critique.rs` with a hand-written unified-diff parser, 4 detector functions, a registry holding axiom metadata, and a Markdown formatter. Stateless — no `init`, no asset directory, no JSON schema. New MCP tool registered alongside the existing four.
+
+**Tech Stack:** Rust 2024, `regex_lite` crate (already a workspace dependency), `rmcp` macros. No new external dependencies. (The original plan referenced `regex`; shipped code uses the existing `regex_lite` dep — `regex_lite::Regex` provides every API the detectors need: `is_match`, `find`, and `captures`.)
 
 ---
 
