@@ -718,5 +718,35 @@
     "prompt_injection": "MANDATORY RULE: If your struct conceptually holds a reference into a field of itself, the design is wrong before any code compiles. Replace the inner reference with an index, restructure ownership through an arena, or pull in `ouroboros`/`self_cell`. Never `'static`-cast the inner reference; moving the outer struct will dangle it.",
     "anti_pattern": "// 'static is a lie. If the Doc moves, every &'static str dangles.\nstruct Doc {\n    text: String,\n    parsed: Vec<&'static str>,\n}",
     "good_pattern": "use std::ops::Range;\n// Index into the owning data; safe under any move of Doc.\nstruct Doc {\n    text: String,\n    spans: Vec<Range<usize>>,\n}\nimpl Doc {\n    fn segment(&self, i: usize) -> &str { &self.text[self.spans[i].clone()] }\n}\n// Alternative when zero-copy borrowing is essential: ouroboros / self_cell."
+  },
+  {
+    "id": "rust_quality_73_interior_mutability_selection",
+    "category": "Interior Mutability Selection",
+    "source": "Rust for Rustaceans, ch. 1 §Interior Mutability; Crust of Rust: Smart Pointers",
+    "triggers": ["Cell RefCell atomic Mutex RwLock", "interior mutability decision tree", "thread shared", "lock-free", "single-threaded mutation", "IM primitive"],
+    "rule_summary": "Pick the lightest interior-mutability primitive that satisfies the sharing need: `Cell<T>` (single-threaded, `Copy` or whole-value get/set, no runtime borrow check), `RefCell<T>` (single-threaded, compound types, runtime borrow check), atomics (`AtomicU64` etc., thread-shared primitives, lock-free), `Mutex<T>` / `RwLock<T>` (thread-shared compound types, blocking).",
+    "prompt_injection": "MANDATORY RULE: Do not reach for `Mutex<T>` reflexively when the sharing pattern is single-threaded or primitive. `Cell<T>` and `RefCell<T>` are single-thread and free of locking; atomics are thread-shared and lock-free; `Mutex`/`RwLock` are thread-shared and lock-bearing. Picking a heavier primitive than required is a wasted-cost smell.",
+    "anti_pattern": "// Single-threaded counter wrapped in Mutex — overkill, lock-bearing, panic-prone.\nstruct Counter { inner: std::sync::Mutex<u64> }\nimpl Counter {\n    fn increment(&self) { *self.inner.lock().unwrap() += 1; }\n}",
+    "good_pattern": "use std::sync::atomic::{AtomicU64, Ordering};\n// Thread-shared primitive: atomic, lock-free.\nstruct Counter { inner: AtomicU64 }\nimpl Counter {\n    fn increment(&self) { self.inner.fetch_add(1, Ordering::Relaxed); }\n}\n// Single-thread Copy alternative: Cell<u64> (no atomics needed).\nstruct LocalCounter { inner: std::cell::Cell<u64> }\nimpl LocalCounter {\n    fn increment(&self) { self.inner.set(self.inner.get() + 1); }\n}"
+  },
+  {
+    "id": "rust_quality_74_mutex_guard_await",
+    "category": "Async Lock Hygiene",
+    "source": "Rust for Rustaceans, ch. 5 §Async; Tokio docs §Shared State; Crust of Rust: Channels",
+    "triggers": ["MutexGuard await deadlock", "async lock", "std sync Mutex async", "tokio sync Mutex", "lock across await", "blocking lock async"],
+    "rule_summary": "A `std::sync::MutexGuard` held across an `.await` point makes the surrounding future `!Send` (the guard is unconditionally `!Send` due to OS thread-affinity for unlock). On `Send`-bound executors (e.g. `tokio::spawn`), this is a compile error. On `!Send` executors, holding a sync lock across await wastes the executor thread and risks deadlock when another task on the same executor needs the lock. Drop the guard before awaiting, or use `tokio::sync::Mutex` (whose guard is `Send` and integrates with the runtime).",
+    "prompt_injection": "MANDATORY RULE: Never hold a `std::sync::Mutex` (or `RwLock`) guard across an `.await`. Either narrow the locked region so the guard drops before the await, or replace the lock with `tokio::sync::Mutex` for genuine async-aware locking. The compiler will not always catch this; write the code so the guard's scope is local.",
+    "anti_pattern": "use std::sync::Mutex;\nasync fn process(state: &Mutex<State>) -> Result<()> {\n    let guard = state.lock().unwrap();\n    fetch_data().await?; // guard is still held; future may move; deadlock risk\n    apply_change(&*guard);\n    Ok(())\n}",
+    "good_pattern": "use std::sync::Mutex;\nasync fn process(state: &Mutex<State>) -> Result<()> {\n    // Take what we need from the lock, then drop the guard before awaiting.\n    let snapshot = {\n        let guard = state.lock().unwrap();\n        guard.snapshot()\n    };\n    let data = fetch_data().await?;\n    {\n        let mut guard = state.lock().unwrap();\n        guard.update_from(&snapshot, &data);\n    }\n    Ok(())\n}\n// If the lock genuinely must span an await, switch to tokio::sync::Mutex."
+  },
+  {
+    "id": "rust_quality_75_pin_discipline",
+    "category": "Pin Discipline",
+    "source": "Rust for Rustaceans, ch. 1 §Pinning and ch. 5 §Async; Crust of Rust: Pin",
+    "triggers": ["Pin Unpin", "self-pin", "self-referential future", "Pin<&mut Self>", "unpin auto trait", "pin projection"],
+    "rule_summary": "Most types are `Unpin` (the auto trait); you only need to think about `Pin` when designing a type that is self-referential or implementing `Future::poll` directly. `Pin<&mut Self>` in `poll` means the future's memory address is stable so any internal self-references stay valid; respect that contract or use `pin_project`.",
+    "prompt_injection": "MANDATORY RULE: When implementing `Future::poll` directly or designing a self-referential type, take the `Pin<&mut Self>` contract seriously: do not move out of `self`, do not return a `&mut` to a self-referential field without `pin_project`, and do not assume the type is `Unpin` unless you have an explicit `impl Unpin for ...` with documented soundness. For everything else, normal `&mut self` methods are fine because most types are auto-`Unpin`.",
+    "anti_pattern": "use std::future::Future;\nuse std::pin::Pin;\nuse std::task::{Context, Poll};\nstruct MyFuture { /* ... */ }\nimpl Future for MyFuture {\n    type Output = ();\n    // Wrong signature: Future::poll takes Pin<&mut Self>, not &mut Self.\n    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<()> { Poll::Ready(()) }\n}",
+    "good_pattern": "use std::future::Future;\nuse std::pin::Pin;\nuse std::task::{Context, Poll};\nstruct MyFuture { state: u32 }\nimpl Future for MyFuture {\n    type Output = ();\n    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {\n        // MyFuture has no self-references, so Pin is just a marker here.\n        // For self-referential futures use pin-project to get safe field access.\n        Poll::Ready(())\n    }\n}"
   }
 ]

@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 72);
+        assert_eq!(rust_quality_axiom_count, 75);
     }
 
     #[test]
@@ -448,6 +448,63 @@ mod tests {
         assert!(
             result.contains("Self-Referential Types"),
             "Self-Referential Types missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_ownership_axioms_batch_3_present() {
+        let result = handle_axioms(
+            "Cell RefCell atomic Mutex RwLock interior mutability decision tree thread shared",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Interior Mutability Selection"),
+            "Interior Mutability Selection missing in focused query"
+        );
+
+        let result =
+            handle_axioms("MutexGuard await deadlock async lock std sync Mutex tokio sync Mutex")
+                .unwrap();
+        assert!(
+            result.contains("Async Lock Hygiene"),
+            "Async Lock Hygiene missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "Pin Unpin self-pin self-referential future poll Pin<&mut Self> unpin auto trait",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Pin Discipline"),
+            "Pin Discipline missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_ownership_demo_query_returns_new_axioms() {
+        let result = handle_axioms(
+            "ownership borrow lifetime variance drop pin reborrow interior mutability",
+        )
+        .unwrap();
+        // Expect at least 3 of the 9 new ownership categories to surface in the top results.
+        let new_categories = [
+            "Borrow Scope",
+            "Reborrowing",
+            "Reference Semantics",
+            "Variance",
+            "Drop Order",
+            "Self-Referential Types",
+            "Interior Mutability Selection",
+            "Async Lock Hygiene",
+            "Pin Discipline",
+        ];
+        let surfaced = new_categories
+            .iter()
+            .filter(|cat| result.contains(*cat))
+            .count();
+        assert!(
+            surfaced >= 3,
+            "expected at least 3 new ownership categories in demo query, got {surfaced}"
         );
     }
 }
