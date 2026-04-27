@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 93);
+        assert_eq!(rust_quality_axiom_count, 102);
     }
 
     #[test]
@@ -738,6 +738,122 @@ mod tests {
         assert!(
             surfaced >= 3,
             "expected at least 3 new perf categories in demo query, got {surfaced}"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_axioms_batch_1_present() {
+        let result = handle_axioms(
+            "SAFETY comment unsafe block invariants undocumented_unsafe_blocks audit unsafe",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Unsafe Block Discipline"),
+            "Unsafe Block Discipline missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "unsafe fn safety preconditions # Safety rustdoc missing_safety_doc caller contract",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Unsafe Fn Contract"),
+            "Unsafe Fn Contract missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "smallest unsafe block scope minimize unsafe surface narrow unsafe block",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Unsafe Block Scope"),
+            "Unsafe Block Scope missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_axioms_batch_2_present() {
+        let result = handle_axioms(
+            "MaybeUninit uninitialized memory addr_of_mut assume_init partially initialized",
+        )
+        .unwrap();
+        assert!(
+            result.contains("MaybeUninit"),
+            "MaybeUninit missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "UnsafeCell interior mutability primitive shared mutability Cell RefCell Mutex source",
+        )
+        .unwrap();
+        assert!(
+            result.contains("UnsafeCell"),
+            "UnsafeCell missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "aliasing pointer provenance Stacked Borrows reference mut overlap raw pointer to mut",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Aliasing"),
+            "Aliasing missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_axioms_batch_3_present() {
+        let result = handle_axioms(
+            "extern C panic catch_unwind FFI boundary unwind UB generic extern reference across FFI",
+        )
+        .unwrap();
+        assert!(
+            result.contains("FFI Boundary"),
+            "FFI Boundary missing in focused query"
+        );
+
+        let result =
+            handle_axioms("repr(C) FFI safe layout stable Option NonNull c_int c_uchar FFI types")
+                .unwrap();
+        assert!(
+            result.contains("FFI Layout"),
+            "FFI Layout missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "CStr from_ptr CString into_raw FFI string ownership c_char buffer ptr len pair",
+        )
+        .unwrap();
+        assert!(
+            result.contains("FFI Strings"),
+            "FFI Strings missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_demo_query_returns_new_axioms() {
+        let result = handle_axioms(
+            "unsafe SAFETY comment unsafe fn smallest unsafe MaybeUninit UnsafeCell aliasing extern C panic repr(C) CStr buffer ownership FFI",
+        )
+        .unwrap();
+        let new_categories = [
+            "Unsafe Block Discipline",
+            "Unsafe Fn Contract",
+            "Unsafe Block Scope",
+            "MaybeUninit",
+            "UnsafeCell",
+            "Aliasing",
+            "FFI Boundary",
+            "FFI Layout",
+            "FFI Strings",
+        ];
+        let surfaced = new_categories
+            .iter()
+            .filter(|cat| result.contains(*cat))
+            .count();
+        assert!(
+            surfaced >= 3,
+            "expected at least 3 new unsafe/FFI categories in demo query, got {surfaced}"
         );
     }
 }
