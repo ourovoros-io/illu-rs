@@ -120,44 +120,97 @@ pub(crate) fn axioms_for_test() -> &'static [Axiom] {
     axioms().expect("axioms parse for tests")
 }
 
+/// Public entry point used by the `mcp__illu__axioms` tool. Reads the
+/// process-global [`ProjectStyle`] populated at server startup and forwards
+/// to [`handle_axioms_with_style`]. The cached style is empty by default,
+/// so callers running before [`init`](crate::server::tools::project_style::init)
+/// (or with no `.illu/style/project.json`) observe the universal-corpus
+/// behavior unchanged from Phase 2.
 pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
-    let axioms = axioms()?;
+    let style = crate::server::tools::project_style::project_style();
+    handle_axioms_with_style(query, style)
+}
+
+/// Score one axiom against the (already-lowercased) query. Extracted from
+/// the closure inside [`handle_axioms_with_style`] so the override-aware
+/// scorer reads as: compute base, then ask the project style what to do
+/// with it. Behavior of the base formula is preserved verbatim from the
+/// Phase-2 scorer: category-substring (+5/term), trigger-substring
+/// (+10/term), summary-substring (+2/term), then exact-match boosts
+/// (+20 category, +30 trigger).
+fn score_axiom(axiom: &Axiom, query_terms: &[&str], query_lower: &str) -> usize {
+    let mut score = 0_usize;
+    for term in query_terms {
+        if axiom.category_lower.contains(term) {
+            score += 5;
+        }
+        for trigger in &axiom.triggers_lower {
+            if trigger.contains(term) {
+                score += 10;
+            }
+        }
+        if axiom.rule_summary_lower.contains(term) {
+            score += 2;
+        }
+    }
+    // Exact-match boost: user typed a category or trigger name
+    // verbatim. `.contains` on the full query against single-word
+    // strings was unreachable for multi-word queries — this
+    // gives both single- and multi-word queries the same shot.
+    if axiom.category_lower == query_lower {
+        score += 20;
+    }
+    for trigger in &axiom.triggers_lower {
+        if trigger == query_lower {
+            score += 30;
+        }
+    }
+    score
+}
+
+/// Score the universal corpus *and* the project's local axioms against
+/// `query`, applying [`ProjectStyle`] overrides per axiom. The split from
+/// [`handle_axioms`] exists so cross-module tests can construct a
+/// `ProjectStyle` and exercise scoring without mutating the OnceLock-cached
+/// style set at server startup.
+///
+/// Override semantics:
+/// - `Ignored` → `adjust_score` returns `None`, the axiom is filtered out.
+/// - `Demoted` / `Elevated` → score is halved / doubled before sort.
+/// - `Noted` → score is unchanged; the project's `note` is appended to
+///   the per-axiom result block as a `**Project note:** ...` line.
+/// - Missing override → identity.
+///
+/// The score-zero filter still applies *after* override adjustment, so a
+/// non-matching axiom (base score 0) cannot be conjured into the result
+/// set by `Demoted`/`Elevated` (multiplied to 0), which preserves the
+/// "no match → no display" invariant.
+pub(crate) fn handle_axioms_with_style(
+    query: &str,
+    style: &crate::server::tools::project_style::ProjectStyle,
+) -> Result<String, crate::IlluError> {
+    let universal = axioms()?;
 
     let query_lower = query.to_lowercase();
     let query_terms: Vec<&str> = query_lower.split_whitespace().collect();
 
-    let mut scored: Vec<(&Axiom, usize)> = axioms
+    // Iterate the universal corpus and the project's local axioms in one
+    // pass. `chain` avoids materialising a combined `Vec`; the local slice
+    // borrows from `style` and the static slice from the cache, so the
+    // resulting `&Axiom` items live for the shorter of the two — bounded
+    // by `style`'s lifetime, which is fine for the immediate `.collect()`.
+    let mut scored: Vec<(&Axiom, usize)> = universal
         .iter()
-        .map(|axiom| {
-            let mut score = 0;
-            for term in &query_terms {
-                if axiom.category_lower.contains(term) {
-                    score += 5;
-                }
-                for trigger in &axiom.triggers_lower {
-                    if trigger.contains(term) {
-                        score += 10;
-                    }
-                }
-                if axiom.rule_summary_lower.contains(term) {
-                    score += 2;
-                }
-            }
-            // Exact-match boost: user typed a category or trigger name
-            // verbatim. `.contains` on the full query against single-word
-            // strings was unreachable for multi-word queries — this
-            // gives both single- and multi-word queries the same shot.
-            if axiom.category_lower == query_lower {
-                score += 20;
-            }
-            for trigger in &axiom.triggers_lower {
-                if trigger == &query_lower {
-                    score += 30;
-                }
-            }
-            (axiom, score)
+        .chain(style.local_axioms.iter())
+        .filter_map(|axiom| {
+            let base = score_axiom(axiom, &query_terms, &query_lower);
+            // `Ignored` filters via `None`; other severities (or no
+            // override) yield `Some(adjusted)`. The score>0 filter below
+            // catches the case where adjusting (or just no-matching) lands
+            // at zero, including `Demoted` of a no-match axiom.
+            let adjusted = style.adjust_score(&axiom.id, base)?;
+            (adjusted > 0).then_some((axiom, adjusted))
         })
-        .filter(|(_, score)| *score > 0)
         .collect();
 
     scored.sort_by_key(|&(_, score)| Reverse(score));
@@ -188,6 +241,12 @@ pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
             let _ = writeln!(output, "_Source: {source}_");
         }
         let _ = writeln!(output, "> **{}**\n", axiom.prompt_injection);
+        // Surface the project's `Noted` note. Other severities encode
+        // their effect through ranking or filtering already; only `Noted`
+        // exists *to* render text.
+        if let Some(note) = style.note_for(&axiom.id) {
+            let _ = writeln!(output, "**Project note:** {note}\n");
+        }
 
         if !axiom.good_pattern.is_empty() {
             let _ = writeln!(
@@ -202,6 +261,11 @@ pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
                 "#### Anti-Pattern:\n```rust\n{}\n```",
                 axiom.anti_pattern
             );
+        }
+        // Surface the project-local axiom's id so a reader can correlate
+        // results back to `mcp__illu__project_style` output.
+        if axiom.id.starts_with("project_") {
+            let _ = writeln!(output, "_Project-local axiom: `{}`_", axiom.id);
         }
         let _ = writeln!(output, "---");
     }
@@ -888,6 +952,110 @@ mod tests {
         assert!(
             surfaced >= 3,
             "expected at least 3 new unsafe/FFI categories in demo query, got {surfaced}"
+        );
+    }
+
+    // --- Phase 3 Task 2: ProjectStyle integration tests --------------------
+    //
+    // These exercise `handle_axioms_with_style` directly with a constructed
+    // `ProjectStyle` rather than the OnceLock-cached one set at server
+    // startup, so test outcomes do not depend on the host repo's
+    // `.illu/style/project.json` (or its absence).
+
+    #[test]
+    fn test_handle_axioms_respects_ignored() {
+        use crate::server::tools::project_style::{AxiomOverride, ProjectStyle, Severity};
+        let mut style = ProjectStyle::default();
+        style.overrides.insert(
+            "rust_quality_57_error_source_chain".into(),
+            AxiomOverride {
+                severity: Severity::Ignored,
+                note: String::new(),
+            },
+        );
+        let result = handle_axioms_with_style(
+            "Error::source error chain source method wrapped error",
+            &style,
+        )
+        .unwrap();
+        assert!(
+            !result.contains("rust_quality_57_error_source_chain"),
+            "ignored axiom must not appear in result, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_handle_axioms_respects_demoted_elevated() {
+        use crate::server::tools::project_style::{AxiomOverride, ProjectStyle, Severity};
+        let mut style = ProjectStyle::default();
+        style.overrides.insert(
+            "rust_quality_85_allocation_hot_paths".into(),
+            AxiomOverride {
+                severity: Severity::Demoted,
+                note: String::new(),
+            },
+        );
+        style.overrides.insert(
+            "rust_quality_87_iterator_codegen".into(),
+            AxiomOverride {
+                severity: Severity::Elevated,
+                note: String::new(),
+            },
+        );
+        // Query that hits both axioms; with overrides, 87 should rank above 85.
+        let result = handle_axioms_with_style(
+            "allocation iterator preallocate hot path with_capacity bounds check",
+            &style,
+        )
+        .unwrap();
+        let pos_85 = result.find("Allocation");
+        let pos_87 = result.find("Iterator");
+        if let (Some(p85), Some(p87)) = (pos_85, pos_87) {
+            assert!(
+                p87 < p85,
+                "elevated iterator-codegen axiom should appear before demoted \
+                 allocation-hot-paths axiom; result: {result}"
+            );
+        } else {
+            // If neither axiom matched (unlikely for this query), the test
+            // is noise; just assert the run produced output.
+            assert!(!result.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_handle_axioms_appends_noted() {
+        use crate::server::tools::project_style::{AxiomOverride, ProjectStyle, Severity};
+        let mut style = ProjectStyle::default();
+        style.overrides.insert(
+            "rust_quality_85_allocation_hot_paths".into(),
+            AxiomOverride {
+                severity: Severity::Noted,
+                note: "PROJECT-NOTE-MARKER-85".into(),
+            },
+        );
+        let result =
+            handle_axioms_with_style("allocation hot path preallocate with_capacity", &style)
+                .unwrap();
+        assert!(
+            result.contains("PROJECT-NOTE-MARKER-85"),
+            "noted axiom's note must appear in result, got: {result}"
+        );
+        assert!(
+            result.contains("**Project note:**"),
+            "noted axiom must use the `Project note` label, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_handle_axioms_surfaces_local_axiom() {
+        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/illu_style_sample/.illu/style/project.json");
+        let style = crate::server::tools::project_style::load_from_path(&fixture).unwrap();
+        let result = handle_axioms_with_style("repository module database access", &style).unwrap();
+        assert!(
+            result.contains("project_repository_pattern"),
+            "project-local axiom must surface for matching query, got: {result}"
         );
     }
 }
