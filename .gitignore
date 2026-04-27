@@ -1,9 +1,20 @@
 /target
 /.worktrees
-.illu/
+# Generated illu state at `.illu/` is ignored — but only its CONTENTS,
+# so we can selectively re-include subdirectories below. Using `.illu/*`
+# (rather than `.illu/`) leaves the directory itself "tracked" so the
+# `!` exceptions can pierce it; gitignore semantics don't let you
+# re-include a file whose parent directory is excluded.
+.illu/*
 # Test fixtures intentionally embed `.illu/` directories to exercise the
-# config loaders; the broad `.illu/` rule above must not hide them.
+# config loaders; the broad rule above must not hide them.
 !/tests/fixtures/**/.illu/
+# `.illu/style/` at the repo root holds project conventions
+# (`project.json`) and decision records (`decisions/*.json`) — these are
+# committed source artifacts, not generated data. `.illu/index.db` and
+# any other transient state still match the `.illu/*` rule above.
+!/.illu/style/
+!/.illu/style/**
 .claude/agents/illu-*.md
 .gemini/agents/illu-*.md
 .DS_Store

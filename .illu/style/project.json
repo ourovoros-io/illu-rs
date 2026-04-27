@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "axiom_overrides": [
+    {
+      "id": "rust_quality_94_unsafe_block_discipline",
+      "severity": "elevated",
+      "note": "All unsafe blocks must have SAFETY comments — non-negotiable for this MCP server."
+    },
+    {
+      "id": "rust_quality_60_error_categories",
+      "severity": "noted",
+      "note": "We are aware of `IlluError::Other(String)` saturation in the four new tools shipped in PR #95; tracked in decision_2026_04_27_error_categories and addressed in the follow-up PR #96."
+    }
+  ],
+  "local_axioms": [
+    {
+      "id": "project_illu_database_mutex",
+      "category": "Concurrency",
+      "source": "src/db.rs module docs",
+      "triggers": ["Database", "Connection", "async", "Send", "Sync"],
+      "rule_summary": "rusqlite::Connection is !Sync, so the project always wraps Database in Arc<Mutex<_>> when sharing across async tasks.",
+      "prompt_injection": "MANDATORY RULE: Never hold a bare Database in a tokio task. Always go through Arc<Mutex<Database>>; the lock is briefly acquired around each query.",
+      "anti_pattern": "let db = Database::open(...)?; tokio::spawn(async move { db.query(...) });",
+      "good_pattern": "let db = Arc::new(Mutex::new(Database::open(...)?)); let db_clone = db.clone(); tokio::spawn(async move { let guard = db_clone.lock().await; guard.query(...) });"
+    }
+  ]
+}
