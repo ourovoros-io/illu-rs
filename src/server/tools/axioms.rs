@@ -136,9 +136,15 @@ pub(crate) fn axioms_for_runtime() -> Result<&'static [Axiom], crate::IlluError>
 /// so callers running before [`init`](crate::server::tools::project_style::init)
 /// (or with no `.illu/style/project.json`) observe the universal-corpus
 /// behavior unchanged from Phase 2.
+///
+/// Threads `None` for `max_tokens` so behavior matches prior phases — the
+/// MCP tool handler in `src/server/mod.rs` calls
+/// [`handle_axioms_with_style`] directly when it needs to forward a
+/// caller-supplied budget. This wrapper remains as a backward-compatible
+/// API surface for `src/api.rs` consumers.
 pub fn handle_axioms(query: &str) -> Result<String, crate::IlluError> {
     let style = crate::server::tools::project_style::project_style();
-    handle_axioms_with_style(query, style)
+    handle_axioms_with_style(query, style, None)
 }
 
 /// Score one axiom against the (already-lowercased) query. Extracted from
@@ -178,6 +184,50 @@ fn score_axiom(axiom: &Axiom, query_terms: &[&str], query_lower: &str) -> usize 
     score
 }
 
+/// Approximate token cost of rendering one axiom result block.
+///
+/// Heuristic: `ceil(bytes / 4)` — for English markdown a real tokenizer
+/// (GPT-4-style BPE, Claude's tokenizer) averages ~3.5 chars per token.
+/// We use 4 and round up so the estimator under-fills the budget rather
+/// than over-spending. `MARKDOWN_OVERHEAD_BYTES` covers the per-axiom
+/// rendering chrome (worst-case ~88 bytes: heading + source line +
+/// prompt block + good/anti pattern fences + separator).
+///
+/// `style` is consulted so the estimator includes the bytes of the
+/// project-local axiom footer (`_Project-local axiom: …_`) for any
+/// axiom with a `project_*` id, and the `**Project note:** …` line
+/// for any axiom whose override severity is `Noted`. Without these,
+/// project-style users would see budget overrun on exactly the
+/// axioms that Phase 3 enables.
+///
+/// This is intentionally not a real tokenizer call — adding `tiktoken-rs`
+/// or `tokenizers` would pull in megabytes of vocabulary data for ~10%
+/// accuracy improvement that callers can clamp downstream if they need.
+fn estimate_tokens(
+    axiom: &Axiom,
+    style: &crate::server::tools::project_style::ProjectStyle,
+) -> usize {
+    const MARKDOWN_OVERHEAD_BYTES: usize = 88;
+    const PROJECT_LOCAL_FOOTER_CHROME: usize = 28; // "_Project-local axiom: ``_\n"
+    const NOTE_LINE_CHROME: usize = 17; // "**Project note:** \n"
+
+    let mut body_bytes = axiom.category.len()
+        + axiom.rule_summary.len()
+        + axiom.prompt_injection.len()
+        + axiom.anti_pattern.len()
+        + axiom.good_pattern.len()
+        + axiom.source.as_ref().map_or(0, String::len);
+
+    if axiom.id.starts_with("project_") {
+        body_bytes += PROJECT_LOCAL_FOOTER_CHROME + axiom.id.len();
+    }
+    if let Some(note) = style.note_for(&axiom.id) {
+        body_bytes += NOTE_LINE_CHROME + note.len();
+    }
+
+    (body_bytes + MARKDOWN_OVERHEAD_BYTES).div_ceil(4)
+}
+
 /// Score the universal corpus *and* the project's local axioms against
 /// `query`, applying [`ProjectStyle`] overrides per axiom. The split from
 /// [`handle_axioms`] exists so cross-module tests can construct a
@@ -198,6 +248,7 @@ fn score_axiom(axiom: &Axiom, query_terms: &[&str], query_lower: &str) -> usize 
 pub(crate) fn handle_axioms_with_style(
     query: &str,
     style: &crate::server::tools::project_style::ProjectStyle,
+    max_tokens: Option<u32>,
 ) -> Result<String, crate::IlluError> {
     let universal = axioms()?;
 
@@ -225,19 +276,66 @@ pub(crate) fn handle_axioms_with_style(
 
     scored.sort_by_key(|&(_, score)| Reverse(score));
 
+    // Capture the top-scored axiom (if any) before the budget walk consumes
+    // `scored`. Used by the budget-too-small diagnostic to name the cost
+    // floor: "smallest matching axiom estimated at ~N tokens" really means
+    // the first (highest-scoring) matching axiom — that defines the minimum
+    // cost a caller must afford to receive *anything* in this score order.
+    let top_match: Option<&Axiom> = scored.first().map(|&(a, _)| a);
+
     // Keep enough matches for the broad baseline quality query to include
     // both the project-specific design axioms and the stricter Rust API
-    // axioms, while still keeping MCP responses short enough to read.
-    let top: Vec<&Axiom> = scored
-        .into_iter()
-        .take(MAX_AXIOM_RESULTS)
-        .map(|(a, _)| a)
-        .collect();
+    // axioms, while still keeping MCP responses short enough to read. When
+    // a caller supplies `max_tokens`, walk the score-ordered candidates
+    // and stop before cumulative estimated cost would exceed the budget;
+    // the `MAX_AXIOM_RESULTS` cap still applies — whichever bound trips
+    // first wins.
+    let top: Vec<&Axiom> = match max_tokens {
+        None => scored
+            .into_iter()
+            .take(MAX_AXIOM_RESULTS)
+            .map(|(a, _)| a)
+            .collect(),
+        Some(budget) => {
+            let budget = budget as usize;
+            let mut spent: usize = 0;
+            let mut chosen = Vec::new();
+            for (axiom, _) in scored {
+                let cost = estimate_tokens(axiom, style);
+                // Strict: stop on the first axiom that would push us past
+                // the budget rather than skipping it for a cheaper later
+                // entry. Score-order priority is more useful to callers
+                // than maximizing fill of the budget window.
+                if spent.saturating_add(cost) > budget {
+                    break;
+                }
+                spent = spent.saturating_add(cost);
+                chosen.push(axiom);
+                if chosen.len() >= MAX_AXIOM_RESULTS {
+                    break;
+                }
+            }
+            chosen
+        }
+    };
 
     let mut output = String::new();
     let _ = writeln!(output, "## Rust Axioms matching '{query}'\n");
 
     if top.is_empty() {
+        // Distinguish "no matches at all" from "matches existed but the
+        // budget couldn't fit any of them". `top_match` is the
+        // *highest-scoring* matching axiom (not the cheapest); naming
+        // it tells the caller what the strict score-order budget walk
+        // would have selected first and how much budget it needed.
+        if let (Some(budget), Some(axiom)) = (max_tokens, top_match) {
+            let cost = estimate_tokens(axiom, style);
+            let _ = writeln!(
+                output,
+                "No matching axioms fit within max_tokens={budget} (top-scored matching axiom estimated at ~{cost} tokens; raise the budget to receive results in score order)."
+            );
+            return Ok(output);
+        }
         let _ = writeln!(
             output,
             "No matching Rust Axioms found in the database. Please refine your query."
@@ -991,8 +1089,8 @@ mod tests {
         // Chain]` (unique to axiom 57) is the only way to detect
         // whether `Ignored` actually fired.
         let query = "Error::source error chain source method wrapped error";
-        let unfiltered = handle_axioms_with_style(query, &ProjectStyle::default()).unwrap();
-        let filtered = handle_axioms_with_style(query, &style).unwrap();
+        let unfiltered = handle_axioms_with_style(query, &ProjectStyle::default(), None).unwrap();
+        let filtered = handle_axioms_with_style(query, &style, None).unwrap();
         assert!(
             unfiltered.contains("[Error Source Chain]"),
             "sanity: axiom 57 should match this query without overrides; got: {unfiltered}"
@@ -1029,6 +1127,7 @@ mod tests {
         let result = handle_axioms_with_style(
             "allocation iterator preallocate hot path with_capacity bounds check",
             &style,
+            None,
         )
         .unwrap();
         assert!(
@@ -1058,9 +1157,12 @@ mod tests {
                 note: "PROJECT-NOTE-MARKER-85".into(),
             },
         );
-        let result =
-            handle_axioms_with_style("allocation hot path preallocate with_capacity", &style)
-                .unwrap();
+        let result = handle_axioms_with_style(
+            "allocation hot path preallocate with_capacity",
+            &style,
+            None,
+        )
+        .unwrap();
         assert!(
             result.contains("PROJECT-NOTE-MARKER-85"),
             "noted axiom's note must appear in result, got: {result}"
@@ -1076,10 +1178,141 @@ mod tests {
         let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/illu_style_sample/.illu/style/project.json");
         let style = crate::server::tools::project_style::load_from_path(&fixture).unwrap();
-        let result = handle_axioms_with_style("repository module database access", &style).unwrap();
+        let result =
+            handle_axioms_with_style("repository module database access", &style, None).unwrap();
         assert!(
             result.contains("project_repository_pattern"),
             "project-local axiom must surface for matching query, got: {result}"
+        );
+    }
+
+    // --- Phase 6 Task 1: token-budget tests --------------------------------
+    //
+    // The estimator is intentionally a heuristic (`ceil(bytes / 4)` plus a
+    // fixed `MARKDOWN_OVERHEAD_BYTES`); these tests assert the contract
+    // (no-budget unchanged, budget respected, zero-budget diagnostic,
+    // score-order truncation, estimator sanity) rather than exact token
+    // counts that would couple to a specific tokenizer.
+
+    #[test]
+    fn test_axioms_max_tokens_none_unchanged() {
+        // No-budget code path is identical to the prior implementation.
+        // Two checks: (1) the same call is deterministic, and (2) the
+        // public wrapper handle_axioms (which threads None through and
+        // reads the global ProjectStyle, which defaults to empty) is
+        // byte-for-byte equivalent to handle_axioms_with_style with the
+        // default style and None budget. (2) is the real "unchanged
+        // from prior phases" invariant — (1) alone would pass even if
+        // the wrapper diverged.
+        use crate::server::tools::project_style::ProjectStyle;
+        let style = ProjectStyle::default();
+        let direct_a = handle_axioms_with_style("error handling", &style, None).unwrap();
+        let direct_b = handle_axioms_with_style("error handling", &style, None).unwrap();
+        assert_eq!(direct_a, direct_b, "direct calls must be deterministic");
+        assert!(!direct_a.is_empty());
+
+        let wrapped = handle_axioms("error handling").unwrap();
+        assert_eq!(
+            direct_a, wrapped,
+            "wrapper handle_axioms must match _with_style(default, None)"
+        );
+    }
+
+    #[test]
+    fn test_axioms_respects_max_tokens() {
+        // Budget mode: cumulative estimated cost of returned axioms must
+        // not exceed the budget. We test against the estimator's own
+        // definition, not an external tokenizer.
+        use crate::server::tools::project_style::ProjectStyle;
+        let style = ProjectStyle::default();
+        let budget: u32 = 2000;
+        let result = handle_axioms_with_style("error handling", &style, Some(budget)).unwrap();
+        // The result must be non-empty for this broad query at 2k tokens.
+        assert!(!result.is_empty());
+        // Sanity: the rendered response itself should be ≤ ~budget * 4
+        // bytes (the estimator's inverse). Allow 50% slop for response
+        // chrome (top heading, separator) we don't account for in
+        // estimate_tokens.
+        let max_bytes = (budget as usize) * 4 * 3 / 2;
+        assert!(
+            result.len() <= max_bytes,
+            "response length {} exceeded loose budget bound {}",
+            result.len(),
+            max_bytes
+        );
+    }
+
+    #[test]
+    fn test_axioms_max_tokens_zero_returns_empty_with_diagnostic() {
+        use crate::server::tools::project_style::ProjectStyle;
+        let style = ProjectStyle::default();
+        let result = handle_axioms_with_style("error handling", &style, Some(0)).unwrap();
+        assert!(
+            result.contains("max_tokens=0"),
+            "zero-budget result must surface the diagnostic naming the budget; got: {result}"
+        );
+        assert!(
+            !result.contains("[Error"),
+            "no axiom headings should appear in zero-budget result; got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_axioms_max_tokens_truncates_in_score_order() {
+        // Compare a no-budget result with a tight-budget result for the
+        // same query: the budgeted result's axioms must all appear in the
+        // no-budget result's prefix (highest-scoring first).
+        use crate::server::tools::project_style::ProjectStyle;
+        let style = ProjectStyle::default();
+        let unbounded = handle_axioms_with_style("error handling", &style, None).unwrap();
+        let bounded = handle_axioms_with_style("error handling", &style, Some(800)).unwrap();
+        // Extract category headings (lines starting with "### [") in order
+        // from each result. Bounded headings must be a prefix of unbounded.
+        let extract = |s: &str| -> Vec<String> {
+            s.lines()
+                .filter(|l| l.starts_with("### ["))
+                .map(String::from)
+                .collect()
+        };
+        let bounded_headings = extract(&bounded);
+        let unbounded_headings = extract(&unbounded);
+        assert!(
+            !bounded_headings.is_empty(),
+            "bounded result should have at least one axiom for this query"
+        );
+        for (i, h) in bounded_headings.iter().enumerate() {
+            assert_eq!(
+                unbounded_headings.get(i),
+                Some(h),
+                "budget walk must pick top-scored axioms in order; mismatch at index {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_estimate_tokens_is_reasonable() {
+        // Sanity: estimate_tokens for a real axiom is within ±50% of
+        // bytes / 4 of its full body. The constant chrome overhead pushes
+        // the estimator slightly higher than a pure-body estimate, which
+        // is the conservative direction.
+        let universal = axioms_for_test();
+        let axiom = universal.first().unwrap();
+        let body_bytes = axiom.category.len()
+            + axiom.rule_summary.len()
+            + axiom.prompt_injection.len()
+            + axiom.anti_pattern.len()
+            + axiom.good_pattern.len()
+            + axiom.source.as_ref().map_or(0, String::len);
+        let estimated = estimate_tokens(
+            axiom,
+            &crate::server::tools::project_style::ProjectStyle::default(),
+        );
+        let body_tokens = body_bytes.div_ceil(4);
+        let lower = body_tokens / 2;
+        let upper = body_tokens * 2;
+        assert!(
+            estimated >= lower && estimated <= upper,
+            "estimate {estimated} should be within ±50% of body-only {body_tokens}"
         );
     }
 }
