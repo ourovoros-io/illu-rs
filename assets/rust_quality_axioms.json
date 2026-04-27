@@ -658,5 +658,35 @@
     "prompt_injection": "MANDATORY RULE: For every fallible behavior under test, assert `matches!(result, Err(Error::ExpectedVariant(..)))` or destructure to inspect fields. `assert!(result.is_err())` lets two unrelated bugs satisfy the same test.",
     "anti_pattern": "#[test]\nfn rejects_missing_field() {\n    assert!(parse(\"{}\").is_err());\n}",
     "good_pattern": "#[test]\nfn rejects_missing_field() {\n    let err = parse(\"{}\").unwrap_err();\n    assert!(matches!(err, ParseError::MissingField(name) if name == \"id\"));\n}"
+  },
+  {
+    "id": "rust_quality_67_nll_borrow_scope",
+    "category": "Borrow Scope",
+    "source": "Rust for Rustaceans, ch. 1 §Lifetimes; Crust of Rust: Lifetime Annotations",
+    "triggers": ["NLL", "non-lexical lifetimes", "borrow scope", "last use", "borrow flow", "borrow checker scope"],
+    "rule_summary": "A borrow ends at its last use, not at the end of the curly-brace scope. When the borrow checker rejects code, restructure (move the conflicting use earlier or use the value sooner) before reaching for `.clone()` or owned types.",
+    "prompt_injection": "MANDATORY RULE: When the borrow checker rejects code that conflicts with a live borrow, first ask whether the borrow's last use can move earlier. NLL means a borrow's effective scope is its live range, not its lexical block. `.clone()` is the last resort, not the first.",
+    "anti_pattern": "let mut map: HashMap<String, i32> = HashMap::new();\nlet key = String::from(\"foo\");\nlet value = match map.get(&key) {\n    Some(v) => *v,\n    None => 0,\n};\n// Defensive clone: assumes map.get's borrow of key extends past the match.\nmap.insert(key.clone(), value + 1);",
+    "good_pattern": "let mut map: HashMap<String, i32> = HashMap::new();\nlet key = String::from(\"foo\");\nlet value = match map.get(&key) {\n    Some(v) => *v,\n    None => 0,\n};\n// NLL: the borrow of key from map.get ends at the end of the match;\n// key can be moved into insert without cloning.\nmap.insert(key, value + 1);"
+  },
+  {
+    "id": "rust_quality_68_reborrow_mut",
+    "category": "Reborrowing",
+    "source": "Rust for Rustaceans, ch. 1 §Borrowing; Crust of Rust: Lifetime Annotations",
+    "triggers": ["reborrow", "reborrowing", "&mut T", "compiler reborrow", "ergonomic API", "mut self chain"],
+    "rule_summary": "Passing a `&mut T` to a function does not move the reference; the compiler reborrows it as `&mut *m` for the call's duration, after which the original is usable again. Lean on this rather than working around perceived double-borrows.",
+    "prompt_injection": "MANDATORY RULE: When chaining calls on a `&mut T`, trust the compiler's reborrowing. `helper(buf); buf.push(x);` works because `helper` got a reborrow `&mut *buf`, not the original. Manual `std::mem::take` / `std::mem::replace` gymnastics are a code smell when reborrowing would suffice.",
+    "anti_pattern": "fn process(data: &mut Vec<i32>) {\n    // Unnecessary ownership swap to avoid perceived double-borrow.\n    let mut owned = std::mem::take(data);\n    use_helper(&mut owned);\n    *data = owned;\n}\nfn use_helper(d: &mut Vec<i32>) { d.push(0); }",
+    "good_pattern": "fn process(data: &mut Vec<i32>) {\n    use_helper(data); // implicit reborrow: helper gets &mut *data\n    data.push(0);     // data is usable again after the call returns\n}\nfn use_helper(d: &mut Vec<i32>) { d.push(0); }"
+  },
+  {
+    "id": "rust_quality_69_references_dont_own",
+    "category": "Reference Semantics",
+    "source": "Rust for Rustaceans, ch. 1 §Ownership and Borrowing",
+    "triggers": ["references do not own", "&mut not ownership", "consume vs borrow", "API confusion", "drop reference", "take vs borrow"],
+    "rule_summary": "`&mut T` is a unique borrow, not ownership. You cannot drop, replace, or destructure the borrowed value through it; you can only mutate in place. APIs that need to consume should take `T` (owned); APIs that need to mutate-and-return-control should take `&mut T`.",
+    "prompt_injection": "MANDATORY RULE: Choose between `&mut T` and `T` by what the API does to the value: mutate-in-place takes `&mut T`; consume / replace / extract takes `T`. `drop(buf)` on a `buf: &mut T` only drops the reference, not the value — usually a sign the wrong signature was chosen.",
+    "anti_pattern": "// Function pretends to consume but only takes a reference.\nfn finalize(buf: &mut Vec<u8>) -> Vec<u8> {\n    // Caller still owns *buf afterwards; the function cannot replace or destroy it.\n    buf.clone() // paid an allocation to return ownership we never had\n}",
+    "good_pattern": "// Take T when the function consumes; the caller transfers ownership.\nfn finalize(buf: Vec<u8>) -> Vec<u8> {\n    buf // moved through; can drop, mutate, replace, return\n}\n// Take &mut T when the function mutates in place.\nfn append_one(buf: &mut Vec<u8>, byte: u8) {\n    buf.push(byte);\n}"
   }
 ]

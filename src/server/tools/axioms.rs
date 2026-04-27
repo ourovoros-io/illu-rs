@@ -351,6 +351,34 @@ mod tests {
     }
 
     #[test]
+    fn test_ownership_axioms_batch_1_present() {
+        let result =
+            handle_axioms("NLL non-lexical lifetimes borrow scope last use borrow flow").unwrap();
+        assert!(
+            result.contains("Borrow Scope"),
+            "Borrow Scope missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "reborrow reborrowing &mut T compiler reborrow ergonomic API mut self chain",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Reborrowing"),
+            "Reborrowing missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "references do not own &mut not ownership consume vs borrow API confusion",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Reference Semantics"),
+            "Reference Semantics missing in focused query"
+        );
+    }
+
+    #[test]
     fn test_axiom_assets_have_unique_ids_and_required_fields() {
         let mut axioms: Vec<TestAxiom> = serde_json::from_str(AXIOMS_JSON).unwrap();
         axioms.extend(serde_json::from_str::<Vec<TestAxiom>>(RUST_QUALITY_AXIOMS_JSON).unwrap());
@@ -391,6 +419,6 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 66);
+        assert_eq!(rust_quality_axiom_count, 69);
     }
 }
