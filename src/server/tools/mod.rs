@@ -10,6 +10,7 @@ pub mod cross_callpath;
 pub mod cross_deps;
 pub mod cross_impact;
 pub mod cross_query;
+pub mod decisions;
 pub mod diff_impact;
 pub mod doc_coverage;
 pub mod docs;

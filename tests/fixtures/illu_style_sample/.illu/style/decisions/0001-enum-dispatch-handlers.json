@@ -1,0 +1,15 @@
+{
+  "id": "decision_use_enum_dispatch_for_handlers",
+  "title": "Use enum dispatch for command handlers",
+  "status": "accepted",
+  "date": "2026-04-15",
+  "context": "We have 12 command handlers; dispatch happens on the request hot path. Profiling showed indirect-call overhead from Box<dyn Handler> was a measurable fraction of per-request time.",
+  "decision": "We chose enum + match over Box<dyn Handler>. The variant set is closed at the library boundary, so external extensibility is not required, and dispatch latency matters more than open-set ergonomics here.",
+  "alternatives_considered": [
+    { "option": "Box<dyn Handler>", "why_rejected": "Requires vtable indirect call on every dispatch; benchmarks showed 8% throughput regression vs enum on this workload." },
+    { "option": "Function pointers (fn(&Cmd) -> Resp)", "why_rejected": "Loses the ability to carry per-handler state; we need that for connection-pool reuse and per-handler metrics." }
+  ],
+  "consequences": "Adding a new command requires touching the Command enum and the dispatch match (compile-time-enforced exhaustiveness). External crates cannot add commands — that is the design choice.",
+  "related_axioms": ["rust_quality_90_enum_dispatch"],
+  "related_files": ["src/handlers/mod.rs", "src/handlers/dispatch.rs"]
+}

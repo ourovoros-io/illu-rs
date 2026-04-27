@@ -260,6 +260,12 @@ impl IlluServer {
                         "failed to load .illu/style/project.json; proceeding without overrides"
                     );
                 }
+                if let Err(e) = tools::decisions::init(root) {
+                    tracing::warn!(
+                        error = ?e,
+                        "failed to load .illu/style/decisions/; proceeding without decisions"
+                    );
+                }
             }
             None => {
                 tracing::debug!(
@@ -808,6 +814,12 @@ struct ExemplarsParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct DecisionsParams {
+    /// Search term for decisions
+    query: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct ProjectStyleParams {}
 
 #[derive(Deserialize, JsonSchema)]
@@ -996,6 +1008,20 @@ impl IlluServer {
         tracing::info!("Tool call: project_style");
         let _guard = crate::status::StatusGuard::new("project_style");
         let result = tools::project_style::handle_project_style().map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "decisions",
+        description = "Query the project's design records loaded from `.illu/style/decisions/`. Returns up to 4 ADR-style decisions matching the query, with full context/decision/alternatives/consequences sections plus related axiom and file links. Use this to recover the rationale behind project-specific architectural choices."
+    )]
+    async fn decisions(
+        &self,
+        Parameters(params): Parameters<DecisionsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(query = %params.query, "Tool call: decisions");
+        let _guard = crate::status::StatusGuard::new(&format!("decisions ▸ {}", params.query));
+        let result = tools::decisions::handle_decisions(&params.query).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

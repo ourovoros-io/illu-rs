@@ -128,6 +128,11 @@ pub mod server {
             pub use crate::server::tools::cross_query::{CrossQueryOpts, handle_cross_query};
         }
 
+        /// Project design records tool.
+        pub mod decisions {
+            pub use crate::server::tools::decisions::handle_decisions;
+        }
+
         /// Diff impact analysis tool.
         pub mod diff_impact {
             pub use crate::server::tools::diff_impact::{
