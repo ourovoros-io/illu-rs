@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 93);
+        assert_eq!(rust_quality_axiom_count, 96);
     }
 
     #[test]
@@ -738,6 +738,36 @@ mod tests {
         assert!(
             surfaced >= 3,
             "expected at least 3 new perf categories in demo query, got {surfaced}"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_axioms_batch_1_present() {
+        let result = handle_axioms(
+            "SAFETY comment unsafe block invariants undocumented_unsafe_blocks audit unsafe",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Unsafe Block Discipline"),
+            "Unsafe Block Discipline missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "unsafe fn safety preconditions # Safety rustdoc missing_safety_doc caller contract",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Unsafe Fn Contract"),
+            "Unsafe Fn Contract missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "smallest unsafe block scope minimize unsafe surface narrow unsafe block",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Unsafe Block Scope"),
+            "Unsafe Block Scope missing in focused query"
         );
     }
 }
