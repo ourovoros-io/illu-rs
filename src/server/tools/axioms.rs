@@ -419,6 +419,35 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 69);
+        assert_eq!(rust_quality_axiom_count, 72);
+    }
+
+    #[test]
+    fn test_ownership_axioms_batch_2_present() {
+        let result = handle_axioms(
+            "variance covariance contravariance invariant PhantomData lifetime variance",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Variance"),
+            "Variance missing in focused query"
+        );
+
+        let result =
+            handle_axioms("drop order field declaration order destructor sequence struct drop")
+                .unwrap();
+        assert!(
+            result.contains("Drop Order"),
+            "Drop Order missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "self-referential struct ouroboros self_cell pinned fields owning_ref dangling self-ref",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Self-Referential Types"),
+            "Self-Referential Types missing in focused query"
+        );
     }
 }
