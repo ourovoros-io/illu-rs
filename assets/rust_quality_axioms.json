@@ -558,5 +558,465 @@
     "prompt_injection": "MANDATORY RULE: Do not assume Rust automatically prevents domain bugs. Architect with typed invariants, or the bug remains a runtime concern.",
     "anti_pattern": "fn transform(point: [f64; 3], from_frame: &str, to_frame: &str) -> [f64; 3] { /* ... */ }",
     "good_pattern": "struct Point<Frame> { coords: [f64; 3], frame: PhantomData<Frame> }\nfn transform<A, B>(point: Point<A>, transform: Transform<A, B>) -> Point<B> { /* ... */ }"
+  },
+  {
+    "id": "rust_quality_57_error_source_chain",
+    "category": "Error Source Chain",
+    "source": "Rust for Rustaceans, ch. 4 §Error Source",
+    "triggers": ["error source", "Error::source", "error chain", "wrapped error", "underlying cause", "source method"],
+    "rule_summary": "Library error variants that wrap an upstream error must implement `Error::source()` so callers can walk the cause chain. Do not flatten the underlying cause into a `Display` string.",
+    "prompt_injection": "MANDATORY RULE: When an error variant wraps another error, return the wrapped error from `source()`. Never collapse the cause into a formatted string in `Display`; the message describes this layer's failure, the chain carries the rest.",
+    "anti_pattern": "impl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Error::Read(io) => write!(f, \"failed to read: {io}\"),\n        }\n    }\n}\nimpl std::error::Error for Error {}",
+    "good_pattern": "impl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Error::Read(_) => f.write_str(\"failed to read configuration\"),\n        }\n    }\n}\nimpl std::error::Error for Error {\n    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {\n        match self {\n            Error::Read(io) => Some(io),\n        }\n    }\n}"
+  },
+  {
+    "id": "rust_quality_58_wrap_vs_propagate",
+    "category": "Error Boundary Discipline",
+    "source": "Rust for Rustaceans, ch. 4 §Error Conversion",
+    "triggers": ["wrap error", "propagate error", "map_err", "boundary context", "preserve original", "domain boundary"],
+    "rule_summary": "Use `?` (with `From`) to propagate errors through layers that share a domain. Use `map_err` only at module or domain boundaries where the calling layer needs different context. Do not apply both at the same call site without justification.",
+    "prompt_injection": "MANDATORY RULE: `?` and `map_err` answer different questions. Use `?` when the caller's domain matches yours. Use `map_err` only when crossing into a layer that owns a different error type. If you find yourself adding context strings inside one domain, extend the underlying error variant instead.",
+    "anti_pattern": "fn read_config(path: &Path) -> Result<Config, ConfigError> {\n    let raw = std::fs::read_to_string(path)\n        .map_err(|e| ConfigError::Other(format!(\"read failed: {e}\")))?;\n    parse(&raw).map_err(|e| ConfigError::Other(format!(\"parse failed: {e}\")))\n}",
+    "good_pattern": "fn read_config(path: &Path) -> Result<Config, ConfigError> {\n    let raw = std::fs::read_to_string(path).map_err(ConfigError::Read)?;\n    parse(&raw).map_err(ConfigError::Parse)\n}"
+  },
+  {
+    "id": "rust_quality_59_error_variant_naming",
+    "category": "Error API Surface",
+    "source": "Rust for Rustaceans, ch. 4 §Error Display; Rust API Guidelines C-WORD-ORDER.",
+    "triggers": ["variant naming", "error name", "error display", "InvalidUtf8", "Display impl", "error message style"],
+    "rule_summary": "Error variant names are nouns naming the failure (`InvalidUtf8`, `MissingField`), not verb phrases (`FailedToParseUtf8`). `Display` produces one short clause without trailing punctuation and without leaking internal state callers cannot use.",
+    "prompt_injection": "MANDATORY RULE: Name error variants for the failure condition, not the operation that failed. Format `Display` output as a noun-phrase or short clause: lowercase, no trailing period, no struct dumps. Internal detail belongs in `Debug` or in `source()` chains.",
+    "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    FailedToParseUtf8 { bytes: Vec<u8>, position: usize },\n    CouldNotFindField,\n}\nimpl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        write!(f, \"Error: {self:?}.\")\n    }\n}",
+    "good_pattern": "#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    InvalidUtf8 { position: usize },\n    MissingField(&'static str),\n}\nimpl fmt::Display for Error {\n    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {\n        match self {\n            Error::InvalidUtf8 { position } => write!(f, \"invalid UTF-8 at byte {position}\"),\n            Error::MissingField(name) => write!(f, \"missing required field `{name}`\"),\n        }\n    }\n}"
+  },
+  {
+    "id": "rust_quality_60_error_categories",
+    "category": "Error Category Structure",
+    "source": "Rust for Rustaceans, ch. 4 §Error Hierarchies",
+    "triggers": ["error category", "io vs domain", "invariant violation", "Other variant", "stringly typed error", "error catchall"],
+    "rule_summary": "Distinguish failure categories — I/O, parse, domain, and invariant violations — as distinct variants or sub-enums. Never collapse them into a single `Other(String)` or `Internal(String)` catch-all.",
+    "prompt_injection": "MANDATORY RULE: Each error variant should let a caller decide whether to retry, surface, or abort. Variants that erase that distinction (`Other(String)`, `Internal(String)`) push the work back to the caller through string parsing. Add a real variant or sub-enum instead.",
+    "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    Other(String),\n}\n// Caller has to grep `Display` to know if this was retry-able I/O or a parse bug.",
+    "good_pattern": "#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    Io(std::io::Error),\n    Parse(ParseError),\n    Schema(SchemaError),\n    Invariant(&'static str),\n}\n// Each variant tells the caller what kind of failure it is."
+  },
+  {
+    "id": "rust_quality_61_backtrace_capture",
+    "category": "Backtrace Policy",
+    "source": "Rust for Rustaceans, ch. 4 §Backtraces",
+    "triggers": ["backtrace", "Backtrace::capture", "stack context", "RUST_BACKTRACE", "error origin", "stack walk"],
+    "rule_summary": "Capture `std::backtrace::Backtrace` only at the boundary where stack context would otherwise be lost — typically the lowest-level error variant or the first conversion away from the originating frame. Avoid capturing on every wrap.",
+    "prompt_injection": "MANDATORY RULE: Backtraces are expensive (a stack walk plus optional symbolication). Capture them once, at the deepest layer that owns the original failure, not at every wrapping site. Application code is more permissive than library code; libraries should let the caller opt in.",
+    "anti_pattern": "#[derive(Debug)]\npub enum Error {\n    Io { source: io::Error, backtrace: Backtrace },\n    Parse { source: ParseError, backtrace: Backtrace },\n    Domain { source: DomainError, backtrace: Backtrace },\n}\n// Three capture sites; any wrapping chain pays a stack walk at each site.",
+    "good_pattern": "#[derive(Debug)]\n#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Domain { source: DomainError, backtrace: Backtrace },\n}\n// Capture once, at the boundary that owns the originating failure."
+  },
+  {
+    "id": "rust_quality_62_stable_error_semantics",
+    "category": "Error Stability",
+    "source": "Rust for Rustaceans, ch. 4 §Error Stability and ch. 8 §Versioning Surface",
+    "triggers": ["non_exhaustive insufficient", "stable variant", "error contract", "semver error", "library error stability"],
+    "rule_summary": "`#[non_exhaustive]` lets you add variants without a major bump, but does not document which existing variants callers may match on as a stable contract. Document each variant's stability explicitly.",
+    "prompt_injection": "MANDATORY RULE: Treat each public error variant as either a stable contract (callers may match on it) or an internal-detail variant (rendered through `Display` only, may be split or removed). Document the distinction in rustdoc; do not let it default to ambiguity.",
+    "anti_pattern": "#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n}\n// No documentation. Callers do not know whether matching `Network` is supported.",
+    "good_pattern": "/// # Stability\n///\n/// `Io`, `Parse`, and `Network` are stable contracts — callers may match on\n/// them. `Internal` (and any future variants gated by `#[non_exhaustive]`) is\n/// internal detail and may be split, merged, or removed in any minor release.\n#[non_exhaustive]\npub enum Error {\n    Io(io::Error),\n    Parse(ParseError),\n    Network(NetworkError),\n    #[doc(hidden)]\n    Internal(InternalKind),\n}"
+  },
+  {
+    "id": "rust_quality_63_error_context_typed",
+    "category": "Error Context",
+    "source": "Rust for Rustaceans, ch. 4 §Carrying Context",
+    "triggers": ["error context", "format string error", "eyre context", "typed context", "structured error", "context fields"],
+    "rule_summary": "Carry error context as typed fields on the variant, not as `format!`-built strings. Reserve `eyre`/`anyhow` chained-string context for application code where the caller never needs to inspect the parts.",
+    "prompt_injection": "MANDATORY RULE: If a caller might want to programmatically inspect what failed (which path, which line, which key), put that information in fields on the error variant. `format!`-built context strings discard the data and force string parsing later.",
+    "anti_pattern": "// `Error::Parse` wraps a formatted string, discarding inspectable parts.\nenum Error { Parse(String) }\nreturn Err(Error::Parse(format!(\n    \"failed at {path:?}:{line}: unexpected token {tok:?}\"\n)));",
+    "good_pattern": "return Err(Error::Parse(ParseError {\n    path: path.to_owned(),\n    line,\n    kind: ParseErrorKind::UnexpectedToken(tok),\n}));"
+  },
+  {
+    "id": "rust_quality_64_no_box_dyn_error_internal",
+    "category": "Error Type Discipline",
+    "source": "Rust for Rustaceans, ch. 4 §Library Error Types",
+    "triggers": ["Box dyn Error", "internal helper", "library error", "private function error", "anyhow internally", "structured error"],
+    "rule_summary": "Library code should not use `Box<dyn Error>` even in private helpers: it leaks anyhow-style erasure into the call graph and prevents callers (including your own code) from reasoning about variants. Build the structured type once and use it everywhere.",
+    "prompt_injection": "MANDATORY RULE: If you have a structured `Error` enum for the public API, use it in private helpers too. `Box<dyn Error>` in a private signature is a tell that you have not finished designing the variant; finish the design.",
+    "anti_pattern": "fn parse_record(input: &str) -> Result<Record, Box<dyn std::error::Error>> {\n    /* private helper inside a library */\n}",
+    "good_pattern": "fn parse_record(input: &str) -> Result<Record, ParseError> {\n    /* same helper, structured error type used everywhere */\n}"
+  },
+  {
+    "id": "rust_quality_65_from_impls_public_api",
+    "category": "Error Conversion Surface",
+    "source": "Rust for Rustaceans, ch. 4 §From Conversions and ch. 8 §Public Surface",
+    "triggers": ["From impl", "error conversion", "auto convert error", "public surface", "conversion graph", "error From"],
+    "rule_summary": "Every `From<E>` for your error type widens the conversion graph and becomes part of the public API: callers' types now flow through `?` into yours. Review each one as a deliberate API decision, not as a convenience for `?`.",
+    "prompt_injection": "MANDATORY RULE: Adding `impl From<UpstreamError> for MyError` is a public API change even when the wrapping variant is internal-detail. Decide whether the upstream error genuinely belongs in your domain before adding the conversion.",
+    "anti_pattern": "// Added because `?` complained.\nimpl From<reqwest::Error> for ConfigError {\n    fn from(error: reqwest::Error) -> Self {\n        ConfigError::Other(error.to_string())\n    }\n}",
+    "good_pattern": "// Decision: ConfigError owns network failures because the loader fetches\n// remote includes. Reviewed in PR #142.\nimpl From<reqwest::Error> for ConfigError {\n    fn from(error: reqwest::Error) -> Self {\n        ConfigError::Network(error)\n    }\n}"
+  },
+  {
+    "id": "rust_quality_66_test_failure_variant",
+    "category": "Error Path Specificity",
+    "source": "Rust for Rustaceans, ch. 6 §Testing Errors",
+    "triggers": ["test error variant", "is_err", "assert matches", "failure path test", "error path coverage", "matches macro"],
+    "rule_summary": "Tests of failure paths must assert on the specific error variant, not just `is_err()`. A test that passes for any failure cannot tell when a refactor silently flips one failure cause into another.",
+    "prompt_injection": "MANDATORY RULE: For every fallible behavior under test, assert `matches!(result, Err(Error::ExpectedVariant(..)))` or destructure to inspect fields. `assert!(result.is_err())` lets two unrelated bugs satisfy the same test.",
+    "anti_pattern": "#[test]\nfn rejects_missing_field() {\n    assert!(parse(\"{}\").is_err());\n}",
+    "good_pattern": "#[test]\nfn rejects_missing_field() {\n    let err = parse(\"{}\").unwrap_err();\n    assert!(matches!(err, ParseError::MissingField(name) if name == \"id\"));\n}"
+  },
+  {
+    "id": "rust_quality_67_nll_borrow_scope",
+    "category": "Borrow Scope",
+    "source": "Rust for Rustaceans, ch. 1 §Lifetimes; Crust of Rust: Lifetime Annotations",
+    "triggers": ["NLL", "non-lexical lifetimes", "borrow scope", "last use", "borrow flow", "borrow checker scope"],
+    "rule_summary": "A borrow ends at its last use, not at the end of the curly-brace scope. When the borrow checker rejects code, restructure (move the conflicting use earlier or use the value sooner) before reaching for `.clone()` or owned types.",
+    "prompt_injection": "MANDATORY RULE: When the borrow checker rejects code that conflicts with a live borrow, first ask whether the borrow's last use can move earlier. NLL means a borrow's effective scope is its live range, not its lexical block. `.clone()` is the last resort, not the first.",
+    "anti_pattern": "let mut buf = String::from(\"hello\");\nlet len: usize;\n{\n    // Pre-NLL workaround: scope-bound let to release the &buf borrow\n    // before mutating buf below.\n    let r = &buf;\n    len = r.len();\n}\nbuf.push_str(\", world\");\nprintln!(\"len was {len}, now {buf}\");",
+    "good_pattern": "let mut buf = String::from(\"hello\");\nlet r = &buf;\nlet len = r.len();\n// NLL: the &buf borrow's last use is r.len() above; the borrow ends here,\n// so buf is free for &mut access on the next line.\nbuf.push_str(\", world\");\nprintln!(\"len was {len}, now {buf}\");"
+  },
+  {
+    "id": "rust_quality_68_reborrow_mut",
+    "category": "Reborrowing",
+    "source": "Rust for Rustaceans, ch. 1 §Borrowing; Crust of Rust: Lifetime Annotations",
+    "triggers": ["reborrow", "reborrowing", "&mut T", "compiler reborrow", "ergonomic API", "mut self chain"],
+    "rule_summary": "Passing a `&mut T` to a function does not move the reference; the compiler reborrows it as `&mut *m` for the call's duration, after which the original is usable again. Lean on this rather than working around perceived double-borrows.",
+    "prompt_injection": "MANDATORY RULE: When chaining calls on a `&mut T`, trust the compiler's reborrowing. `helper(buf); buf.push(x);` works because `helper` got a reborrow `&mut *buf`, not the original. Manual `std::mem::take` / `std::mem::replace` gymnastics are a code smell when reborrowing would suffice.",
+    "anti_pattern": "fn process(data: &mut Vec<i32>) {\n    // Unnecessary ownership swap to avoid perceived double-borrow.\n    let mut owned = std::mem::take(data);\n    use_helper(&mut owned);\n    *data = owned;\n}\nfn use_helper(d: &mut Vec<i32>) { d.push(0); }",
+    "good_pattern": "fn process(data: &mut Vec<i32>) {\n    use_helper(data); // implicit reborrow: helper gets &mut *data\n    data.push(0);     // data is usable again after the call returns\n}\nfn use_helper(d: &mut Vec<i32>) { d.push(0); }"
+  },
+  {
+    "id": "rust_quality_69_references_dont_own",
+    "category": "Reference Semantics",
+    "source": "Rust for Rustaceans, ch. 1 §Ownership and Borrowing",
+    "triggers": ["references do not own", "&mut not ownership", "consume vs borrow", "API confusion", "drop reference", "take vs borrow"],
+    "rule_summary": "`&mut T` is a unique borrow, not ownership. You cannot move out of the borrowed value (consume it) without leaving valid data behind; you can mutate in place, and you can replace via `*ref = new` or `mem::replace`. APIs that need to consume the value entirely should take `T` (owned); APIs that mutate-and-return-control should take `&mut T`.",
+    "prompt_injection": "MANDATORY RULE: Choose between `&mut T` and `T` by what the API does to the value: mutate-in-place takes `&mut T`; consume / replace / extract takes `T`. `drop(buf)` on a `buf: &mut T` only drops the reference, not the value — usually a sign the wrong signature was chosen.",
+    "anti_pattern": "// Function pretends to consume but only takes a reference.\nfn finalize(buf: &mut Vec<u8>) -> Vec<u8> {\n    // Caller still owns *buf afterwards; the function cannot replace or destroy it.\n    buf.clone() // paid an allocation to return ownership we never had\n}",
+    "good_pattern": "// Take T when the function consumes; the caller transfers ownership.\nfn finalize(buf: Vec<u8>) -> Vec<u8> {\n    buf // moved through; can drop, mutate, replace, return\n}\n// Take &mut T when the function mutates in place.\nfn append_one(buf: &mut Vec<u8>, byte: u8) {\n    buf.push(byte);\n}"
+  },
+  {
+    "id": "rust_quality_70_variance_discipline",
+    "category": "Variance",
+    "source": "Rust for Rustaceans, ch. 1 §Variance and Subtyping; Rustonomicon §Variance; Crust of Rust: Subtyping and Variance",
+    "triggers": ["variance", "covariance", "contravariance", "invariant", "PhantomData lifetime", "variance marker"],
+    "rule_summary": "Pick the `PhantomData<...>` marker that captures what your type semantically holds, because variance determines soundness. Per the Rustonomicon variance table: `&'a T` is covariant in `'a` and `T`; `&'a mut T` is covariant in `'a` and invariant in `T`; `fn(T)` is contravariant in `T`; `fn() -> T` is covariant in `T`; `*const T` is covariant in `T`; `*mut T` is invariant in `T`. `PhantomData<X>` mirrors `X`.",
+    "prompt_injection": "MANDATORY RULE: When defining a struct that conceptually holds a borrow, raw pointer, or function involving a generic parameter it does not store as a field, choose the `PhantomData<...>` marker by variance, not by convenience. The marker dictates whether `'short` lifetimes can subtype `'long` and whether `T` may be substituted for a subtype, which determines whether your unsafe abstraction is sound.",
+    "anti_pattern": "use std::marker::PhantomData;\nstruct Slice<'a, T> {\n    ptr: *const T,\n    len: usize,\n    _marker: PhantomData<T>, // Compile error E0392: 'a unused; use PhantomData<&'a T> to express the borrow.\n}",
+    "good_pattern": "use std::marker::PhantomData;\n// Behaves like &'a [T]: covariant in 'a and T.\nstruct Slice<'a, T> {\n    ptr: *const T,\n    len: usize,\n    _marker: PhantomData<&'a T>,\n}\n// Behaves like &'a mut [T]: covariant in 'a, invariant in T.\nstruct SliceMut<'a, T> {\n    ptr: *mut T,\n    len: usize,\n    _marker: PhantomData<&'a mut T>,\n}\n// Consumer-like callback: the fn(T) field itself makes Sink<T>\n// contravariant in T (input position). PhantomData would be needed\n// only if T were not stored in a real field.\nstruct Sink<T> {\n    f: fn(T),\n}"
+  },
+  {
+    "id": "rust_quality_71_drop_order",
+    "category": "Drop Order",
+    "source": "Rust for Rustaceans, ch. 1 §Drop Check; Rust Reference §Destructors",
+    "triggers": ["drop order", "field declaration order", "destructor sequence", "struct drop", "drop fields", "RAII order"],
+    "rule_summary": "Struct fields are dropped in declaration order (top to bottom). Design the field order so that fields holding borrows or callbacks into other fields are declared *before* the fields they depend on — dependents drop first, dependencies drop last.",
+    "prompt_injection": "MANDATORY RULE: Order struct fields by drop dependency: a field that uses another field in its `Drop` impl must be declared first. If `logger.flush()` writes to `writer`, declare `logger` before `writer` so logger's destructor runs while writer is still alive.",
+    "anti_pattern": "// writer dropped first, but logger's Drop tries to flush via writer — undefined access.\nstruct LogWriter {\n    writer: BufWriter<File>, // declared first → dropped first\n    logger: FlushOnDropLogger,\n}",
+    "good_pattern": "// logger dropped first while writer is still alive; writer drops last and flushes.\nstruct LogWriter {\n    logger: FlushOnDropLogger, // declared first → dropped first\n    writer: BufWriter<File>,   // declared second → dropped last\n}"
+  },
+  {
+    "id": "rust_quality_72_self_referential",
+    "category": "Self-Referential Types",
+    "source": "Rust for Rustaceans, ch. 1 §Self-Referential Types; Crust of Rust: Pin",
+    "triggers": ["self-referential", "self-ref struct", "ouroboros", "self_cell", "pinned fields", "owning_ref", "dangling self-ref"],
+    "rule_summary": "Naive self-referential structs (`struct { data: String, view: &str_into_data }`) do not compile, and faking `'static` is unsound the moment `data` moves. Use indices into the owning data, an arena (`bumpalo`, `typed-arena`), or a Pin-based crate (`ouroboros`, `self_cell`) instead.",
+    "prompt_injection": "MANDATORY RULE: If your struct conceptually holds a reference into a field of itself, the design is wrong before any code compiles. Replace the inner reference with an index, restructure ownership through an arena, or pull in `ouroboros`/`self_cell`. Never `'static`-cast the inner reference; moving the outer struct will dangle it.",
+    "anti_pattern": "// 'static is a lie. If the Doc moves, every &'static str dangles.\nstruct Doc {\n    text: String,\n    parsed: Vec<&'static str>,\n}",
+    "good_pattern": "use std::ops::Range;\n// Index into the owning data; safe under any move of Doc.\nstruct Doc {\n    text: String,\n    spans: Vec<Range<usize>>,\n}\nimpl Doc {\n    fn segment(&self, i: usize) -> &str { &self.text[self.spans[i].clone()] }\n}\n// Alternative when zero-copy borrowing is essential: ouroboros / self_cell."
+  },
+  {
+    "id": "rust_quality_73_interior_mutability_selection",
+    "category": "Interior Mutability Selection",
+    "source": "Rust for Rustaceans, ch. 1 §Interior Mutability; Crust of Rust: Smart Pointers",
+    "triggers": ["Cell RefCell atomic Mutex RwLock", "interior mutability decision tree", "thread shared", "lock-free", "single-threaded mutation", "IM primitive"],
+    "rule_summary": "Pick the lightest interior-mutability primitive that satisfies the sharing need: `Cell<T>` (single-threaded; `Copy` required for `get`; `set`/`replace`/`swap`/`take` available for non-`Copy` types; no runtime borrow check), `RefCell<T>` (single-threaded, compound types, runtime borrow check), atomics (`AtomicU64` etc., thread-shared primitives, lock-free), `Mutex<T>` / `RwLock<T>` (thread-shared compound types, blocking).",
+    "prompt_injection": "MANDATORY RULE: Do not reach for `Mutex<T>` reflexively when the sharing pattern is single-threaded or primitive. `Cell<T>` and `RefCell<T>` are single-thread and free of locking; atomics are thread-shared and lock-free; `Mutex`/`RwLock` are thread-shared and lock-bearing. Picking a heavier primitive than required is a wasted-cost smell.",
+    "anti_pattern": "// Single-threaded counter wrapped in Mutex — overkill, lock-bearing, panic-prone.\nstruct Counter { inner: std::sync::Mutex<u64> }\nimpl Counter {\n    fn increment(&self) { *self.inner.lock().unwrap() += 1; }\n}",
+    "good_pattern": "use std::sync::atomic::{AtomicU64, Ordering};\n// Thread-shared primitive: atomic, lock-free.\nstruct Counter { inner: AtomicU64 }\nimpl Counter {\n    fn increment(&self) { self.inner.fetch_add(1, Ordering::Relaxed); }\n}\n// Single-thread Copy alternative: Cell<u64> (no atomics needed).\nstruct LocalCounter { inner: std::cell::Cell<u64> }\nimpl LocalCounter {\n    fn increment(&self) { self.inner.set(self.inner.get() + 1); }\n}"
+  },
+  {
+    "id": "rust_quality_74_mutex_guard_await",
+    "category": "Async Lock Hygiene",
+    "source": "Rust for Rustaceans, ch. 5 §Async; Tokio docs §Shared State; Crust of Rust: Channels",
+    "triggers": ["MutexGuard await deadlock", "async lock", "std sync Mutex async", "tokio sync Mutex", "lock across await", "blocking lock async"],
+    "rule_summary": "A `std::sync::MutexGuard` held across an `.await` point makes the surrounding future `!Send` (the guard is unconditionally `!Send` due to OS thread-affinity for unlock). On `Send`-bound executors (e.g. `tokio::spawn`), this is a compile error. On `!Send` executors, holding a sync lock across await wastes the executor thread and risks deadlock when another task on the same executor needs the lock. Drop the guard before awaiting, or use `tokio::sync::Mutex` (whose guard is `Send` and integrates with the runtime).",
+    "prompt_injection": "MANDATORY RULE: Never hold a `std::sync::Mutex` (or `RwLock`) guard across an `.await`. Either narrow the locked region so the guard drops before the await, or replace the lock with `tokio::sync::Mutex` for genuine async-aware locking. The compiler will not always catch this; write the code so the guard's scope is local.",
+    "anti_pattern": "use std::sync::Mutex;\nasync fn process(state: &Mutex<State>) -> Result<()> {\n    let guard = state.lock().unwrap();\n    fetch_data().await?; // guard held across await: !Send propagates, so tokio::spawn rejects this at compile time; on !Send executors, deadlock risk\n    apply_change(&*guard);\n    Ok(())\n}",
+    "good_pattern": "use std::sync::Mutex;\nasync fn process(state: &Mutex<State>) -> Result<()> {\n    // Take what we need from the lock, then drop the guard before awaiting.\n    let snapshot = {\n        let guard = state.lock().unwrap();\n        guard.snapshot()\n    };\n    let data = fetch_data().await?;\n    {\n        let mut guard = state.lock().unwrap();\n        guard.update_from(&snapshot, &data);\n    }\n    Ok(())\n}\n// If the lock genuinely must span an await, switch to tokio::sync::Mutex."
+  },
+  {
+    "id": "rust_quality_75_pin_discipline",
+    "category": "Pin Discipline",
+    "source": "Rust for Rustaceans, ch. 1 §Pinning and ch. 5 §Async; Crust of Rust: Pin",
+    "triggers": ["Pin Unpin", "self-pin", "self-referential future", "Pin<&mut Self>", "unpin auto trait", "pin projection"],
+    "rule_summary": "Most types are `Unpin` (the auto trait); you only need to think about `Pin` when designing a type that is self-referential or implementing `Future::poll` directly. `Pin<&mut Self>` in `poll` means the future's memory address is stable so any internal self-references stay valid; respect that contract or use `pin_project`.",
+    "prompt_injection": "MANDATORY RULE: When implementing `Future::poll` directly or designing a self-referential type, take the `Pin<&mut Self>` contract seriously: do not move out of `self`, do not return a `&mut` to a self-referential field without `pin_project`, and do not assume the type is `Unpin` unless you have an explicit `impl Unpin for ...` with documented soundness. For everything else, normal `&mut self` methods are fine because most types are auto-`Unpin`.",
+    "anti_pattern": "use std::future::Future;\nuse std::pin::Pin;\nuse std::task::{Context, Poll};\nstruct MyFuture { /* ... */ }\nimpl Future for MyFuture {\n    type Output = ();\n    // Wrong signature: Future::poll takes Pin<&mut Self>, not &mut Self.\n    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<()> { Poll::Ready(()) }\n}",
+    "good_pattern": "use std::future::Future;\nuse std::pin::Pin;\nuse std::task::{Context, Poll};\nstruct MyFuture { state: u32 }\nimpl Future for MyFuture {\n    type Output = ();\n    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {\n        // MyFuture has no self-references, so Pin is just a marker here.\n        // For self-referential futures use pin-project to get safe field access.\n        Poll::Ready(())\n    }\n}"
+  },
+  {
+    "id": "rust_quality_76_sealed_traits",
+    "category": "Sealed Traits",
+    "source": "Rust for Rustaceans, ch. 2 §Coherence; rust-imap pattern; Rust API Guidelines C-SEALED",
+    "triggers": ["sealed trait", "private super trait", "block external impl", "pub trait", "extension prevention", "trait sealing"],
+    "rule_summary": "Use a private super trait to seal a public trait: external crates can call methods on it but cannot implement it. Pattern: a private module containing a `Sealed` trait, then `pub trait Foo: private::Sealed {}` plus `impl private::Sealed for ...` only for the types you control.",
+    "prompt_injection": "MANDATORY RULE: When you publish a trait whose set of implementors must remain bounded (closed-set extensions over std types, library-controlled implementations only), seal it with a private super trait. Without sealing, every minor-version method addition risks breaking external implementors.",
+    "anti_pattern": "// Unsealed: external crate can `impl Pretty for u32 { ... }`, and any future\n// minor-version method addition would break that external impl.\npub trait Pretty {\n    fn pretty(&self) -> String;\n}",
+    "good_pattern": "mod private {\n    pub trait Sealed {}\n}\n\npub trait Pretty: private::Sealed {\n    fn pretty(&self) -> String;\n}\n\n// We control all impls.\nimpl private::Sealed for String {}\nimpl Pretty for String {\n    fn pretty(&self) -> String { format!(\"\\\"{self}\\\"\") }\n}\n// External crates can call .pretty() but cannot impl Pretty for their own types\n// because they cannot impl private::Sealed."
+  },
+  {
+    "id": "rust_quality_77_object_safety",
+    "category": "Object Safety",
+    "source": "Rust Reference §Object Safety; Crust of Rust: Trait Objects",
+    "triggers": ["object safety", "dyn compatible", "dyn Trait", "Self: Sized escape", "dispatchable receiver", "generic methods trait object"],
+    "rule_summary": "A trait is object-safe (dyn-compatible) only if every method either has a dispatchable receiver and no generic type parameters, or is excluded from the vtable via `where Self: Sized`. Dispatchable receivers: `&self`, `&mut self`, `Box<Self>`, `Rc<Self>`, `Arc<Self>`, `Pin<P>`. A consuming `self` receiver does not by itself make the trait non-dyn-compatible — the trait still satisfies dyn-compatibility, but the consuming method is not callable through `&dyn` (only through `Box<Self>` or via `where Self: Sized` gating).",
+    "prompt_injection": "MANDATORY RULE: If callers may use your trait as `dyn Trait`, design every method to be dispatchable (no generic params, dispatchable receiver, no Self by value) or gate it behind `where Self: Sized` so it is excluded from the vtable. Adding a generic method later silently breaks `dyn Trait` usage at every call site.",
+    "anti_pattern": "pub trait Render {\n    fn into_string(self) -> String;       // consuming self: not callable through &dyn,\n                                          // but does not alone make the trait non-dyn-compatible\n    fn fmt<W: Write>(&self, w: &mut W);   // generic type parameter: this is what breaks dyn\n}\nlet r: Box<dyn Render> = /* ... */;       // ERROR (E0038): only because of fmt<W>; remove it and this compiles",
+    "good_pattern": "pub trait Render {\n    fn fmt(&self, w: &mut dyn Write);                 // dispatchable, no generics\n    fn into_string(self) -> String where Self: Sized; // gated: not on the vtable\n}\nlet r: Box<dyn Render> = /* ... */;                   // OK\nr.fmt(&mut buf);                                       // works through the vtable\n// r.into_string() is unavailable through dyn (Sized-gated) but works on concrete T."
+  },
+  {
+    "id": "rust_quality_78_object_safe_api_design",
+    "category": "Object-Safe API Design",
+    "source": "Rust for Rustaceans, ch. 2 §Trait Objects and Object Safety",
+    "triggers": ["object-safe API", "preserve object safety", "extension trait dyn", "plugin trait", "deliberate non-object-safe", "ext trait pattern"],
+    "rule_summary": "Design traits to be object-safe by default; give it up only when the trait is genuinely a static-only abstraction. For traits exposed to user-defined plugins or heterogeneous collections, object safety is required. Provide generic conveniences via a separate extension trait with a blanket impl, so the core stays dyn-compatible.",
+    "prompt_injection": "MANDATORY RULE: When designing a public trait, decide upfront whether `dyn Trait` is in scope. If yes, keep methods object-safe and put generic helpers on a separate `*Ext` extension trait with `impl<T: BaseTrait + ?Sized> Ext for T {}`. If no, document the decision in rustdoc — callers cannot store `Box<dyn YourTrait>`.",
+    "anti_pattern": "// Trait meant for plugins, accidentally not object-safe due to a generic method.\npub trait LoggerPlugin {\n    fn name(&self) -> &str;                          // object-safe\n    fn log<W: Write>(&self, msg: &str, sink: W);     // generic: breaks dyn\n}",
+    "good_pattern": "pub trait LoggerPlugin {\n    fn name(&self) -> &str;\n    fn log(&self, msg: &str, sink: &mut dyn Write);\n}\n// Generic helper as extension trait with blanket impl:\npub trait LoggerPluginExt: LoggerPlugin {\n    fn log_to<W: Write>(&self, msg: &str, mut sink: W) {\n        self.log(msg, &mut sink as &mut dyn Write);\n    }\n}\nimpl<T: LoggerPlugin + ?Sized> LoggerPluginExt for T {}"
+  },
+  {
+    "id": "rust_quality_79_static_vs_dynamic_dispatch",
+    "category": "Static vs Dynamic Dispatch",
+    "source": "Rust for Rustaceans, ch. 2 §Generics vs Trait Objects; Rust Book ch. 17",
+    "triggers": ["generic vs dyn", "static dispatch", "dynamic dispatch", "monomorphization", "vtable", "binary size dispatch"],
+    "rule_summary": "Pick generics (`fn foo<T: Trait>(x: T)`) for hot paths and homogeneous types: monomorphization, inlining, no indirect call. Pick trait objects (`fn foo(x: &dyn Trait)`) for heterogeneous collections, plugin boundaries, and binary-size budgets: single code copy, vtable indirection. Mixing both in one API is rarely the right answer.",
+    "prompt_injection": "MANDATORY RULE: Default to generics for performance-sensitive code that handles a single type per call site. Use `dyn Trait` only when you need heterogeneous collections, plugin boundaries that decouple consumers from concrete types, or to keep binary size bounded. Document the choice when it is non-obvious.",
+    "anti_pattern": "// Heterogeneous renderable items forced through monomorphization — Vec<T> requires\n// all elements to share the same concrete type T; mixing two impls is impossible.\nfn render_all<T: Render>(items: Vec<T>) { /* one concrete type per call */ }\n\n// Hot-path callback through dyn — indirect call, missed inlining.\nfn for_each(callback: &dyn Fn(usize), n: usize) {\n    for i in 0..n { callback(i); }\n}",
+    "good_pattern": "// Heterogeneous: dyn.\nfn render_all(items: Vec<Box<dyn Render>>) { /* mixed concrete types in one Vec */ }\n\n// Hot-path: generic, monomorphized per F.\nfn for_each<F: Fn(usize)>(callback: F, n: usize) {\n    for i in 0..n { callback(i); }\n}"
+  },
+  {
+    "id": "rust_quality_80_associated_types",
+    "category": "Associated Types",
+    "source": "Rust for Rustaceans, ch. 2 §Associated Types vs Generics; Rust Book ch. 19",
+    "triggers": ["associated type", "generic parameter", "Iterator Item", "Add Output", "type relation", "one impl per type"],
+    "rule_summary": "Use an associated type when the trait has one logical impl per type (`Iterator::Item` is determined by the iterator). Use a generic parameter when the caller picks (`Add<RHS>` lets one type implement addition with multiple right-hand-side types). Don't mix both unless the relation requires it.",
+    "prompt_injection": "MANDATORY RULE: Decide for each trait whether the related type is determined by the implementor (associated type) or chosen by the caller (generic parameter). If implementors have exactly one natural choice, an associated type spares callers from spelling it out. If multiple choices coexist on one type, a generic parameter is necessary.",
+    "anti_pattern": "// Generic parameter when only one impl per type makes sense — caller forced to spell\n// the only valid choice every time.\ntrait Container<Item> {\n    fn add(&mut self, x: Item);\n}\nimpl Container<u32> for MyVec { /* the only impl */ }\nfn use_it<C: Container<u32>>(c: &mut C) { /* must spell u32 every time */ }",
+    "good_pattern": "// Associated type: one Item per Container type; caller does not spell it.\ntrait Container {\n    type Item;\n    fn add(&mut self, x: Self::Item);\n}\nimpl Container for MyVec { type Item = u32; /* ... */ }\nfn use_it<C: Container<Item = u32>>(c: &mut C) { /* spelled when caller pins it */ }\nfn use_it_any<C: Container>(c: &mut C, x: C::Item) { /* opaque to caller */ }"
+  },
+  {
+    "id": "rust_quality_81_hrtbs",
+    "category": "Higher-Ranked Trait Bounds",
+    "source": "Rust for Rustaceans, ch. 2 §HRTBs; Rust Reference §Higher-Rank Trait Bounds; Crust of Rust: Lifetime Annotations",
+    "triggers": ["HRTB", "for<'a>", "higher-ranked trait bound", "callback any lifetime", "Fn arbitrary lifetime", "borrow checker callback"],
+    "rule_summary": "`for<'a> Fn(&'a T) -> R` (and the related `for<'a> Fn(&'a T) -> &'a U` form when the return borrows from the input) declares the callback works for any caller-chosen lifetime, not a single named lifetime fixed at the bound site. Use HRTBs when a function passes borrowed data into a callback whose lifetime cannot be tied to the function's own type parameters.",
+    "prompt_injection": "MANDATORY RULE: When a callback bound describes a closure or function pointer that the implementation will invoke with locally-borrowed data, write the bound as `for<'a> Fn(&'a T) -> ...` (HRTB). A single named lifetime tied to the outer function's type parameters constrains the callback to one specific lifetime, which usually fails when the implementation has only a shorter borrow to offer.",
+    "anti_pattern": "// Single named lifetime: caller picks 'a, function is locked to that lifetime.\n// Trying to call f on a locally-borrowed value fails (E0597) because the local\n// borrow's scope is shorter than 'a.\nfn process<'a, F>(input: &'a str, f: F)\nwhere F: Fn(&'a str) -> bool\n{\n    let scratch = format!(\"[{input}]\"); // owned, function-local\n    if f(&scratch) {                     // ERROR: scratch's borrow shorter than 'a\n        /* ... */\n    }\n}",
+    "good_pattern": "// HRTB: callback works for any lifetime — including scratch's local one.\nfn process<F>(input: &str, f: F)\nwhere F: for<'a> Fn(&'a str) -> bool\n{\n    let scratch = format!(\"[{input}]\");\n    if f(&scratch) {                     // OK: HRTB accepts any &str\n        /* ... */\n    }\n}"
+  },
+  {
+    "id": "rust_quality_82_sized_bound",
+    "category": "Sized Bound",
+    "source": "Rust for Rustaceans, ch. 2 §Sized and DSTs; Rustonomicon §Exotically Sized Types",
+    "triggers": ["?Sized", "DST", "dynamically sized type", "implicit Sized", "Box T ?Sized", "Arc T ?Sized"],
+    "rule_summary": "Generic type parameters carry an implicit `Sized` bound. Relax it with `T: ?Sized` to accept dynamically-sized types (`str`, `[T]`, `dyn Trait`). The cost is that the parameter can only be used through references or owning pointers (`&T`, `&mut T`, `Box<T>`, `Arc<T>`, `Rc<T>`); never by value, since the size is unknown at compile time.",
+    "prompt_injection": "MANDATORY RULE: For container or wrapper types that should accept DSTs, write the parameter as `T: ?Sized` and use it only through references or owning smart pointers. For parameters used by value (returned, moved, stored inline), keep the implicit `Sized` bound.",
+    "anti_pattern": "// Implicit Sized: cannot wrap str or dyn Trait.\nstruct Wrapper<T> { inner: Box<T> }\nlet w: Wrapper<str> = /* ... */;        // ERROR: str is not Sized\nlet w: Wrapper<dyn Display> = /* ... */; // ERROR: dyn Display is not Sized",
+    "good_pattern": "struct Wrapper<T: ?Sized> { inner: Box<T> }\nlet w: Wrapper<str> = Wrapper { inner: \"hi\".to_owned().into_boxed_str() };\nlet w: Wrapper<dyn std::fmt::Display> = Wrapper { inner: Box::new(42_u32) };\n// Methods that move T by value still need T: Sized; reference-based methods are fine."
+  },
+  {
+    "id": "rust_quality_83_zst_markers",
+    "category": "Zero-Sized Types",
+    "source": "Rust for Rustaceans, ch. 2 §Zero-Sized Types; Rust Book ch. 5",
+    "triggers": ["ZST", "zero-sized type", "unit struct", "compile-time marker", "type witness", "Vec () no allocation"],
+    "rule_summary": "A zero-sized type (`struct A;`, `()`, `PhantomData<T>`, structs with all-ZST fields) costs no memory at runtime but carries information at compile time. Use them for typestate phases, capability tokens, type-level booleans, and marker bounds. `Vec<()>` never allocates element storage — pushes only update the length counter.",
+    "prompt_injection": "MANDATORY RULE: When you need a compile-time witness that an operation has happened or that a value belongs to a category, use a ZST. Unit structs, `PhantomData`, and ZST-only fields encode information in the type system at zero runtime cost.",
+    "anti_pattern": "// Runtime boolean to indicate an authentication state that is statically known.\nstruct Connection { authenticated: bool }\nimpl Connection {\n    fn send(&self, _msg: &str) {\n        assert!(self.authenticated, \"not authenticated\"); // runtime check\n    }\n}",
+    "good_pattern": "use std::marker::PhantomData;\n// ZST markers + typestate: invalid state unrepresentable at compile time.\nstruct Anon;        // 0 bytes\nstruct Authed;      // 0 bytes\nstruct Connection<S> { _state: PhantomData<S> }\nimpl Connection<Anon> {\n    fn login(self) -> Connection<Authed> {\n        Connection { _state: PhantomData }\n    }\n}\nimpl Connection<Authed> {\n    fn send(&self, _msg: &str) { /* compile-time guaranteed authenticated */ }\n}"
+  },
+  {
+    "id": "rust_quality_84_marker_auto_traits",
+    "category": "Marker and Auto Traits",
+    "source": "Rust for Rustaceans, ch. 2 §Auto Traits and Markers; Rust Reference §Auto Traits",
+    "triggers": ["auto trait", "Send Sync auto", "marker trait", "Eq Hash coherence", "derive Eq Hash agree", "manual auto trait"],
+    "rule_summary": "Auto traits (`Send`, `Sync`, `Unpin`, `UnwindSafe`, `RefUnwindSafe`) are inferred by the compiler from the fields of your type — `Sized` is implicit and special-cased by the compiler but is NOT an auto trait. Do not impl auto traits explicitly except `unsafe impl` for the rare type that wraps a raw pointer or other `!Send`/`!Sync` primitive whose external invariants you have audited. Non-auto coherence-bound traits require deliberate alignment when hand-implemented: `Hash` and `Eq` must agree (`a == b` implies `hash(a) == hash(b)`), and `Ord` and `PartialOrd` must agree (`cmp(a, b)` matches `partial_cmp(a, b).unwrap()`).",
+    "prompt_injection": "MANDATORY RULE: Do not explicitly impl auto traits for normal types — let the compiler propagate them from fields. Use `unsafe impl Send`/`Sync` only for types that wrap raw pointers or other `!Send`/`!Sync` primitives whose invariants you have audited. For non-auto coherence-bound traits (`Hash`/`Eq`, `Ord`/`PartialOrd`), keep manual impls in agreement so `a == b` implies `hash(a) == hash(b)` and `cmp(a, b)` implies `partial_cmp(a, b)`.",
+    "anti_pattern": "// Manual Eq ignores `version` (id-only equality), but derived Hash includes it.\n// Two items with same id but different versions are Eq (eq says so) but hash\n// to different values — `a == b` does NOT imply `hash(a) == hash(b)`. HashMap\n// will silently lose entries when a lookup uses a different version than insert.\n#[derive(Hash)] // includes version\nstruct Item { id: u64, version: u64 }\nimpl PartialEq for Item {\n    fn eq(&self, other: &Self) -> bool { self.id == other.id } // ignores version\n}\nimpl Eq for Item {}",
+    "good_pattern": "// Default: derive both, fields agree.\n#[derive(PartialEq, Eq, Hash)]\nstruct Item { id: u64, version: u64 }\n\n// Or: id-only identity, with Hash and Eq aligned manually.\nstruct Item2 { id: u64, version: u64 }\nimpl PartialEq for Item2 { fn eq(&self, o: &Self) -> bool { self.id == o.id } }\nimpl Eq for Item2 {}\nimpl std::hash::Hash for Item2 {\n    fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.id.hash(state); }\n}\n// Now: a == b ⟺ hash(a) == hash(b). Contract preserved."
+  },
+  {
+    "id": "rust_quality_85_allocation_hot_paths",
+    "category": "Allocation Discipline",
+    "source": "Rust for Rustaceans, ch. 9 §Allocation; Rust Performance Book §Heap Allocations",
+    "triggers": ["allocation hot path", "Vec with_capacity", "format! in loop", "buffer reuse", "preallocate", "avoid alloc", "reserve", "capacity growth", "Vec push"],
+    "rule_summary": "In hot paths, preallocate `Vec` and `String` with `with_capacity` for known sizes, avoid `format!`/`to_string` calls inside tight loops, and reuse buffers with `.clear()` rather than reallocating. Each `format!` allocates a fresh `String`; `write!` into a preallocated buffer with `std::fmt::Write` writes into the existing capacity (only reallocates if the buffer outgrows the initial estimate).",
+    "prompt_injection": "MANDATORY RULE: When a function runs in a hot path (per profile or by design), preallocate output buffers with `with_capacity`, route formatted output through `write!` against an existing buffer rather than `format!`, and reuse rather than recreate buffers across iterations. Each unjustified allocation in a hot loop is a measurable cost.",
+    "anti_pattern": "fn render_lines(items: &[Item]) -> String {\n    let mut out = String::new(); // 0 capacity — reallocates as it grows\n    for item in items {\n        out.push_str(&format!(\"{}\\n\", item)); // format! allocates a fresh String each iteration\n    }\n    out\n}",
+    "good_pattern": "use std::fmt::Write;\nfn render_lines(items: &[Item]) -> String {\n    let mut out = String::with_capacity(items.len() * 32); // preallocated estimate\n    for item in items {\n        let _ = write!(out, \"{}\\n\", item); // writes into the existing buffer; no per-iteration alloc\n    }\n    out\n}"
+  },
+  {
+    "id": "rust_quality_86_string_allocation",
+    "category": "String Allocation",
+    "source": "Rust for Rustaceans, ch. 1 §Cow; Rust Performance Book §Type Sizes; std docs §Box<str>",
+    "triggers": ["Cow str", "Box<str>", "static str", "string with_capacity", "string memory", "allocation strategy"],
+    "rule_summary": "Pick the right string type by use case: `&'static str` for compile-time strings (no allocation), `&str` for borrowed slices, `Box<str>` for owned-but-not-growable (drops the capacity field — saves ~8 bytes per string vs `String`), `String` for owned+growable, `Cow<'a, str>` for sometimes-borrowed-sometimes-owned. Defaulting everything to `String` allocates where you don't need to.",
+    "prompt_injection": "MANDATORY RULE: Choose the string type that matches the value's actual lifecycle. `String` is owned and growable — use it only when you need both. For struct fields known at compile time, use `&'static str`. For owned-but-frozen, use `Box<str>`. For sometimes-borrowed, use `Cow<'a, str>`. Excess `String` allocations compound across hot paths.",
+    "anti_pattern": "// Every field is String even though some are static or rarely modified.\nstruct Config {\n    name: String,        // even when name is always a built-in default like \"timeout\"\n    description: String, // even when often borrowed from a config file slice\n}\nfn demo() {\n    let _ = Config {\n        name: \"timeout\".to_owned(),       // unnecessary heap alloc\n        description: \"...\".to_owned(),\n    };\n}",
+    "good_pattern": "use std::borrow::Cow;\nstruct Config<'a> {\n    name: &'static str,        // no allocation for built-in defaults\n    description: Cow<'a, str>, // borrows when possible, owns when needed\n}\n// Owned-but-frozen field: Box<str> drops the unused capacity field.\nstruct Frozen { label: Box<str> }"
+  },
+  {
+    "id": "rust_quality_87_iterator_codegen",
+    "category": "Iterator Codegen",
+    "source": "Rust Performance Book §Bounds Checks; Crust of Rust: Iterators",
+    "triggers": ["iter elide bounds check", "indexed access bounds check", "iterator vectorize", "for i in 0..n", "compiler bounds proof"],
+    "rule_summary": "Use `iter()`/`iter_mut()` over indexed loops where possible. Iterators carry the structural guarantee that each element is touched exactly once, which lets the compiler reliably elide bounds checks, autovectorize, and inline aggressively. Indexed access (`arr[i]` in `for i in 0..arr.len()`) can also be optimized but the elision is conditional on the compiler proving `i < len`, which it doesn't always do for non-trivial loops.",
+    "prompt_injection": "MANDATORY RULE: Default to `iter()`/`iter_mut()` for elementwise traversal, not indexed loops. The iterator form gives the compiler a structural proof of safety; the indexed form requires the compiler to derive that proof from the loop bounds. Reach for indexed access only when you genuinely need an index alongside the value (use `.enumerate()` instead in many cases).",
+    "anti_pattern": "fn sum_indices(arr: &[i64]) -> i64 {\n    let mut total = 0;\n    for i in 0..arr.len() {     // each `arr[i]` may emit a bounds check\n        total += arr[i];\n    }\n    total\n}",
+    "good_pattern": "fn sum_iter(arr: &[i64]) -> i64 {\n    arr.iter().copied().sum() // bounds-check-free; autovectorizes on most targets\n}\nfn first_negative_index(arr: &[i64]) -> Option<usize> {\n    arr.iter().position(|&x| x < 0) // structural proof carried by the iterator\n}"
+  },
+  {
+    "id": "rust_quality_88_monomorphization_cost",
+    "category": "Monomorphization Cost",
+    "source": "Rust for Rustaceans, ch. 9 §Compile Times; Rust Performance Book §Type Sizes; cargo llvm-lines documentation",
+    "triggers": ["monomorphization", "code bloat", "binary size", "generic instantiation", "cargo llvm-lines", "cargo bloat"],
+    "rule_summary": "Each concrete instantiation of a generic function generates a separate copy in the binary. Hot path: generics win (inline, no indirection). Cold or rarely-used code with many instantiations: `dyn Trait` wins (single code copy, smaller binary, slightly slower call). Profile binary size with `cargo llvm-lines` or `cargo bloat` before introducing generics in cold code, and pair this rule with axiom 79 (when to switch to dyn).",
+    "prompt_injection": "MANDATORY RULE: Generics are not free — each new concrete `T` duplicates the function body. For cold or many-typed call sites, accept the indirect call cost of `dyn Trait` to keep binary size bounded. Profile, don't guess: `cargo llvm-lines` and `cargo bloat` show actual binary impact per generic.",
+    "anti_pattern": "// Library exports a heavily-generic decoder used in mostly-cold code paths.\n// Every concrete `T: Read` instantiates the entire decode tree separately.\npub fn decode_from<T: Read>(reader: T) -> Result<Doc, Error> { /* large impl */ }",
+    "good_pattern": "// Hot path: keep generics for the inner decoders that benefit from inlining.\npub fn decode_hot<T: Read>(reader: T) -> Result<Token, Error> { /* small, inlined */ }\n// Cold entry point: take &mut dyn Read, single code copy regardless of source.\npub fn decode_from(reader: &mut dyn Read) -> Result<Doc, Error> {\n    /* large impl, monomorphized once */\n}"
+  },
+  {
+    "id": "rust_quality_89_inline_hints",
+    "category": "Inline Hints",
+    "source": "Rust Reference §inline attribute; Rust Performance Book §Inlining",
+    "triggers": ["#[inline]", "inline always", "inline never", "cross-crate inline", "force inline"],
+    "rule_summary": "`#[inline]` *suggests* the compiler inline this function across crate boundaries (within a crate, the compiler decides regardless). `#[inline(always)]` is a *strong directive* — the compiler honors it in virtually all non-recursive cases, though it remains a hint and can be refused for recursive functions or some debug-build configurations. Rarely the right call: can hurt I-cache for large functions. `#[inline(never)]` disables inlining; useful for debugging codegen, profile attribution, or preserving symbols in stack traces.",
+    "prompt_injection": "MANDATORY RULE: Use `#[inline]` on small, hot, cross-crate-callable functions. Reserve `#[inline(always)]` for functions you have measured to need it, not as a generic perf incantation. Use `#[inline(never)]` deliberately for debugging or to keep a function present in profiles and stack traces.",
+    "anti_pattern": "// 200-line function annotated to \"make it fast\" — bloats every call site.\n// Likely net-negative: I-cache pressure outweighs the saved call overhead.\n#[inline(always)]\nfn render_complex_thing(/* ... */) -> Output { /* 200 lines */ }",
+    "good_pattern": "// Tiny accessor in a hot path: cross-crate inline is a clear win.\n#[inline]\npub fn count(&self) -> usize { self.items.len() }\n\n// Debugging codegen: keep this function distinct in profiles and stack traces.\n#[inline(never)]\nfn cold_path_for_diagnostics() { /* ... */ }"
+  },
+  {
+    "id": "rust_quality_90_enum_dispatch",
+    "category": "Enum Dispatch",
+    "source": "Rust for Rustaceans, ch. 2 §Trait Objects; enum_dispatch crate; Crust of Rust: Trait Objects",
+    "triggers": ["enum dispatch", "closed set dispatch", "enum vs dyn", "no vtable", "static heterogeneous"],
+    "rule_summary": "When the variant set is fixed at the library boundary (you control all impls), an enum dispatches faster than `Box<dyn Trait>`: no vtable, no indirect branch, the `match` compiles to direct branches or a jump table (depending on variant count) that the optimizer can specialize per arm. Use `dyn Trait` only when external code must add new variants. Caveat: when variants vary wildly in size, `Vec<MyEnum>` reserves space for the largest variant per element, so `Vec<Box<dyn Trait>>` (16-byte fat pointers) may use less memory — measure both for size-sensitive workloads. See also axiom 88 (monomorphization cost) for the open-set case where `dyn Trait` may still beat generics on binary size.",
+    "prompt_injection": "MANDATORY RULE: Reach for `dyn Trait` only when external crates need to add their own implementors. For closed-set polymorphism (your library knows all variants), define an enum and dispatch via `match`. The enum form is faster (no indirect call), more inspectable (exhaustive matches surface missed variants at compile time), and often clearer to read.",
+    "anti_pattern": "trait Shape { fn area(&self) -> f64; }\nstruct Circle(f64);\nstruct Square(f64);\nimpl Shape for Circle { fn area(&self) -> f64 { std::f64::consts::PI * self.0 * self.0 } }\nimpl Shape for Square { fn area(&self) -> f64 { self.0 * self.0 } }\n// vtable per element, indirect call per .area(); external crates can add Shape impls.\nlet shapes: Vec<Box<dyn Shape>> = vec![Box::new(Circle(1.0)), Box::new(Square(2.0))];",
+    "good_pattern": "enum Shape {\n    Circle(f64),\n    Square(f64),\n}\nimpl Shape {\n    fn area(&self) -> f64 {\n        match self {\n            Self::Circle(r) => std::f64::consts::PI * r * r,\n            Self::Square(s) => s * s,\n        }\n    }\n}\n// No vtable, direct call per .area(). External crates cannot add new variants —\n// that is the design choice; document it.\nlet shapes: Vec<Shape> = vec![Shape::Circle(1.0), Shape::Square(2.0)];"
+  },
+  {
+    "id": "rust_quality_91_struct_layout",
+    "category": "Struct Layout",
+    "source": "Rust Reference §Type Layout; Rust Performance Book §Type Sizes",
+    "triggers": ["struct layout", "field reorder", "padding", "alignment", "repr(C)", "size_of", "cache line", "false sharing", "cache padded"],
+    "rule_summary": "Rust's default `repr(Rust)` is allowed to reorder fields and does so in practice to minimize padding (the Reference makes few layout guarantees beyond size and alignment). `#[repr(C)]` (FFI, stable layout) freezes declaration order — manually order fields by *descending* alignment to avoid padding gaps. For hot-path structs accessed by separate cores, lay out with cache-line awareness (64-byte boundary on most x86-64; 128 on aarch64/Apple Silicon) to avoid false sharing.",
+    "prompt_injection": "MANDATORY RULE: Trust `repr(Rust)` to minimize padding by default. When you must use `#[repr(C)]` (FFI, stable layout, hand-tuned layout), order fields by descending alignment so smaller fields fill the trailing space without inserting padding. For shared cache-line state, separate hot fields onto distinct lines; `crossbeam-utils::CachePadded<T>` is the standard helper.",
+    "anti_pattern": "#[repr(C)]\nstruct Bad {\n    a: u8,   // 1 byte + 7 padding before the next u64\n    b: u64,  // 8 bytes\n    c: u8,   // 1 byte + 7 trailing padding to keep struct alignment\n}\n// size_of::<Bad>() == 24",
+    "good_pattern": "#[repr(C)]\nstruct Better {\n    b: u64,  // 8 bytes (largest first)\n    a: u8,   // 1 byte\n    c: u8,   // 1 byte + 6 trailing padding\n}\n// size_of::<Better>() == 16\n\n// Or: drop #[repr(C)] entirely and let the compiler reorder — `repr(Rust)` does\n// the equivalent reorder for you and may pick an even tighter layout.\nstruct AutoLayout { a: u8, b: u64, c: u8 }"
+  },
+  {
+    "id": "rust_quality_92_atomic_ordering",
+    "category": "Atomic Ordering",
+    "source": "Rust Reference §Atomics; Rust Performance Book §Atomics; Crust of Rust: Atomics",
+    "triggers": ["atomic ordering", "Relaxed", "Acquire", "Release", "SeqCst", "memory ordering"],
+    "rule_summary": "Pick the weakest ordering that satisfies your synchronization need. `Relaxed`: atomicity only, no ordering between threads (counters, stats). `Acquire` (loads) / `Release` (stores): synchronizes-with the paired op (one-flag-protects-data patterns). `AcqRel`: read-modify-write that does both. `SeqCst`: total global order across all SeqCst ops — strongest, slowest, expensive on weak-memory architectures.",
+    "prompt_injection": "MANDATORY RULE: `SeqCst` is the safest default but rarely the right one. Identify what synchronizes-with what: `Relaxed` for counters with no read-after-write across threads; `Acquire`/`Release` pairs for locks, channels, and one-shot signalling; `AcqRel` for fetch-update RMW; `SeqCst` only when you actually need a total global order (rare).",
+    "anti_pattern": "use std::sync::atomic::{AtomicU64, Ordering};\nlet counter = AtomicU64::new(0);\n// Stat counter that is never read with synchronization meaning — SeqCst is overkill.\ncounter.fetch_add(1, Ordering::SeqCst);",
+    "good_pattern": "use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};\n// Stat counter: no inter-thread ordering needed.\nlet counter = AtomicU64::new(0);\ncounter.fetch_add(1, Ordering::Relaxed);\n\n// One-shot signal: writer publishes data, then sets the flag with Release;\n// reader checks the flag with Acquire and only then reads the data.\nlet ready = AtomicBool::new(false);\n// writer side (real code wraps shared data in UnsafeCell or other atomics)\n// ...write data fields...\nready.store(true, Ordering::Release);\n// reader side\nwhile !ready.load(Ordering::Acquire) { std::hint::spin_loop(); }\n// ...read data fields, guaranteed visible..."
+  },
+  {
+    "id": "rust_quality_93_heap_discipline",
+    "category": "Heap Allocation Discipline",
+    "source": "Rust for Rustaceans, ch. 9 §Allocation; Rust Performance Book §Heap Allocations",
+    "triggers": ["Box small T", "stack vs heap", "unnecessary Box", "Box Copy type", "heap indirection"],
+    "rule_summary": "`Box<T>` is for trait objects, recursive types, or genuinely large values you need to move cheaply. Don't wrap small `Copy` or `Clone` types in `Box` for \"indirection\" — heap allocation costs an alloc/dealloc plus a pointer chase on every access. Stack values are faster, simpler, and the compiler optimizes them better. `Box<String>` and `Box<Vec<T>>` are double indirection through a type that already owns a heap allocation.",
+    "prompt_injection": "MANDATORY RULE: Reach for `Box<T>` only when one of three reasons applies — `Box<dyn Trait>` for trait-object polymorphism, `Box<Self>` for recursive types, or `Box<T>` for genuinely large `T` you want to move cheaply. For everything else, store `T` directly. `Box<u32>`, `Box<bool>`, and `Box<String>` are usually a code-smell.",
+    "anti_pattern": "struct Config {\n    timeout: Box<u32>,   // u32 is Copy and 4 bytes — Box adds alloc + pointer indirection for nothing\n    name: Box<String>,   // String already owns its bytes on the heap; Box<String> double-indirects\n}",
+    "good_pattern": "struct Config {\n    timeout: u32,   // stack, direct access\n    name: String,   // already heap-allocated; one indirection is enough\n}\n// Legitimate Box uses:\nstruct Plugin { handler: Box<dyn EventHandler> }            // trait object\nstruct LinkedList<T> { head: Option<Box<Node<T>>> }         // recursive type\nstruct Frame { huge_buffer: Box<[u8; 4 * 1024 * 1024]> }    // genuinely large; avoid stack overflow"
+  },
+  {
+    "id": "rust_quality_94_unsafe_block_discipline",
+    "category": "Unsafe Block Discipline",
+    "source": "Rust Reference §Unsafety; Rustonomicon §Working with Unsafe; clippy::undocumented_unsafe_blocks",
+    "triggers": ["SAFETY comment naming invariants", "unsafe block invariants", "undocumented_unsafe_blocks", "clippy undocumented unsafe", "audit trail unsafe", "invariants from # Safety section"],
+    "rule_summary": "Every `unsafe { ... }` block must be paired with a `// SAFETY: <which invariants this caller satisfies>` comment immediately above it. The comment names the obligations from the called API's `# Safety` section and explains why this caller meets them. The convention is enforced project-wide by `clippy::undocumented_unsafe_blocks`. A bare `unsafe { ... }` is a code review red flag — it asserts soundness without justifying it.",
+    "prompt_injection": "MANDATORY RULE: Never write a bare `unsafe { ... }` block. Pair each one with a `// SAFETY: ...` comment that names the specific invariants you are asserting and why they hold here (e.g., `the slice is non-empty by the early return above`, `the pointer comes from Box::into_raw and was never reborrowed`). The comment is the audit trail; it is what makes the unsafe block reviewable.",
+    "anti_pattern": "fn first_unchecked<T>(v: &[T]) -> &T {\n    // No SAFETY comment — reviewer cannot tell whether the caller checked emptiness.\n    unsafe { v.get_unchecked(0) }\n}",
+    "good_pattern": "fn first_unchecked<T>(v: &[T]) -> &T {\n    debug_assert!(!v.is_empty());\n    // SAFETY: caller-visible debug_assert and the &[T] type guarantee no other\n    // mutable borrow exists; index 0 is in bounds because v is non-empty by\n    // the function's documented precondition.\n    unsafe { v.get_unchecked(0) }\n}"
+  },
+  {
+    "id": "rust_quality_95_unsafe_fn_contract",
+    "category": "Unsafe Fn Contract",
+    "source": "Rust Reference §unsafe-fn; Rustonomicon §Safe and Unsafe APIs; clippy::missing_safety_doc",
+    "triggers": ["unsafe fn", "# Safety doc", "missing_safety_doc", "caller invariants", "unsafe fn contract", "safety preconditions"],
+    "rule_summary": "Declaring `unsafe fn foo()` says \"calling this requires invariants the type system cannot check.\" Document those preconditions in a `# Safety` rustdoc section above the function; callers must, in their own `// SAFETY:` comment at each call site, explain how *they* satisfy each precondition (substituting concrete justifications, not just restating the contract). Don't mark a function `unsafe` defensively — only mark it when a caller can break memory safety by misusing it. `clippy::missing_safety_doc` flags `pub unsafe fn` without `# Safety` docs.",
+    "prompt_injection": "MANDATORY RULE: When you write `unsafe fn`, write a `/// # Safety` rustdoc section listing every precondition a caller must uphold (e.g., \"`ptr` must be non-null and valid for `len * size_of::<T>()` bytes\"). If you cannot enumerate the preconditions, the function should not be `unsafe` — it is either safe (reword the API) or unsoundly designed (reshape the API).",
+    "anti_pattern": "// `unsafe` with no documentation — a caller has no way to know what to verify.\npub unsafe fn copy_n<T>(src: *const T, dst: *mut T, n: usize) {\n    std::ptr::copy_nonoverlapping(src, dst, n);\n}",
+    "good_pattern": "/// Copies `n` values of `T` from `src` to `dst`.\n///\n/// # Safety\n///\n/// - `src` must be valid for reads of `n * size_of::<T>()` bytes.\n/// - `dst` must be valid for writes of `n * size_of::<T>()` bytes.\n/// - The two regions must not overlap.\n/// - Both pointers must be properly aligned for `T`.\npub unsafe fn copy_n<T>(src: *const T, dst: *mut T, n: usize) {\n    // SAFETY: the four preconditions in this function's `# Safety` section\n    // are exactly those of `ptr::copy_nonoverlapping` (read-validity,\n    // write-validity, non-overlap, alignment); we forward them unchanged\n    // from the caller, who has signed our contract.\n    unsafe { std::ptr::copy_nonoverlapping(src, dst, n) }\n}"
+  },
+  {
+    "id": "rust_quality_96_unsafe_block_scope",
+    "category": "Unsafe Block Scope",
+    "source": "Rust for Rustaceans, ch. 9 §Working with Unsafe; Rustonomicon §Working with Unsafe",
+    "triggers": ["smallest unsafe block", "minimize unsafe surface", "narrow unsafe block", "unsafe block scope", "auditable unsafe"],
+    "rule_summary": "Wrap only the operation that genuinely requires `unsafe`, not the surrounding logic. A 1- or 2-line `unsafe { ... }` block isolates exactly the operation under review; a multi-line block hides which operations are actually unsafe inside otherwise-safe code. Bounds checks, pointer construction, and length computation should live outside the unsafe block whenever possible.",
+    "prompt_injection": "MANDATORY RULE: When you reach for `unsafe`, scope it to the exact unsafe operation. Compute pointers, lengths, and bounds checks in safe code; drop into `unsafe { ... }` only for the dereference, the `from_raw_parts`, the `assume_init`, etc. The reviewer should be able to read the unsafe block in isolation and see the single operation it covers.",
+    "anti_pattern": "// One large unsafe block hides which line is the actually-unsafe one.\nunsafe fn split_at_mut_unchecked<T>(s: &mut [T], mid: usize) -> (&mut [T], &mut [T]) {\n    unsafe {\n        let len = s.len();\n        let ptr = s.as_mut_ptr();\n        // bounds reasoning, pointer arithmetic, and the actual unsafe ops all\n        // live inside the same block — reviewer must squint at every line.\n        (\n            std::slice::from_raw_parts_mut(ptr, mid),\n            std::slice::from_raw_parts_mut(ptr.add(mid), len - mid),\n        )\n    }\n}",
+    "good_pattern": "/// # Safety\n/// `mid <= s.len()` must hold.\nunsafe fn split_at_mut_unchecked<T>(s: &mut [T], mid: usize) -> (&mut [T], &mut [T]) {\n    let len = s.len();\n    let ptr = s.as_mut_ptr();\n    // SAFETY: caller guarantees mid <= len. ptr came from `&mut [T]` so it is\n    // non-null, properly aligned for T, points to len consecutive initialized\n    // values, and the allocation fits within isize::MAX. The two halves are\n    // disjoint by construction so no aliasing &mut is created and no other\n    // pointer reads or writes this memory for the borrow's lifetime.\n    let left = unsafe { std::slice::from_raw_parts_mut(ptr, mid) };\n    // SAFETY: same caller guarantee and same alignment/initialization/size\n    // properties carried over from the original `&mut [T]`. `ptr.add(mid)` is\n    // in-bounds because mid <= len, and the right half is disjoint from the\n    // left because their byte ranges do not overlap.\n    let right = unsafe { std::slice::from_raw_parts_mut(ptr.add(mid), len - mid) };\n    (left, right)\n}"
+  },
+  {
+    "id": "rust_quality_97_maybe_uninit",
+    "category": "MaybeUninit",
+    "source": "std::mem::MaybeUninit; Rustonomicon §Working with Uninitialized Memory; std::ptr::addr_of_mut!",
+    "triggers": ["MaybeUninit", "uninitialized memory", "addr_of_mut", "assume_init", "partially initialized", "mem::uninitialized"],
+    "rule_summary": "`mem::uninitialized<T>()` is undefined behavior for almost every `T` and is deprecated; reach for `MaybeUninit<T>` instead. Pattern: `let mut x = MaybeUninit::<T>::uninit();` then write each field through `(&raw mut (*x.as_mut_ptr()).field).write(value)` (or, on Rust < 1.82, the now-soft-deprecated equivalent `addr_of_mut!((*x.as_mut_ptr()).field).write(value)`); never go through a `&mut T` to the partially-initialized value. Call `assume_init()` only once *every* field is initialized. Critical: constructing a `&mut T` to a `MaybeUninit<T>` is itself undefined behavior — the `&mut` is invalid the moment it exists, regardless of whether you read from it.",
+    "prompt_injection": "MANDATORY RULE: For delayed initialization use `MaybeUninit<T>`, not `mem::uninitialized` (deprecated, immediate UB for non-zero-sized non-Copy types). Write fields through raw pointers via `&raw mut` (or, on older toolchains, the soft-deprecated `addr_of_mut!`), never through a `&mut T` to the partially-initialized value. Call `assume_init()` only after every field has been written.",
+    "anti_pattern": "use std::mem::MaybeUninit;\nstruct Pair { a: u32, b: String }\nlet mut p = MaybeUninit::<Pair>::uninit();\n// UB: &mut Pair is invalid because Pair is not yet initialized; the mere\n// existence of this reference is undefined behavior, even before reading.\nlet pref: &mut Pair = unsafe { &mut *p.as_mut_ptr() };\npref.a = 1;\npref.b = String::from(\"hi\");",
+    "good_pattern": "use std::mem::MaybeUninit;\nuse std::ptr::addr_of_mut;\nstruct Pair { a: u32, b: String }\nlet mut p = MaybeUninit::<Pair>::uninit();\nlet ptr = p.as_mut_ptr();\n// SAFETY: addr_of_mut! takes a place expression and yields a raw pointer\n// without materializing a &mut to the partially-initialized Pair.\nunsafe {\n    addr_of_mut!((*ptr).a).write(1);\n    addr_of_mut!((*ptr).b).write(String::from(\"hi\"));\n}\n// SAFETY: every field of Pair has been initialized above.\nlet pair: Pair = unsafe { p.assume_init() };"
+  },
+  {
+    "id": "rust_quality_98_unsafe_cell",
+    "category": "UnsafeCell",
+    "source": "std::cell::UnsafeCell; Rust Reference §Interior Mutability; Rustonomicon §Aliasing",
+    "triggers": ["UnsafeCell", "interior mutability primitive", "shared mutability", "Cell RefCell Mutex source", "shared reference to mutable conversion"],
+    "rule_summary": "`UnsafeCell<T>` is the *only* type the language permits to obtain a `*mut T` from a shared reference (`&UnsafeCell<T>` → `.get()` → `*mut T`). Every safe interior-mutability type (`Cell`, `RefCell`, `Mutex`, `RwLock`, atomics, `OnceCell`) is built on top of it. Casting `&T` to `&mut T` through any other path is undefined behavior even if no one is currently reading the `&T`. Don't roll a custom `Cell` with raw pointer casts; use the existing wrappers, or build directly on `UnsafeCell` with documented invariants.",
+    "prompt_injection": "MANDATORY RULE: For shared-reference mutation, pick the safest existing wrapper (`Cell` for Copy, `RefCell` for !Copy single-threaded, `Mutex`/`RwLock` for cross-thread, atomics for primitives). If none fit, build on `UnsafeCell<T>` with explicit safety documentation. Never cast `*const T` to `*mut T` to mutate behind a shared reference unless `T` is inside an `UnsafeCell` — that's UB regardless of whether anyone observes the mutation.",
+    "anti_pattern": "// The cast itself is fine — pointer-type punning is well-defined. The UB is\n// the *write through* `*mut i32` to memory that is borrowed as `&i32`: the\n// shared reference guarantees the value does not change while it is live, and\n// `value` is not inside an `UnsafeCell`. The borrow checker accepts the code,\n// but the abstract machine does not.\nfn bad_set(value: &i32, new: i32) {\n    let ptr = value as *const i32 as *mut i32;\n    unsafe { *ptr = new; }\n}",
+    "good_pattern": "use std::cell::Cell;\n// Sound: Cell wraps an UnsafeCell internally and exposes a safe API.\nfn good_set(slot: &Cell<i32>, new: i32) {\n    slot.set(new);\n}\n// Or, when the existing wrappers don't fit, build on UnsafeCell directly:\nuse std::cell::UnsafeCell;\nstruct MyCell<T> { inner: UnsafeCell<T> }\nimpl<T> MyCell<T> {\n    /// # Safety\n    /// Caller must ensure no other reference (shared or unique) into `inner`\n    /// is live when this method runs. Validity, alignment, and initialization\n    /// are upheld by `MyCell`'s own invariants: `UnsafeCell::get` returns a\n    /// valid, properly-aligned `*mut T` that points to an initialized `T` for\n    /// as long as `&self` is live.\n    unsafe fn replace(&self, new: T) -> T {\n        // SAFETY: ptr::replace requires (1) valid for reads and writes, (2)\n        // properly aligned, (3) points to an initialized T. (1)-(3) follow\n        // from MyCell's structural invariants. The fourth requirement — no\n        // other live reference into `inner` — is the caller's obligation.\n        unsafe { std::ptr::replace(self.inner.get(), new) }\n    }\n}"
+  },
+  {
+    "id": "rust_quality_99_aliasing",
+    "category": "Aliasing",
+    "source": "Rustonomicon §Aliasing; Rustonomicon §References; Stacked Borrows model (Rust unsafe code guidelines)",
+    "triggers": ["aliasing", "pointer provenance", "Stacked Borrows", "&mut from raw", "reference aliasing", "raw pointer to mut"],
+    "rule_summary": "Rust's reference rules apply *everywhere a reference is live*, not just where the borrow checker can see them: a `&mut T` is unique (no other reference to the same location), a `&T` is shared (any number of `&T`, but no `&mut T` to the same location). Raw pointers do not impose aliasing rules, but the moment you materialize a `&mut T` from a raw pointer, every other live reference to that location becomes invalid under the Stacked Borrows model. Keep raw pointers raw until the last moment; convert to `&T`/`&mut T` only when you can prove no other reference is live.",
+    "prompt_injection": "MANDATORY RULE: Treat references as exclusive (`&mut`) or shared (`&`) globally, not lexically. When you cross between safe and unsafe code with raw pointers, do not materialize a `&mut T` from a raw pointer if any other reference to the same allocation is live — even a `&T`, even one that was created earlier and is about to be dropped. The Stacked Borrows model says the `&mut` invalidates the earlier reference at the moment the `&mut` is created.",
+    "anti_pattern": "let mut x = 1u32;\nlet ptr: *mut u32 = &mut x;\n// `shared` is a live &u32 borrow rooted at `ptr`.\nlet shared: &u32 = unsafe { &*ptr };\n// UB under Stacked Borrows: materializing &mut u32 from `ptr` invalidates\n// `shared` at the moment the &mut is created, before any read happens.\n// The subsequent read through `shared` is undefined behavior.\nlet exclusive: &mut u32 = unsafe { &mut *ptr };\n*exclusive = 2;\nlet _ = *shared;",
+    "good_pattern": "let mut x = 1u32;\nlet ptr: *mut u32 = &mut x;\n// Stay in raw pointers while both reads/writes are needed; raw pointers do\n// not impose aliasing, so `read`/`write` through `ptr` is sound.\nunsafe {\n    let cur = ptr.read();\n    ptr.write(cur + 1);\n}\n// SAFETY: ptr is valid for the lifetime of x, and no other reference to x\n// is live at this point (the raw-pointer ops above produced no borrow).\nlet final_ref: &u32 = unsafe { &*ptr };\nassert_eq!(*final_ref, 2);"
+  },
+  {
+    "id": "rust_quality_100_ffi_boundary",
+    "category": "FFI Boundary",
+    "source": "Rust Reference §Foreign Function Interface; Rust for Rustaceans, ch. 11 §FFI; std::panic::catch_unwind; RFC 2945 (extern \"C-unwind\")",
+    "triggers": ["extern C panic", "catch_unwind", "FFI boundary panic", "extern C generic", "FFI references", "unwind UB"],
+    "rule_summary": "Three rules at the `extern \"C\"` boundary: (1) A Rust `panic!` that tries to unwind across the default `extern \"C\"` ABI is turned into a process abort (RFC 2945, stabilized 1.71); a *foreign* unwind (e.g. C++ exception) crossing `extern \"C\"` in either direction is still undefined behavior. To recover from panics with an error code instead of aborting, wrap the body in `std::panic::catch_unwind` and map `Err` into a sentinel value — but note that `catch_unwind` only catches *unwinding* panics; under a `panic = \"abort\"` profile the process aborts before the closure can return. The opt-in `extern \"C-unwind\"` ABI lets panics propagate across the boundary safely. (2) Never expose Rust references (`&T`/`&mut T`) across the boundary — C cannot uphold validity or aliasing invariants. Use `*const T`/`*mut T` and document the lifetime/ownership rules. (3) A generic `extern \"C\" fn foo<T>(...)` compiles, but it has no single mangled symbol for C to link against; always write a concrete monomorphic wrapper per `T` you expose.",
+    "prompt_injection": "MANDATORY RULE: Every `extern \"C\" fn` body that wants to recover (rather than abort the process) on panic wraps its work in `std::panic::catch_unwind` and converts panics into a sentinel error value. Function signatures use `*const T`/`*mut T`, never `&T`/`&mut T`, and the rustdoc above the function documents who allocates, who frees, what null/length conventions hold, and the aliasing precondition. No generic `extern \"C\"` functions — they compile but have no single symbol for C to link against, so write concrete `extern \"C\" fn parse_u32_buffer(...)` wrappers around generic helpers.",
+    "anti_pattern": "// Three problems stacked: panic crossing the boundary aborts the process\n// (not what a library author wants), &mut MyType is exposed (C cannot uphold\n// aliasing/validity invariants), and the function is generic (compiles, but\n// produces no single linkable symbol for C — the no_mangle_generic_items\n// warning fires for that reason).\n#[unsafe(no_mangle)]\npub extern \"C\" fn process<T>(value: &mut T) -> i32 {\n    panic!(\"unimplemented\"); // panic across extern \"C\" -> abort, not graceful\n}",
+    "good_pattern": "use std::panic::catch_unwind;\n\n#[repr(C)]\npub struct MyType { field: u32 }\n\n/// Processes a MyType value.\n///\n/// # Safety\n/// `value` must be a non-null pointer to a valid MyType for the duration of\n/// the call, and no other reference (Rust or C) may alias `*value` while this\n/// call runs. Caller retains ownership; this function does not free.\n///\n/// Returns 0 on success, -1 on caller error, -2 on internal panic.\n#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn my_process(value: *mut MyType) -> i32 {\n    if value.is_null() { return -1; }\n    catch_unwind(|| {\n        // SAFETY: caller-documented non-null, validity, and exclusive-access\n        // preconditions; the &mut lives only inside this closure.\n        let v = unsafe { &mut *value };\n        v.field = v.field.saturating_add(1);\n        0\n    })\n    .unwrap_or(-2) // recover from panic with an error code instead of abort\n}"
+  },
+  {
+    "id": "rust_quality_101_ffi_layout",
+    "category": "FFI Layout",
+    "source": "Rust Reference §Type Layout (repr(C), repr(<int>)); std::ptr::NonNull; std::ffi::{c_int, c_uchar, c_char}",
+    "triggers": ["repr(C)", "FFI safe layout", "Option NonNull", "c_int c_uchar", "FFI types", "stable layout"],
+    "rule_summary": "Types crossing the FFI boundary need a stable layout. `#[repr(C)]` on structs and unions matches the C ABI; `#[repr(<int>)]` (e.g. `#[repr(u8)]`) gives enums a stable discriminant layout; default `repr(Rust)` is *not* stable and must not cross. For nullable pointers use `Option<NonNull<T>>` — niche optimization makes it the same size as `*mut T` and uses the null bit pattern as `None`. Use the concrete ABI types from `std::ffi` (`c_int`, `c_uchar`, `c_char`) rather than Rust's `i32`/`u8`/`i8` to make the C-side mapping explicit.",
+    "prompt_injection": "MANDATORY RULE: Every type that appears in an `extern \"C\"` signature or as a field of one must have an FFI-safe layout. Annotate structs and unions with `#[repr(C)]`; annotate enums with `#[repr(u8)]` (or another integer); use `Option<NonNull<T>>` instead of `*mut T` when null is meaningful (you get the null check for free in pattern matches); use `c_int`/`c_char`/`c_uchar` for primitives so the C header generator and the reader both see the intended ABI mapping.",
+    "anti_pattern": "// repr(Rust) — the field order can change between compiler versions,\n// breaking C callers that assumed declaration order.\npub struct Header {\n    pub kind: u8,\n    pub length: u32,\n}\n// `improper_ctypes` warns: Vec<u8> has no stable layout. The Rust side\n// compiles (extern blocks are unsafe under 2024 edition); the lint exists\n// because *calling* this from C is undefined behavior — C cannot construct\n// a valid Vec<u8>.\nunsafe extern \"C\" {\n    fn read(out: Vec<u8>) -> i32;\n}",
+    "good_pattern": "use std::ffi::{c_int, c_uchar};\nuse std::ptr::NonNull;\n\n#[repr(C)]\npub struct Header {\n    pub kind: c_uchar,\n    pub length: c_int,\n    // Niche-optimized nullable pointer: same size as *mut Body, distinguishes\n    // null at the type level so callers must pattern-match.\n    pub body: Option<NonNull<Body>>,\n}\n\n#[repr(C)]\npub struct Body {\n    pub bytes: *mut c_uchar,\n    pub len: usize,\n}\n\n#[repr(u8)]\npub enum Status { Ok = 0, Err = 1 }"
+  },
+  {
+    "id": "rust_quality_102_ffi_strings",
+    "category": "FFI Strings",
+    "source": "std::ffi::{CStr, CString}; Rust Reference §Foreign Function Interface; Rust for Rustaceans, ch. 11 §Strings",
+    "triggers": ["CStr from_ptr", "CString into_raw", "FFI string ownership", "c_char buffer", "ptr len pair", "C string ownership"],
+    "rule_summary": "Strings cross the FFI boundary as `*const c_char` (or `*mut`) with documented ownership: the type does not encode who frees, so the rustdoc must. `CStr::from_ptr(p)` borrows for the duration of `'a` (caller retains ownership); `CString::into_raw()` transfers ownership *out* of Rust and a matching `CString::from_raw()` reclaims it back. Buffers (non-string) cross as `(ptr: *const T, len: usize)` pairs — never raw pointer alone, because length is not recoverable on the C side.",
+    "prompt_injection": "MANDATORY RULE: Every C string parameter has its ownership documented in the rustdoc: \"caller retains and frees\" (use `CStr::from_ptr` for a borrow), or \"ownership transferred to Rust, will be freed by Rust\" (use `CString::from_raw`), or \"Rust transfers ownership; C must call <free_fn>\" (return `CString::into_raw`). Buffers are always `(ptr, len)` pairs; never expose a length-less raw pointer to a buffer.",
+    "anti_pattern": "use std::ffi::c_char;\n// Returns a C string with no documented ownership convention. Caller has\n// no idea whether they should call free, a Rust-provided destructor, or\n// nothing at all (which leaks).\n#[unsafe(no_mangle)]\npub extern \"C\" fn build_message() -> *const c_char {\n    let s = std::ffi::CString::new(\"hello\").unwrap();\n    s.as_ptr() // dangling: CString drops at end of scope!\n}",
+    "good_pattern": "use std::ffi::{CStr, CString, c_char};\n\n/// Borrows a C string for inspection. The caller retains ownership.\n///\n/// # Safety\n/// `s` must be a non-null, NUL-terminated C string valid for the call.\n#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn message_len(s: *const c_char) -> usize {\n    if s.is_null() { return 0; }\n    // SAFETY: caller's documented non-null + NUL-terminated precondition.\n    unsafe { CStr::from_ptr(s) }.to_bytes().len()\n}\n\n/// Builds a Rust-owned C string and transfers ownership to C.\n/// C must release the value with `free_message`, not `free`.\n#[unsafe(no_mangle)]\npub extern \"C\" fn build_message() -> *mut c_char {\n    CString::new(\"hello\").map(CString::into_raw).unwrap_or(std::ptr::null_mut())\n}\n\n/// Reclaims and frees a string previously returned by `build_message`.\n#[unsafe(no_mangle)]\npub unsafe extern \"C\" fn free_message(s: *mut c_char) {\n    if s.is_null() { return; }\n    // SAFETY: caller passes a pointer obtained from CString::into_raw\n    // and never freed by any other path.\n    drop(unsafe { CString::from_raw(s) });\n}"
   }
 ]

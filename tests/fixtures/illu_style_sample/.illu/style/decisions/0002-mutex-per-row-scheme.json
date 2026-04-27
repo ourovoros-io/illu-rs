@@ -1,0 +1,15 @@
+{
+  "id": "decision_replace_mutex_per_row",
+  "title": "Replace mutex-per-row with sharded RwLock cache",
+  "status": "superseded",
+  "date": "2026-03-02",
+  "context": "Original cache used one Mutex per row to allow fine-grained locking. Profiling under concurrent read load showed catastrophic contention from the pthread mutex syscall overhead even when no two threads ever touched the same row.",
+  "decision": "We chose a 64-shard RwLock<HashMap<Key, Value>> scheme. Reads are uncontended within a shard; writers take the per-shard write lock. Hot-key fairness is not required for our workload.",
+  "alternatives_considered": [
+    { "option": "Keep per-row Mutex", "why_rejected": "Profiler showed contention even on disjoint rows; per-row granularity wasn't paying for its overhead." },
+    { "option": "DashMap", "why_rejected": "External dependency we can avoid for a 64-shard scheme that's <100 LOC." }
+  ],
+  "consequences": "Cache implementation is a custom 64-shard map; readers see uncontended access for ~98% of requests in production. Sharding is fixed at compile time. This decision was later superseded by switching to a fully lock-free structure when the contention shifted to the write path.",
+  "related_axioms": ["rust_quality_73_interior_mutability_selection"],
+  "related_files": ["src/cache/sharded.rs"]
+}

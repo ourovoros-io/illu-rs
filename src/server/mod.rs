@@ -247,6 +247,33 @@ pub struct IlluServer {
 impl IlluServer {
     #[must_use]
     pub fn new(db: Database, config: IndexConfig, registry: crate::registry::Registry) -> Self {
+        // Phase 3 project-style overrides: load `.illu/style/project.json`
+        // (relative to the database's repo root) into the process-global
+        // cache. Errors here are non-fatal — a misconfigured or missing
+        // file must not prevent the server from starting; tools fall back
+        // to the universal axiom corpus instead.
+        match db.repo_root() {
+            Some(root) => {
+                if let Err(e) = tools::project_style::init(root) {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to load .illu/style/project.json; proceeding without overrides"
+                    );
+                }
+                if let Err(e) = tools::decisions::init(root) {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to load .illu/style/decisions/; proceeding without decisions"
+                    );
+                }
+            }
+            None => {
+                tracing::debug!(
+                    "database has no repo root; skipping .illu/style/project.json and .illu/style/decisions/ loads"
+                );
+            }
+        }
+
         Self {
             db: std::sync::Arc::new(Mutex::new(db)),
             config: std::sync::Arc::new(config),
@@ -778,7 +805,34 @@ struct CrossCallpathParams {
 struct AxiomsParams {
     /// Search term for axioms
     query: String,
+    /// Optional token budget for the response. When set, results are
+    /// truncated in score order so cumulative estimated tokens stay
+    /// within budget. When omitted, behavior is unchanged from prior
+    /// phases (caps at `MAX_AXIOM_RESULTS` results regardless of size).
+    #[serde(default)]
+    max_tokens: Option<u32>,
 }
+
+#[derive(Deserialize, JsonSchema)]
+struct ExemplarsParams {
+    /// Search term for exemplars
+    query: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct CritiqueParams {
+    /// Unified-diff output (e.g. from `git diff`).
+    diff: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct DecisionsParams {
+    /// Search term for decisions
+    query: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ProjectStyleParams {}
 
 #[derive(Deserialize, JsonSchema)]
 struct StdDocsParams {
@@ -935,9 +989,73 @@ impl IlluServer {
         &self,
         Parameters(params): Parameters<AxiomsParams>,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!(query = %params.query, "Tool call: axioms");
+        tracing::info!(query = %params.query, max_tokens = ?params.max_tokens, "Tool call: axioms");
         let _guard = crate::status::StatusGuard::new(&format!("axioms ▸ {}", params.query));
-        let result = tools::axioms::handle_axioms(&params.query).map_err(to_mcp_err)?;
+        // Calls `handle_axioms_with_style` directly so the caller-supplied
+        // token budget reaches the budget-walk in axioms.rs. The thin
+        // `handle_axioms` wrapper still threads `None` for use by
+        // `src/api.rs` consumers that have no MCP-side budget concern.
+        let style = crate::server::tools::project_style::project_style();
+        let result =
+            tools::axioms::handle_axioms_with_style(&params.query, style, params.max_tokens)
+                .map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "exemplars",
+        description = "Query the curated Rust Exemplars database. Returns up to 4 compile-checked Rust files demonstrating idiomatic integrated patterns, with cross-references to the axioms each demonstrates. Use this when you want to see what an idiomatic solution looks like in practice, not just rule-by-rule guidance."
+    )]
+    async fn exemplars(
+        &self,
+        Parameters(params): Parameters<ExemplarsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(query = %params.query, "Tool call: exemplars");
+        let _guard = crate::status::StatusGuard::new(&format!("exemplars ▸ {}", params.query));
+        let result = tools::exemplars::handle_exemplars(&params.query).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "critique",
+        description = "Critique a unified diff for potential axiom violations. Runs a small menu of regex-based detectors over added lines and returns a Markdown summary listing each potential violation by file:line, axiom ID + title, and severity (info/warning/error). Detectors cover unsafe block discipline, unsafe fn contracts, Box<CopyType>, and mem::uninitialized. Output is advisory — false positives exist."
+    )]
+    async fn critique(
+        &self,
+        Parameters(params): Parameters<CritiqueParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(diff_len = params.diff.len(), "Tool call: critique");
+        let _guard =
+            crate::status::StatusGuard::new(&format!("critique ▸ {} bytes", params.diff.len()));
+        let result = tools::critique::handle_critique(&params.diff).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "project_style",
+        description = "Show the active project style overrides loaded from `.illu/style/project.json`. Lists axiom overrides (ignored/demoted/noted/elevated) and project-local axioms. Use this to inspect why an axiom was filtered out or got an unexpected ranking, or to review the project conventions encoded in the file."
+    )]
+    async fn project_style(
+        &self,
+        Parameters(_params): Parameters<ProjectStyleParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Tool call: project_style");
+        let _guard = crate::status::StatusGuard::new("project_style");
+        let result = tools::project_style::handle_project_style().map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "decisions",
+        description = "Query the project's design records loaded from `.illu/style/decisions/`. Returns up to 4 ADR-style decisions matching the query, with full context/decision/alternatives/consequences sections plus related axiom and file links. Use this to recover the rationale behind project-specific architectural choices."
+    )]
+    async fn decisions(
+        &self,
+        Parameters(params): Parameters<DecisionsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(query = %params.query, "Tool call: decisions");
+        let _guard = crate::status::StatusGuard::new(&format!("decisions ▸ {}", params.query));
+        let result = tools::decisions::handle_decisions(&params.query).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

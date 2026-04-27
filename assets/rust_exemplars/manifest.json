@@ -1,0 +1,85 @@
+{
+  "exemplars": [
+    {
+      "slug": "errors/api_error",
+      "category": "Error Design",
+      "title": "Layered API error hierarchy",
+      "description": "Public ApiError enum with stable variants, internal source chain via std::error::Error::source, helper constructors. The pattern thiserror's #[derive(Error)] generates, spelled out for clarity.",
+      "triggers": ["api error hierarchy", "error type design", "thiserror enum", "error source chain", "stable error variants"],
+      "axioms_demonstrated": ["rust_quality_57_error_source_chain", "rust_quality_58_wrap_vs_propagate"],
+      "source": "thiserror documentation; Rust for Rustaceans, ch. 4 §Error Handling"
+    },
+    {
+      "slug": "ownership/cow_string",
+      "category": "Cow Strings",
+      "title": "Cow<str> for sometimes-borrowed config",
+      "description": "Returns the input slice unchanged when no normalization is needed, only allocating on the slow path. Demonstrates Cow's role in avoiding the always-clone-because-API-takes-String anti-pattern.",
+      "triggers": ["Cow str example", "borrow when possible", "string normalize Cow", "lazy allocation Cow"],
+      "axioms_demonstrated": ["rust_quality_86_string_allocation"],
+      "source": "Rust for Rustaceans, ch. 1 §Cow"
+    },
+    {
+      "slug": "ownership/drop_guard",
+      "category": "RAII Drop Guard",
+      "title": "Drop-guard for paired setup/teardown",
+      "description": "RAII helper that runs an arbitrary closure on drop. Carries cleanup through panic unwinding and early returns; .dismiss() consumes the guard without firing the closure on the success path.",
+      "triggers": ["drop guard example", "RAII cleanup", "scope guard pattern", "panic safe cleanup"],
+      "axioms_demonstrated": ["rust_quality_71_drop_order"],
+      "source": "Rust for Rustaceans, ch. 1 §Drop; scopeguard crate"
+    },
+    {
+      "slug": "types/sealed_trait",
+      "category": "Sealed Trait",
+      "title": "Sealed trait with private supertrait",
+      "description": "Public trait that can be called externally but only implemented within this crate. The seal is enforced by a private Sealed supertrait that external crates cannot name and therefore cannot satisfy.",
+      "triggers": ["sealed trait example", "private supertrait", "closed implementation", "extension safe"],
+      "axioms_demonstrated": ["rust_quality_76_sealed_traits"],
+      "source": "Rust for Rustaceans, ch. 2 §Trait Design"
+    },
+    {
+      "slug": "types/typestate_builder",
+      "category": "Type-state Builder",
+      "title": "Type-state builder with required-field tracking",
+      "description": "Builder where required fields are encoded in the generic type parameters via marker types. Calling .build() before every required field is set is a compile error, not a runtime panic — no Option, no unwrap.",
+      "triggers": ["type state builder", "compile time required field", "ZST marker builder", "phantom builder state"],
+      "axioms_demonstrated": ["rust_quality_83_zst_markers"],
+      "source": "Rust for Rustaceans, ch. 3 §Type-state; typed-builder crate"
+    },
+    {
+      "slug": "types/extension_trait",
+      "category": "Extension Trait",
+      "title": "Sealed extension trait on a foreign type",
+      "description": "Adds methods to a foreign type (str) via a trait. Sealed so external crates cannot add competing impls; the seal also prevents accidental shadowing of methods we add later.",
+      "triggers": ["extension trait example", "extending foreign type", "sealed extension trait", "method on str"],
+      "axioms_demonstrated": ["rust_quality_76_sealed_traits"],
+      "source": "Rust for Rustaceans, ch. 2 §Extension Traits"
+    },
+    {
+      "slug": "perf/closed_dispatch",
+      "category": "Enum Dispatch",
+      "title": "Closed-set command dispatch via enum + match",
+      "description": "Counter that processes a stream of commands via an enum + match rather than Box<dyn Command>. No vtable, no indirect call; the match compiles to direct branches; a Vec<Command> or &[Command] packs each element rather than indirecting through a fat pointer.",
+      "triggers": ["enum dispatch example", "match closed set", "command pattern enum", "no dyn dispatch"],
+      "axioms_demonstrated": ["rust_quality_90_enum_dispatch", "rust_quality_79_static_vs_dynamic_dispatch"],
+      "source": "Rust for Rustaceans, ch. 2 §Trait Objects; enum_dispatch crate"
+    },
+    {
+      "slug": "unsafe_ffi/maybe_uninit_init",
+      "category": "MaybeUninit Init",
+      "title": "Incremental MaybeUninit initialization with &raw mut",
+      "description": "Builds a fixed-size buffer field-by-field through &raw mut, never materializing a &mut to the partially-initialized value. Each unsafe block is scoped to the exact unsafe operation; each has a SAFETY comment naming the invariants.",
+      "triggers": ["MaybeUninit example", "raw mut init pattern", "field by field init", "incremental struct init"],
+      "axioms_demonstrated": ["rust_quality_97_maybe_uninit", "rust_quality_94_unsafe_block_discipline", "rust_quality_96_unsafe_block_scope"],
+      "source": "std::mem::MaybeUninit rustdoc; Rustonomicon §Working with Uninitialized Memory"
+    },
+    {
+      "slug": "unsafe_ffi/c_string_wrapper",
+      "category": "FFI Strings Example",
+      "title": "FFI string borrow-and-transfer pair",
+      "description": "Three extern \"C\" functions: reading the length of a caller-owned NUL-terminated C string (CStr::from_ptr borrow), building a Rust-owned C string transferred to the caller (CString::into_raw), and reclaiming such a pointer for free (CString::from_raw). Each fn body is panic-isolated via catch_unwind.",
+      "triggers": ["FFI string wrapper", "extern C string ownership", "CStr CString example", "FFI safe panic"],
+      "axioms_demonstrated": ["rust_quality_100_ffi_boundary", "rust_quality_102_ffi_strings", "rust_quality_94_unsafe_block_discipline", "rust_quality_95_unsafe_fn_contract"],
+      "source": "std::ffi::CStr / CString rustdoc; Rust Reference §Foreign Function Interface"
+    }
+  ]
+}

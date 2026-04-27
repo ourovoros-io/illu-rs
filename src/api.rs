@@ -108,6 +108,11 @@ pub mod server {
             pub use crate::server::tools::crate_impact::handle_crate_impact;
         }
 
+        /// Diff critique tool.
+        pub mod critique {
+            pub use crate::server::tools::critique::handle_critique;
+        }
+
         /// Cross-repository call-path tool.
         pub mod cross_callpath {
             pub use crate::server::tools::cross_callpath::handle_cross_callpath;
@@ -128,6 +133,11 @@ pub mod server {
             pub use crate::server::tools::cross_query::{CrossQueryOpts, handle_cross_query};
         }
 
+        /// Project design records tool.
+        pub mod decisions {
+            pub use crate::server::tools::decisions::handle_decisions;
+        }
+
         /// Diff impact analysis tool.
         pub mod diff_impact {
             pub use crate::server::tools::diff_impact::{
@@ -143,6 +153,11 @@ pub mod server {
         /// Dependency documentation lookup tool.
         pub mod docs {
             pub use crate::server::tools::docs::handle_docs;
+        }
+
+        /// Curated Rust exemplars search tool.
+        pub mod exemplars {
+            pub use crate::server::tools::exemplars::handle_exemplars;
         }
 
         /// File dependency graph tool.
@@ -198,6 +213,11 @@ pub mod server {
         /// Directory overview tool.
         pub mod overview {
             pub use crate::server::tools::overview::handle_overview;
+        }
+
+        /// Project-style overrides tool.
+        pub mod project_style {
+            pub use crate::server::tools::project_style::handle_project_style;
         }
 
         /// Symbol query tool.

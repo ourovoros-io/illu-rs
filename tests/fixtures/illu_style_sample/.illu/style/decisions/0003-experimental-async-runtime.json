@@ -1,0 +1,15 @@
+{
+  "id": "decision_evaluate_smol_runtime",
+  "title": "Evaluate smol as an alternative async runtime",
+  "status": "proposed",
+  "date": "2026-04-20",
+  "context": "We currently use tokio for the server. Memory overhead per task is non-trivial (~2KB minimum for a tokio task) and we expect to launch ~100K concurrent connections under peak load. smol claims a smaller per-task footprint.",
+  "decision": "Investigate smol as a swap-in replacement; benchmark memory and throughput under the production workload before deciding. No code change yet — this is a proposed experiment.",
+  "alternatives_considered": [
+    { "option": "Stay on tokio", "why_rejected": "Not yet — we want measurements before committing." },
+    { "option": "async-std", "why_rejected": "Project is in maintenance mode; not a viable migration target." }
+  ],
+  "consequences": "If accepted: the runtime swap touches every spawn site (~40 call sites) plus tokio::sync usage (which would migrate to async-channel or similar). If rejected: we document why and revisit if memory pressure changes.",
+  "related_axioms": ["rust_quality_74_mutex_guard_await"],
+  "related_files": []
+}
