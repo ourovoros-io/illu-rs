@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task.
 
-**Goal:** Add `.illu/style/project.json` as a per-project override layer over the universal axiom corpus. New module + new MCP tool + modified `handle_axioms` scoring + 10 tests + a fixture project.
+**Goal:** Add `.illu/style/project.json` as a per-project override layer over the universal axiom corpus. New module + new MCP tool + modified `handle_axioms` scoring + 15 tests (11 in `project_style` + 4 in `axioms`) + a fixture project.
 
 **Architecture:** New module `src/server/tools/project_style.rs` mirrors the parse-once-cache pattern of `axioms.rs`. `ProjectStyle` is loaded once at server startup from `{repo}/.illu/style/project.json`; absent file → empty default → Phase-2 behavior unchanged. `handle_axioms` grows a `_with_style` variant that consults overrides; the public `handle_axioms` reads from a process-global `OnceLock<ProjectStyle>` set during server init.
 
@@ -68,9 +68,9 @@ Create `tests/fixtures/illu_style_sample/.illu/style/project.json`:
   "version": 1,
   "axiom_overrides": [
     {
-      "id": "rust_quality_64_error_chain",
+      "id": "rust_quality_64_no_box_dyn_error_internal",
       "severity": "ignored",
-      "note": "we use anyhow project-wide; thiserror is not the convention here"
+      "note": "this codebase deliberately erases internal errors to Box<dyn Error> in private conversion helpers to keep cross-module coupling minimal; not enforcing this rule"
     },
     {
       "id": "rust_quality_85_allocation_hot_paths",
