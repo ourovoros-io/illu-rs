@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 96);
+        assert_eq!(rust_quality_axiom_count, 99);
     }
 
     #[test]
@@ -768,6 +768,36 @@ mod tests {
         assert!(
             result.contains("Unsafe Block Scope"),
             "Unsafe Block Scope missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_axioms_batch_2_present() {
+        let result = handle_axioms(
+            "MaybeUninit uninitialized memory addr_of_mut assume_init partially initialized",
+        )
+        .unwrap();
+        assert!(
+            result.contains("MaybeUninit"),
+            "MaybeUninit missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "UnsafeCell interior mutability primitive shared mutability Cell RefCell Mutex source",
+        )
+        .unwrap();
+        assert!(
+            result.contains("UnsafeCell"),
+            "UnsafeCell missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "aliasing pointer provenance Stacked Borrows reference mut overlap raw pointer to mut",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Aliasing"),
+            "Aliasing missing in focused query"
         );
     }
 }
