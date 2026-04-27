@@ -868,5 +868,35 @@
     "prompt_injection": "MANDATORY RULE: Default to `iter()`/`iter_mut()` for elementwise traversal, not indexed loops. The iterator form gives the compiler a structural proof of safety; the indexed form requires the compiler to derive that proof from the loop bounds. Reach for indexed access only when you genuinely need an index alongside the value (use `.enumerate()` instead in many cases).",
     "anti_pattern": "fn sum_indices(arr: &[i64]) -> i64 {\n    let mut total = 0;\n    for i in 0..arr.len() {     // each `arr[i]` may emit a bounds check\n        total += arr[i];\n    }\n    total\n}",
     "good_pattern": "fn sum_iter(arr: &[i64]) -> i64 {\n    arr.iter().copied().sum() // bounds-check-free; autovectorizes on most targets\n}\nfn first_negative_index(arr: &[i64]) -> Option<usize> {\n    arr.iter().position(|&x| x < 0) // structural proof carried by the iterator\n}"
+  },
+  {
+    "id": "rust_quality_88_monomorphization_cost",
+    "category": "Monomorphization Cost",
+    "source": "Rust for Rustaceans, ch. 9 §Compile Times; Rust Performance Book §Type Sizes; cargo llvm-lines documentation",
+    "triggers": ["monomorphization", "code bloat", "binary size", "generic instantiation", "cargo llvm-lines", "cargo bloat"],
+    "rule_summary": "Each concrete instantiation of a generic function generates a separate copy in the binary. Hot path: generics win (inline, no indirection). Cold or rarely-used code with many instantiations: `dyn Trait` wins (single code copy, smaller binary, slightly slower call). Profile binary size with `cargo llvm-lines` or `cargo bloat` before introducing generics in cold code, and pair this rule with axiom 79 (when to switch to dyn).",
+    "prompt_injection": "MANDATORY RULE: Generics are not free — each new concrete `T` duplicates the function body. For cold or many-typed call sites, accept the indirect call cost of `dyn Trait` to keep binary size bounded. Profile, don't guess: `cargo llvm-lines` and `cargo bloat` show actual binary impact per generic.",
+    "anti_pattern": "// Library exports a heavily-generic decoder used in mostly-cold code paths.\n// Every concrete `T: Read` instantiates the entire decode tree separately.\npub fn decode_from<T: Read>(reader: T) -> Result<Doc, Error> { /* large impl */ }",
+    "good_pattern": "// Hot path: keep generics for the inner decoders that benefit from inlining.\npub fn decode_hot<T: Read>(reader: T) -> Result<Token, Error> { /* small, inlined */ }\n// Cold entry point: take &mut dyn Read, single code copy regardless of source.\npub fn decode_from(reader: &mut dyn Read) -> Result<Doc, Error> {\n    /* large impl, monomorphized once */\n}"
+  },
+  {
+    "id": "rust_quality_89_inline_hints",
+    "category": "Inline Hints",
+    "source": "Rust Reference §inline attribute; Rust Performance Book §Inlining",
+    "triggers": ["#[inline]", "inline always", "inline never", "cross-crate inline", "force inline"],
+    "rule_summary": "`#[inline]` *suggests* the compiler inline this function across crate boundaries (within a crate, the compiler decides regardless). `#[inline(always)]` *forces* inlining even where the compiler would refuse — rarely the right call, can hurt I-cache for large functions. `#[inline(never)]` disables inlining; useful for debugging codegen, profile attribution, or preserving symbols in stack traces.",
+    "prompt_injection": "MANDATORY RULE: Use `#[inline]` on small, hot, cross-crate-callable functions. Reserve `#[inline(always)]` for functions you have measured to need it, not as a generic perf incantation. Use `#[inline(never)]` deliberately for debugging or to keep a function present in profiles and stack traces.",
+    "anti_pattern": "// 200-line function annotated to \"make it fast\" — bloats every call site.\n// Likely net-negative: I-cache pressure outweighs the saved call overhead.\n#[inline(always)]\nfn render_complex_thing(/* ... */) -> Output { /* 200 lines */ }",
+    "good_pattern": "// Tiny accessor in a hot path: cross-crate inline is a clear win.\n#[inline]\npub fn count(&self) -> usize { self.items.len() }\n\n// Debugging codegen: keep this function distinct in profiles and stack traces.\n#[inline(never)]\nfn cold_path_for_diagnostics() { /* ... */ }"
+  },
+  {
+    "id": "rust_quality_90_enum_dispatch",
+    "category": "Enum Dispatch",
+    "source": "Rust for Rustaceans, ch. 2 §Trait Objects; enum_dispatch crate; Crust of Rust: Trait Objects",
+    "triggers": ["enum dispatch", "closed set dispatch", "enum vs dyn", "no vtable", "static heterogeneous"],
+    "rule_summary": "When the variant set is fixed at the library boundary (you control all impls), an enum dispatches faster than `Box<dyn Trait>`: no vtable, no indirect branch, the `match` compiles to a jump table the optimizer can specialize per arm. Use `dyn Trait` only when external code must add new variants. Caveat: when variants vary wildly in size, `Vec<MyEnum>` reserves space for the largest variant per element, so `Vec<Box<dyn Trait>>` (16-byte fat pointers) may use less memory — measure both for size-sensitive workloads.",
+    "prompt_injection": "MANDATORY RULE: Reach for `dyn Trait` only when external crates need to add their own implementors. For closed-set polymorphism (your library knows all variants), define an enum and dispatch via `match`. The enum form is faster (no indirect call), more inspectable (exhaustive matches surface missed variants at compile time), and often clearer to read.",
+    "anti_pattern": "trait Shape { fn area(&self) -> f64; }\nstruct Circle(f64);\nstruct Square(f64);\nimpl Shape for Circle { fn area(&self) -> f64 { std::f64::consts::PI * self.0 * self.0 } }\nimpl Shape for Square { fn area(&self) -> f64 { self.0 * self.0 } }\n// vtable per element, indirect call per .area(); external crates can add Shape impls.\nlet shapes: Vec<Box<dyn Shape>> = vec![Box::new(Circle(1.0)), Box::new(Square(2.0))];",
+    "good_pattern": "enum Shape {\n    Circle(f64),\n    Square(f64),\n}\nimpl Shape {\n    fn area(&self) -> f64 {\n        match self {\n            Self::Circle(r) => std::f64::consts::PI * r * r,\n            Self::Square(s) => s * s,\n        }\n    }\n}\n// No vtable, direct call per .area(). External crates cannot add new variants —\n// that is the design choice; document it.\nlet shapes: Vec<Shape> = vec![Shape::Circle(1.0), Shape::Square(2.0)];"
   }
 ]

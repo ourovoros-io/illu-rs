@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 87);
+        assert_eq!(rust_quality_axiom_count, 90);
     }
 
     #[test]
@@ -652,6 +652,35 @@ mod tests {
         assert!(
             result.contains("Iterator Codegen"),
             "Iterator Codegen missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_perf_axioms_batch_2_present() {
+        let result = handle_axioms(
+            "monomorphization code bloat binary size generic instantiation cargo llvm-lines",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Monomorphization Cost"),
+            "Monomorphization Cost missing in focused query"
+        );
+
+        let result =
+            handle_axioms("#[inline] inline always inline never cross-crate inline force inline")
+                .unwrap();
+        assert!(
+            result.contains("Inline Hints"),
+            "Inline Hints missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "enum dispatch closed set dispatch enum vs dyn no vtable static heterogeneous",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Enum Dispatch"),
+            "Enum Dispatch missing in focused query"
         );
     }
 }
