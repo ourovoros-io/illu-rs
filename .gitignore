@@ -1,6 +1,9 @@
 /target
 /.worktrees
 .illu/
+# Test fixtures intentionally embed `.illu/` directories to exercise the
+# config loaders; the broad `.illu/` rule above must not hide them.
+!/tests/fixtures/**/.illu/
 .claude/agents/illu-*.md
 .gemini/agents/illu-*.md
 .DS_Store

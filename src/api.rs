@@ -205,6 +205,11 @@ pub mod server {
             pub use crate::server::tools::overview::handle_overview;
         }
 
+        /// Project-style overrides tool.
+        pub mod project_style {
+            pub use crate::server::tools::project_style::handle_project_style;
+        }
+
         /// Symbol query tool.
         pub mod query {
             pub use crate::server::tools::query::handle_query;
