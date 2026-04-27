@@ -145,6 +145,11 @@ pub mod server {
             pub use crate::server::tools::docs::handle_docs;
         }
 
+        /// Curated Rust exemplars search tool.
+        pub mod exemplars {
+            pub use crate::server::tools::exemplars::handle_exemplars;
+        }
+
         /// File dependency graph tool.
         pub mod file_graph {
             pub use crate::server::tools::file_graph::handle_file_graph;

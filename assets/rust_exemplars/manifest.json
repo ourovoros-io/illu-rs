@@ -1,0 +1,31 @@
+{
+  "exemplars": [
+    {
+      "slug": "errors/api_error",
+      "category": "Error Design",
+      "title": "Layered API error hierarchy",
+      "description": "Public ApiError enum with stable variants, internal source chain via std::error::Error::source, helper constructors. The pattern thiserror's #[derive(Error)] generates, spelled out for clarity.",
+      "triggers": ["api error hierarchy", "error type design", "thiserror enum", "error source chain", "stable error variants"],
+      "axioms_demonstrated": ["rust_quality_57_error_source_chain", "rust_quality_58_wrap_vs_propagate"],
+      "source": "thiserror documentation; Rust for Rustaceans, ch. 4 §Error Handling"
+    },
+    {
+      "slug": "ownership/cow_string",
+      "category": "Cow Strings",
+      "title": "Cow<str> for sometimes-borrowed config",
+      "description": "Returns the input slice unchanged when no normalization is needed, only allocating on the slow path. Demonstrates Cow's role in avoiding the always-clone-because-API-takes-String anti-pattern.",
+      "triggers": ["Cow str example", "borrow when possible", "string normalize Cow", "lazy allocation Cow"],
+      "axioms_demonstrated": ["rust_quality_86_string_allocation"],
+      "source": "Rust for Rustaceans, ch. 1 §Cow"
+    },
+    {
+      "slug": "ownership/drop_guard",
+      "category": "RAII Drop Guard",
+      "title": "Drop-guard for paired setup/teardown",
+      "description": "RAII helper that runs an arbitrary closure on drop. Carries cleanup through panic unwinding and early returns; .dismiss() consumes the guard without firing the closure on the success path.",
+      "triggers": ["drop guard example", "RAII cleanup", "scope guard pattern", "panic safe cleanup"],
+      "axioms_demonstrated": ["rust_quality_71_drop_order"],
+      "source": "Rust for Rustaceans, ch. 1 §Drop; scopeguard crate"
+    }
+  ]
+}

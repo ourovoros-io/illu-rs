@@ -781,6 +781,12 @@ struct AxiomsParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct ExemplarsParams {
+    /// Search term for exemplars
+    query: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 struct StdDocsParams {
     /// Standard-library item, e.g. `std::collections::HashMap` or `std::path::Path::strip_prefix`
     item: String,
@@ -938,6 +944,20 @@ impl IlluServer {
         tracing::info!(query = %params.query, "Tool call: axioms");
         let _guard = crate::status::StatusGuard::new(&format!("axioms ▸ {}", params.query));
         let result = tools::axioms::handle_axioms(&params.query).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "exemplars",
+        description = "Query the curated Rust Exemplars database. Returns up to 4 compile-checked Rust files demonstrating idiomatic integrated patterns, with cross-references to the axioms each demonstrates. Use this when you want to see what an idiomatic solution looks like in practice, not just rule-by-rule guidance."
+    )]
+    async fn exemplars(
+        &self,
+        Parameters(params): Parameters<ExemplarsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!(query = %params.query, "Tool call: exemplars");
+        let _guard = crate::status::StatusGuard::new(&format!("exemplars ▸ {}", params.query));
+        let result = tools::exemplars::handle_exemplars(&params.query).map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

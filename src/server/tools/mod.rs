@@ -13,6 +13,7 @@ pub mod cross_query;
 pub mod diff_impact;
 pub mod doc_coverage;
 pub mod docs;
+pub mod exemplars;
 pub mod file_graph;
 pub mod freshness;
 pub mod graph_export;
