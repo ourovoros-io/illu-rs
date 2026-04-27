@@ -89,6 +89,15 @@ fn lookup_code(slug: &str) -> Option<&'static str> {
         "ownership/drop_guard" => Some(include_str!(
             "../../../assets/rust_exemplars/ownership/drop_guard.rs"
         )),
+        "types/sealed_trait" => Some(include_str!(
+            "../../../assets/rust_exemplars/types/sealed_trait.rs"
+        )),
+        "types/typestate_builder" => Some(include_str!(
+            "../../../assets/rust_exemplars/types/typestate_builder.rs"
+        )),
+        "types/extension_trait" => Some(include_str!(
+            "../../../assets/rust_exemplars/types/extension_trait.rs"
+        )),
         _ => None,
     }
 }
@@ -281,6 +290,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_exemplars_batch_2_present() {
+        let result = handle_exemplars(
+            "sealed trait example private supertrait closed implementation extension safe",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Sealed Trait"),
+            "Sealed Trait exemplar missing in focused query"
+        );
+
+        let result =
+            handle_exemplars("type state builder compile time required field ZST marker builder")
+                .unwrap();
+        assert!(
+            result.contains("Type-state Builder"),
+            "Type-state Builder exemplar missing in focused query"
+        );
+
+        let result = handle_exemplars(
+            "extension trait example extending foreign type sealed extension trait",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Extension Trait"),
+            "Extension Trait exemplar missing in focused query"
+        );
+    }
+
     /// Compile-check that every exemplar file is real Rust. Each is a
     /// separate child module so unrelated identifiers don't collide. Dead
     /// code is allowed because exemplars are demonstrations, not callable
@@ -299,6 +337,15 @@ mod tests {
         }
         mod ownership_drop_guard {
             include!("../../../assets/rust_exemplars/ownership/drop_guard.rs");
+        }
+        mod types_sealed_trait {
+            include!("../../../assets/rust_exemplars/types/sealed_trait.rs");
+        }
+        mod types_typestate_builder {
+            include!("../../../assets/rust_exemplars/types/typestate_builder.rs");
+        }
+        mod types_extension_trait {
+            include!("../../../assets/rust_exemplars/types/extension_trait.rs");
         }
     }
 }
