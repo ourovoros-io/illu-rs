@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 84);
+        assert_eq!(rust_quality_axiom_count, 93);
     }
 
     #[test]
@@ -622,6 +622,122 @@ mod tests {
         assert!(
             surfaced >= 3,
             "expected at least 3 new types categories in demo query, got {surfaced}"
+        );
+    }
+
+    #[test]
+    fn test_perf_axioms_batch_1_present() {
+        let result = handle_axioms(
+            "allocation hot path Vec with_capacity format! in loop buffer reuse preallocate",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Allocation Discipline"),
+            "Allocation Discipline missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "Cow str Box<str> static str string with_capacity string memory allocation strategy",
+        )
+        .unwrap();
+        assert!(
+            result.contains("String Allocation"),
+            "String Allocation missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "iter elide bounds check indexed access bounds check iterator vectorize for i in 0..n compiler bounds proof",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Iterator Codegen"),
+            "Iterator Codegen missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_perf_axioms_batch_2_present() {
+        let result = handle_axioms(
+            "monomorphization code bloat binary size generic instantiation cargo llvm-lines",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Monomorphization Cost"),
+            "Monomorphization Cost missing in focused query"
+        );
+
+        let result =
+            handle_axioms("#[inline] inline always inline never cross-crate inline force inline")
+                .unwrap();
+        assert!(
+            result.contains("Inline Hints"),
+            "Inline Hints missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "enum dispatch closed set dispatch enum vs dyn no vtable static heterogeneous",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Enum Dispatch"),
+            "Enum Dispatch missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_perf_axioms_batch_3_present() {
+        let result = handle_axioms(
+            "struct layout field reorder padding alignment repr(C) size_of cache line",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Struct Layout"),
+            "Struct Layout missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "atomic ordering Relaxed Acquire Release SeqCst memory ordering atomic synchronization",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Atomic Ordering"),
+            "Atomic Ordering missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "Box small T stack vs heap unnecessary Box Box Copy type heap indirection",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Heap Allocation Discipline"),
+            "Heap Allocation Discipline missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_perf_demo_query_returns_new_axioms() {
+        let result = handle_axioms(
+            "performance allocation hot path string Cow iterator monomorphization inline enum dispatch struct layout atomic ordering Box heap",
+        )
+        .unwrap();
+        let new_categories = [
+            "Allocation Discipline",
+            "String Allocation",
+            "Iterator Codegen",
+            "Monomorphization Cost",
+            "Inline Hints",
+            "Enum Dispatch",
+            "Struct Layout",
+            "Atomic Ordering",
+            "Heap Allocation Discipline",
+        ];
+        let surfaced = new_categories
+            .iter()
+            .filter(|cat| result.contains(*cat))
+            .count();
+        assert!(
+            surfaced >= 3,
+            "expected at least 3 new perf categories in demo query, got {surfaced}"
         );
     }
 }
