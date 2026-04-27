@@ -239,7 +239,7 @@ Create file `assets/rust_exemplars/manifest.json` (all 9 entries upfront so the 
       "title": "Sealed trait with private supertrait",
       "description": "Public trait that can be called externally but only implemented within this crate. The seal is enforced by a private Sealed supertrait that external crates cannot name and therefore cannot satisfy.",
       "triggers": ["sealed trait example", "private supertrait", "closed implementation", "extension safe"],
-      "axioms_demonstrated": ["rust_quality_76_sealed_traits", "rust_quality_77_object_safety"],
+      "axioms_demonstrated": ["rust_quality_76_sealed_traits"],
       "source": "Rust for Rustaceans, ch. 2 §Trait Design"
     },
     {
@@ -255,7 +255,7 @@ Create file `assets/rust_exemplars/manifest.json` (all 9 entries upfront so the 
       "slug": "types/extension_trait",
       "category": "Extension Trait",
       "title": "Sealed extension trait on a foreign type",
-      "description": "Adds methods to a foreign type (str) via a trait. Sealed so external crates cannot add competing impls; methods do not shadow std methods because of the trait-import discipline.",
+      "description": "Adds methods to a foreign type (str) via a trait. Sealed so external crates cannot add competing impls; the seal also prevents accidental shadowing of methods we add later.",
       "triggers": ["extension trait example", "extending foreign type", "sealed extension trait", "method on str"],
       "axioms_demonstrated": ["rust_quality_76_sealed_traits"],
       "source": "Rust for Rustaceans, ch. 2 §Extension Traits"
@@ -266,7 +266,7 @@ Create file `assets/rust_exemplars/manifest.json` (all 9 entries upfront so the 
       "title": "Closed-set command dispatch via enum + match",
       "description": "Counter that processes a stream of commands via an enum + match rather than Box<dyn Command>. No vtable, no indirect call; the match compiles to direct branches; Vec<Command> packs each element rather than indirecting through a fat pointer.",
       "triggers": ["enum dispatch example", "match closed set", "command pattern enum", "no dyn dispatch"],
-      "axioms_demonstrated": ["rust_quality_90_enum_dispatch", "rust_quality_88_monomorphization_cost"],
+      "axioms_demonstrated": ["rust_quality_90_enum_dispatch"],
       "source": "Rust for Rustaceans, ch. 2 §Trait Objects; enum_dispatch crate"
     },
     {
@@ -775,11 +775,16 @@ EOF
 Create file `assets/rust_exemplars/types/sealed_trait.rs`:
 
 ```rust
-//! Sealed trait pattern: a public trait that external code can call but
-//! only types in this crate can implement. The seal is enforced by a
-//! private `Sealed` supertrait that external crates cannot name and
-//! therefore cannot satisfy. Adding new impls is reserved for future
-//! versions of this crate.
+// Sealed trait pattern: a public trait that external code can call but
+// only types in this crate can implement. The seal is enforced by a
+// private `Sealed` supertrait that external crates cannot name and
+// therefore cannot satisfy. Adding new format variants is reserved for
+// future versions of this crate.
+//
+// Each `mod private { pub trait Sealed {} }` is local to the file that
+// owns the public trait it seals; collapsing two seals into one shared
+// module weakens both because either crate's authors could then satisfy
+// the other's bound by accident.
 
 mod private {
     /// Sealed marker. External crates cannot name this trait, so they
@@ -788,27 +793,34 @@ mod private {
     pub trait Sealed {}
 }
 
-/// Public trait — external crates may call its methods on values of types
-/// that implement it, but cannot add their own implementations.
+/// Unix-epoch timestamp in seconds — the value that `Format` impls render.
+#[derive(Clone, Copy, Debug)]
+pub struct Timestamp(pub u64);
+
+/// Renders a timestamp into a human-readable string. The seal protects
+/// the *set of formats* the library exposes; callers may use any
+/// implementor freely, but only this crate may add new ones.
 pub trait Format: private::Sealed {
-    fn format(&self) -> String;
+    fn format(&self, ts: Timestamp) -> String;
 }
 
 pub struct Rfc3339;
-pub struct Iso8601Date;
+pub struct EpochSeconds;
 
 impl private::Sealed for Rfc3339 {}
-impl private::Sealed for Iso8601Date {}
+impl private::Sealed for EpochSeconds {}
 
 impl Format for Rfc3339 {
-    fn format(&self) -> String {
-        "1970-01-01T00:00:00Z".to_string()
+    fn format(&self, ts: Timestamp) -> String {
+        // Real implementations would derive year/month/day from ts.0;
+        // this exemplar focuses on the seal pattern, not date arithmetic.
+        format!("rfc3339:{}", ts.0)
     }
 }
 
-impl Format for Iso8601Date {
-    fn format(&self) -> String {
-        "1970-01-01".to_string()
+impl Format for EpochSeconds {
+    fn format(&self, ts: Timestamp) -> String {
+        ts.0.to_string()
     }
 }
 ```
@@ -932,7 +944,7 @@ Append the 3 type-system entries (sealed_trait, typestate_builder, extension_tra
       "title": "Sealed trait with private supertrait",
       "description": "Public trait that can be called externally but only implemented within this crate. The seal is enforced by a private Sealed supertrait that external crates cannot name and therefore cannot satisfy.",
       "triggers": ["sealed trait example", "private supertrait", "closed implementation", "extension safe"],
-      "axioms_demonstrated": ["rust_quality_76_sealed_traits", "rust_quality_77_object_safety"],
+      "axioms_demonstrated": ["rust_quality_76_sealed_traits"],
       "source": "Rust for Rustaceans, ch. 2 §Trait Design"
     },
     {
@@ -948,7 +960,7 @@ Append the 3 type-system entries (sealed_trait, typestate_builder, extension_tra
       "slug": "types/extension_trait",
       "category": "Extension Trait",
       "title": "Sealed extension trait on a foreign type",
-      "description": "Adds methods to a foreign type (str) via a trait. Sealed so external crates cannot add competing impls; methods do not shadow std methods because of the trait-import discipline.",
+      "description": "Adds methods to a foreign type (str) via a trait. Sealed so external crates cannot add competing impls; the seal also prevents accidental shadowing of methods we add later.",
       "triggers": ["extension trait example", "extending foreign type", "sealed extension trait", "method on str"],
       "axioms_demonstrated": ["rust_quality_76_sealed_traits"],
       "source": "Rust for Rustaceans, ch. 2 §Extension Traits"
@@ -1217,9 +1229,7 @@ pub unsafe extern "C" fn ffi_string_len(s: *const c_char) -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn ffi_string_make() -> *mut c_char {
     catch_unwind(|| {
-        CString::new("hello from rust")
-            .map(CString::into_raw)
-            .unwrap_or(std::ptr::null_mut())
+        CString::new("hello from rust").map_or(std::ptr::null_mut(), CString::into_raw)
     })
     .unwrap_or(std::ptr::null_mut())
 }
@@ -1251,7 +1261,7 @@ Append before the closing `]`:
       "title": "Closed-set command dispatch via enum + match",
       "description": "Counter that processes a stream of commands via an enum + match rather than Box<dyn Command>. No vtable, no indirect call; the match compiles to direct branches; Vec<Command> packs each element rather than indirecting through a fat pointer.",
       "triggers": ["enum dispatch example", "match closed set", "command pattern enum", "no dyn dispatch"],
-      "axioms_demonstrated": ["rust_quality_90_enum_dispatch", "rust_quality_88_monomorphization_cost"],
+      "axioms_demonstrated": ["rust_quality_90_enum_dispatch"],
       "source": "Rust for Rustaceans, ch. 2 §Trait Objects; enum_dispatch crate"
     },
     {
