@@ -402,7 +402,10 @@ fn detect_box_of_copy(hunks: &[DiffHunk]) -> Vec<Critique> {
             if !line.is_added {
                 continue;
             }
-            if let Some(m) = BOX_OF_COPY_PAT.find(&line.text) {
+            // `find_iter` so multiple `Box<u32>`/`Box<bool>` on one line each
+            // produce a critique. Single-match `find` would silently
+            // undercount declarations like `Box<u32>, Box<bool>`.
+            for m in BOX_OF_COPY_PAT.find_iter(&line.text) {
                 out.push(Critique {
                     axiom_id: String::new(),
                     axiom_title: String::new(),
@@ -642,12 +645,28 @@ mod tests {
     #[test]
     fn test_detector_axiom_ids_resolve() {
         let axioms = crate::server::tools::axioms::axioms_for_test();
-        let known: std::collections::HashSet<&str> = axioms.iter().map(|a| a.id.as_str()).collect();
+        // Map id -> category so we can also verify the detector's
+        // `axiom_title` matches the corpus's category. A title that
+        // drifts from the corpus (typo, rename) would otherwise show
+        // wrong text in critique output without any test failure.
+        let by_id: std::collections::HashMap<&str, &str> = axioms
+            .iter()
+            .map(|a| (a.id.as_str(), a.category.as_str()))
+            .collect();
         for entry in detectors() {
+            let category = by_id.get(entry.axiom_id);
             assert!(
-                known.contains(entry.axiom_id),
+                category.is_some(),
                 "detector `{}` references unknown axiom `{}`",
                 entry.name,
+                entry.axiom_id
+            );
+            assert_eq!(
+                *category.unwrap(),
+                entry.axiom_title,
+                "detector `{}` axiom_title `{}` does not match corpus category for `{}`",
+                entry.name,
+                entry.axiom_title,
                 entry.axiom_id
             );
         }
