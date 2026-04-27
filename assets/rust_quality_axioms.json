@@ -666,8 +666,8 @@
     "triggers": ["NLL", "non-lexical lifetimes", "borrow scope", "last use", "borrow flow", "borrow checker scope"],
     "rule_summary": "A borrow ends at its last use, not at the end of the curly-brace scope. When the borrow checker rejects code, restructure (move the conflicting use earlier or use the value sooner) before reaching for `.clone()` or owned types.",
     "prompt_injection": "MANDATORY RULE: When the borrow checker rejects code that conflicts with a live borrow, first ask whether the borrow's last use can move earlier. NLL means a borrow's effective scope is its live range, not its lexical block. `.clone()` is the last resort, not the first.",
-    "anti_pattern": "let mut map: HashMap<String, i32> = HashMap::new();\nlet key = String::from(\"foo\");\nlet value = match map.get(&key) {\n    Some(v) => *v,\n    None => 0,\n};\n// Defensive clone: assumes map.get's borrow of key extends past the match.\nmap.insert(key.clone(), value + 1);",
-    "good_pattern": "let mut map: HashMap<String, i32> = HashMap::new();\nlet key = String::from(\"foo\");\nlet value = match map.get(&key) {\n    Some(v) => *v,\n    None => 0,\n};\n// NLL: the borrow of key from map.get ends at the end of the match;\n// key can be moved into insert without cloning.\nmap.insert(key, value + 1);"
+    "anti_pattern": "let mut buf = String::from(\"hello\");\nlet len: usize;\n{\n    // Pre-NLL workaround: scope-bound let to release the &buf borrow\n    // before mutating buf below.\n    let r = &buf;\n    len = r.len();\n}\nbuf.push_str(\", world\");\nprintln!(\"len was {len}, now {buf}\");",
+    "good_pattern": "let mut buf = String::from(\"hello\");\nlet r = &buf;\nlet len = r.len();\n// NLL: the &buf borrow's last use is r.len() above; the borrow ends here,\n// so buf is free for &mut access on the next line.\nbuf.push_str(\", world\");\nprintln!(\"len was {len}, now {buf}\");"
   },
   {
     "id": "rust_quality_68_reborrow_mut",
@@ -684,7 +684,7 @@
     "category": "Reference Semantics",
     "source": "Rust for Rustaceans, ch. 1 §Ownership and Borrowing",
     "triggers": ["references do not own", "&mut not ownership", "consume vs borrow", "API confusion", "drop reference", "take vs borrow"],
-    "rule_summary": "`&mut T` is a unique borrow, not ownership. You cannot drop, replace, or destructure the borrowed value through it; you can only mutate in place. APIs that need to consume should take `T` (owned); APIs that need to mutate-and-return-control should take `&mut T`.",
+    "rule_summary": "`&mut T` is a unique borrow, not ownership. You cannot move out of the borrowed value (consume it) without leaving valid data behind; you can mutate in place, and you can replace via `*ref = new` or `mem::replace`. APIs that need to consume the value entirely should take `T` (owned); APIs that mutate-and-return-control should take `&mut T`.",
     "prompt_injection": "MANDATORY RULE: Choose between `&mut T` and `T` by what the API does to the value: mutate-in-place takes `&mut T`; consume / replace / extract takes `T`. `drop(buf)` on a `buf: &mut T` only drops the reference, not the value — usually a sign the wrong signature was chosen.",
     "anti_pattern": "// Function pretends to consume but only takes a reference.\nfn finalize(buf: &mut Vec<u8>) -> Vec<u8> {\n    // Caller still owns *buf afterwards; the function cannot replace or destroy it.\n    buf.clone() // paid an allocation to return ownership we never had\n}",
     "good_pattern": "// Take T when the function consumes; the caller transfers ownership.\nfn finalize(buf: Vec<u8>) -> Vec<u8> {\n    buf // moved through; can drop, mutate, replace, return\n}\n// Take &mut T when the function mutates in place.\nfn append_one(buf: &mut Vec<u8>, byte: u8) {\n    buf.push(byte);\n}"
