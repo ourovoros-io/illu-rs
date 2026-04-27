@@ -64,6 +64,21 @@ pub enum Status {
     Deprecated,
 }
 
+impl Status {
+    /// Stable lowercase string representation matching the on-disk JSON
+    /// values. Used by the scorer (full-query equality boost) and the
+    /// formatter (display in result headings) — extracted to keep both
+    /// sites in sync as new variants are added.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Proposed => "proposed",
+            Self::Accepted => "accepted",
+            Self::Superseded => "superseded",
+            Self::Deprecated => "deprecated",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Alternative {
@@ -152,12 +167,12 @@ const MAX_DECISION_RESULTS: usize = 4;
 static DECISIONS: OnceLock<Vec<Decision>> = OnceLock::new();
 
 /// Returns the active decision corpus, or an empty slice if [`init`] was
-/// not called or the directory was absent.
+/// not called or the directory was absent. The empty branch is just `&[]`
+/// because `&'static [T]` already exists statically — no `OnceLock` cell
+/// needed for the fallback (unlike `project_style::project_style`, which
+/// must return `&'static ProjectStyle` and therefore needs storage).
 pub fn decisions() -> &'static [Decision] {
-    static EMPTY: OnceLock<Vec<Decision>> = OnceLock::new();
-    DECISIONS
-        .get()
-        .map_or_else(|| EMPTY.get_or_init(Vec::new).as_slice(), Vec::as_slice)
+    DECISIONS.get().map_or(&[], Vec::as_slice)
 }
 
 /// Load `{repo_root}/.illu/style/decisions/*.json` into the global cache.
@@ -302,29 +317,33 @@ fn score_decision(decision: &Decision, query_lower: &str, query_tokens: &[&str])
         total = total.saturating_add(30);
     }
     // status equality boost (e.g. user types "accepted" to find all accepted records)
-    let status_str = match decision.status {
-        Status::Proposed => "proposed",
-        Status::Accepted => "accepted",
-        Status::Superseded => "superseded",
-        Status::Deprecated => "deprecated",
-    };
-    if status_str == query_lower {
+    if decision.status.as_str() == query_lower {
         total = total.saturating_add(20);
     }
     total
 }
 
-/// Returns up to [`MAX_DECISION_RESULTS`] decisions best matching `query`.
+/// Returns up to [`MAX_DECISION_RESULTS`] decisions best matching `query`,
+/// reading from the process-global cache populated by [`init`]. The
+/// `Result` wrapper is for parity with sibling `handle_*` tool entry
+/// points; the underlying [`handle_decisions_with_corpus`] is infallible.
 pub fn handle_decisions(query: &str) -> Result<String, crate::IlluError> {
-    let corpus = decisions();
+    Ok(handle_decisions_with_corpus(query, decisions()))
+}
+
+/// Same as [`handle_decisions`] but takes the corpus as an argument so
+/// tests can exercise the formatter and scorer without touching the
+/// process-global `DECISIONS` cache. Mirrors
+/// [`crate::server::tools::axioms::handle_axioms_with_style`]. Returns
+/// `String` (not `Result`) because no operation here can fail — parsing
+/// already happened at [`init`] time.
+pub(crate) fn handle_decisions_with_corpus(query: &str, corpus: &[Decision]) -> String {
     let query_lower = query.to_lowercase();
     let tokens: Vec<&str> = query_lower.split_whitespace().collect();
 
     if corpus.is_empty() {
-        return Ok(
-            "## Decisions\n\nNo decision records are configured (`.illu/style/decisions/` is absent or empty).\n"
-                .to_string(),
-        );
+        return "## Decisions\n\nNo decision records are configured (`.illu/style/decisions/` is absent or empty).\n"
+            .to_string();
     }
 
     let mut scored: Vec<(usize, &Decision)> = corpus
@@ -336,19 +355,19 @@ pub fn handle_decisions(query: &str) -> Result<String, crate::IlluError> {
     scored.truncate(MAX_DECISION_RESULTS);
 
     if scored.is_empty() {
-        return Ok("## Decisions\n\nNo decisions matched the query.\n".to_string());
+        return "## Decisions\n\nNo decisions matched the query.\n".to_string();
     }
 
     let mut output = String::new();
     let _ = writeln!(output, "## Decisions matching '{query}'\n");
     for (i, (score, d)) in scored.iter().enumerate() {
-        let status = match d.status {
-            Status::Proposed => "proposed",
-            Status::Accepted => "accepted",
-            Status::Superseded => "superseded",
-            Status::Deprecated => "deprecated",
-        };
-        let _ = writeln!(output, "## {} (`{}`, {})", d.title, status, d.date);
+        let _ = writeln!(
+            output,
+            "## {} (`{}`, {})",
+            d.title,
+            d.status.as_str(),
+            d.date
+        );
         let _ = writeln!(output, "**ID:** `{}`  ", d.id);
         let _ = writeln!(output, "**Match score:** {score}");
         let _ = writeln!(output, "\n### Context\n\n{}\n", d.context);
@@ -376,7 +395,7 @@ pub fn handle_decisions(query: &str) -> Result<String, crate::IlluError> {
         }
     }
 
-    Ok(output)
+    output
 }
 
 #[cfg(test)]
@@ -390,20 +409,8 @@ mod tests {
             .join("tests/fixtures/illu_style_sample/.illu/style/decisions")
     }
 
-    fn fixture_repo_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/illu_style_sample")
-    }
-
     fn fixture_corpus() -> Vec<Decision> {
         load_from_dir(&fixture_dir()).unwrap()
-    }
-
-    /// Populate the process-global `DECISIONS` cache from the fixture so
-    /// `handle_decisions` tests see the corpus. `init` is idempotent
-    /// (`OnceLock::set` is a no-op after the first success), so calling
-    /// this from multiple parallel tests is safe.
-    fn ensure_global_cache_populated() {
-        init(&fixture_repo_root()).unwrap();
     }
 
     #[test]
@@ -500,9 +507,12 @@ mod tests {
 
     #[test]
     fn test_handle_decisions_focused_query() {
-        ensure_global_cache_populated();
-        // Use the fixture's first decision as the query target.
-        let result = handle_decisions("enum dispatch handlers vtable Box dyn").unwrap();
+        // Tests pass the fixture corpus directly via handle_decisions_with_corpus
+        // rather than touching the process-global DECISIONS cache. This mirrors
+        // the Phase 3 testing seam (handle_axioms_with_style) and avoids the
+        // cross-test coupling that any OnceLock-write would introduce.
+        let corpus = fixture_corpus();
+        let result = handle_decisions_with_corpus("enum dispatch handlers vtable Box dyn", &corpus);
         assert!(
             result.contains("decision_use_enum_dispatch_for_handlers"),
             "enum-dispatch decision must surface; got: {result}"
@@ -511,10 +521,11 @@ mod tests {
 
     #[test]
     fn test_handle_decisions_demo_query() {
-        ensure_global_cache_populated();
-        // Broad query touching all three records.
-        let result =
-            handle_decisions("dispatch mutex async runtime alternatives chosen rejected").unwrap();
+        let corpus = fixture_corpus();
+        let result = handle_decisions_with_corpus(
+            "dispatch mutex async runtime alternatives chosen rejected",
+            &corpus,
+        );
         let expected_ids = [
             "decision_use_enum_dispatch_for_handlers",
             "decision_replace_mutex_per_row",

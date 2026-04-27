@@ -262,7 +262,7 @@ impl IlluServer {
                 }
                 if let Err(e) = tools::decisions::init(root) {
                     tracing::warn!(
-                        error = ?e,
+                        error = %e,
                         "failed to load .illu/style/decisions/; proceeding without decisions"
                     );
                 }
