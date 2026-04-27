@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 84);
+        assert_eq!(rust_quality_axiom_count, 87);
     }
 
     #[test]
@@ -622,6 +622,36 @@ mod tests {
         assert!(
             surfaced >= 3,
             "expected at least 3 new types categories in demo query, got {surfaced}"
+        );
+    }
+
+    #[test]
+    fn test_perf_axioms_batch_1_present() {
+        let result = handle_axioms(
+            "allocation hot path Vec with_capacity format! in loop buffer reuse preallocate",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Allocation Discipline"),
+            "Allocation Discipline missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "Cow str Box<str> static str string with_capacity string memory allocation strategy",
+        )
+        .unwrap();
+        assert!(
+            result.contains("String Allocation"),
+            "String Allocation missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "iter elide bounds check indexed access bounds check iterator vectorize for i in 0..n compiler bounds proof",
+        )
+        .unwrap();
+        assert!(
+            result.contains("Iterator Codegen"),
+            "Iterator Codegen missing in focused query"
         );
     }
 }
