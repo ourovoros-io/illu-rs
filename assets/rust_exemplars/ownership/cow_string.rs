@@ -7,6 +7,9 @@ use std::borrow::Cow;
 
 /// Normalize a config-key string: trim whitespace and lowercase ASCII letters.
 /// Returns the original slice (no allocation) when no normalization is needed.
+/// Non-ASCII uppercase characters (e.g. `Ä`) pass through unchanged — config
+/// keys are assumed to be ASCII; full Unicode case-folding requires the
+/// `unicode-case-mapping` family of crates and is intentionally out of scope.
 pub fn normalize_key(input: &str) -> Cow<'_, str> {
     let trimmed = input.trim();
     let needs_lower = trimmed.bytes().any(|b| b.is_ascii_uppercase());

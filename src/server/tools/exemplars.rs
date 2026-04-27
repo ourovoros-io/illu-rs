@@ -126,29 +126,37 @@ fn exemplars() -> Result<&'static [Exemplar], crate::IlluError> {
         .ok_or_else(|| crate::IlluError::Other("exemplars OnceLock unexpectedly empty".into()))
 }
 
-/// Score a single exemplar against a tokenized query. Mirrors
-/// [`crate::server::tools::axioms`]'s scoring weights so users get
-/// consistent ranking behaviour across both tools.
-fn score(exemplar: &Exemplar, query_tokens: &[&str]) -> usize {
-    let mut score = 0;
+/// Score a single exemplar against a query. Mirrors
+/// [`crate::server::tools::axioms`]'s scoring exactly: per-token
+/// `.contains` accumulation in the loop, then full-query equality
+/// boosts after the loop. The equality boost only fires when the user
+/// types a category or trigger phrase verbatim (multi-word triggers
+/// would never match a single token), so users get the same +20/+30
+/// behaviour they get for axioms.
+fn score(exemplar: &Exemplar, query_lower: &str, query_tokens: &[&str]) -> usize {
+    let mut total = 0;
     for token in query_tokens {
+        if exemplar.category_lower.contains(token) {
+            total += 5;
+        }
         for trigger in &exemplar.triggers_lower {
-            if trigger == token {
-                score += 30;
-            } else if trigger.contains(token) {
-                score += 10;
+            if trigger.contains(token) {
+                total += 10;
             }
         }
-        if exemplar.category_lower == *token {
-            score += 20;
-        } else if exemplar.category_lower.contains(token) {
-            score += 5;
-        }
         if exemplar.description_lower.contains(token) {
-            score += 2;
+            total += 2;
         }
     }
-    score
+    if exemplar.category_lower == query_lower {
+        total += 20;
+    }
+    for trigger in &exemplar.triggers_lower {
+        if trigger == query_lower {
+            total += 30;
+        }
+    }
+    total
 }
 
 /// Returns up to [`MAX_EXEMPLAR_RESULTS`] exemplars best matching `query`,
@@ -160,7 +168,7 @@ pub fn handle_exemplars(query: &str) -> Result<String, crate::IlluError> {
 
     let mut scored: Vec<(usize, &Exemplar)> = exemplars
         .iter()
-        .map(|e| (score(e, &tokens), e))
+        .map(|e| (score(e, &query_lower, &tokens), e))
         .filter(|(s, _)| *s > 0)
         .collect();
     scored.sort_by_key(|(s, _)| Reverse(*s));
@@ -171,10 +179,10 @@ pub fn handle_exemplars(query: &str) -> Result<String, crate::IlluError> {
     }
 
     let mut output = String::new();
-    for (i, (score, exemplar)) in scored.iter().enumerate() {
+    for (i, (match_score, exemplar)) in scored.iter().enumerate() {
         let _ = writeln!(output, "## {} — {}\n", exemplar.category, exemplar.title);
         let _ = writeln!(output, "**Slug:** `{}`  ", exemplar.slug);
-        let _ = writeln!(output, "**Match score:** {score}  ");
+        let _ = writeln!(output, "**Match score:** {match_score}  ");
         let _ = writeln!(output, "**Source:** {}  ", exemplar.source);
         if !exemplar.axioms_demonstrated.is_empty() {
             let _ = writeln!(
