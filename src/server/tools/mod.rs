@@ -25,6 +25,7 @@ pub mod implements;
 pub mod neighborhood;
 pub mod orphaned;
 pub mod overview;
+pub mod project_style;
 pub mod quality_gate;
 pub mod query;
 pub mod references;

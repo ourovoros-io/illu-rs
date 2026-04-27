@@ -247,6 +247,27 @@ pub struct IlluServer {
 impl IlluServer {
     #[must_use]
     pub fn new(db: Database, config: IndexConfig, registry: crate::registry::Registry) -> Self {
+        // Phase 3 project-style overrides: load `.illu/style/project.json`
+        // (relative to the database's repo root) into the process-global
+        // cache. Errors here are non-fatal — a misconfigured or missing
+        // file must not prevent the server from starting; tools fall back
+        // to the universal axiom corpus instead.
+        match db.repo_root() {
+            Some(root) => {
+                if let Err(e) = tools::project_style::init(root) {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to load .illu/style/project.json; proceeding without overrides"
+                    );
+                }
+            }
+            None => {
+                tracing::debug!(
+                    "database has no repo root; skipping .illu/style/project.json load"
+                );
+            }
+        }
+
         Self {
             db: std::sync::Arc::new(Mutex::new(db)),
             config: std::sync::Arc::new(config),
@@ -787,6 +808,9 @@ struct ExemplarsParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+struct ProjectStyleParams {}
+
+#[derive(Deserialize, JsonSchema)]
 struct StdDocsParams {
     /// Standard-library item, e.g. `std::collections::HashMap` or `std::path::Path::strip_prefix`
     item: String,
@@ -958,6 +982,20 @@ impl IlluServer {
         tracing::info!(query = %params.query, "Tool call: exemplars");
         let _guard = crate::status::StatusGuard::new(&format!("exemplars ▸ {}", params.query));
         let result = tools::exemplars::handle_exemplars(&params.query).map_err(to_mcp_err)?;
+        Ok(text_result(result))
+    }
+
+    #[tool(
+        name = "project_style",
+        description = "Show the active project style overrides loaded from `.illu/style/project.json`. Lists axiom overrides (ignored/demoted/noted/elevated) and project-local axioms. Use this to inspect why an axiom was filtered out or got an unexpected ranking, or to review the project conventions encoded in the file."
+    )]
+    async fn project_style(
+        &self,
+        Parameters(_params): Parameters<ProjectStyleParams>,
+    ) -> Result<CallToolResult, McpError> {
+        tracing::info!("Tool call: project_style");
+        let _guard = crate::status::StatusGuard::new("project_style");
+        let result = tools::project_style::handle_project_style().map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 

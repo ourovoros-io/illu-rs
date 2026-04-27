@@ -4,19 +4,23 @@ use std::fmt::Write;
 use std::sync::OnceLock;
 
 /// On-disk JSON shape. The `id` is preserved on the parsed [`Axiom`] so
-/// other modules (e.g. `exemplars`) can cross-reference axioms by stable
-/// identifier; serde still silently skips any other unknown keys.
+/// other modules (e.g. `exemplars`, `project_style`) can cross-reference
+/// axioms by stable identifier; serde still silently skips any other
+/// unknown keys.
+///
+/// Visibility: `pub(crate)` so the project-style loader can deserialize
+/// `local_axioms[]` through the same shape rather than forking the schema.
 #[derive(Deserialize, Debug)]
-struct RawAxiom {
-    id: String,
-    category: String,
+pub(crate) struct RawAxiom {
+    pub(crate) id: String,
+    pub(crate) category: String,
     #[serde(default)]
-    source: Option<String>,
-    triggers: Vec<String>,
-    rule_summary: String,
-    prompt_injection: String,
-    anti_pattern: String,
-    good_pattern: String,
+    pub(crate) source: Option<String>,
+    pub(crate) triggers: Vec<String>,
+    pub(crate) rule_summary: String,
+    pub(crate) prompt_injection: String,
+    pub(crate) anti_pattern: String,
+    pub(crate) good_pattern: String,
 }
 
 /// In-memory axiom with pre-lowercased fields. Scoring touches every
@@ -37,6 +41,18 @@ pub struct Axiom {
     category_lower: String,
     triggers_lower: Vec<String>,
     rule_summary_lower: String,
+}
+
+impl Axiom {
+    /// Short human-readable label for the axiom, used by display surfaces
+    /// (e.g. `project_style` summary) that show one axiom per line and
+    /// don't need the full prompt injection. Today this is just the
+    /// `rule_summary`; if a future schema version adds a distinct `title`,
+    /// callers gain richer output without changing.
+    #[must_use]
+    pub fn title_or_summary(&self) -> &str {
+        &self.rule_summary
+    }
 }
 
 impl From<RawAxiom> for Axiom {
