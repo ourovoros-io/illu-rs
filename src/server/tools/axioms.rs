@@ -419,7 +419,7 @@ mod tests {
             assert!(!axiom.good_pattern.trim().is_empty(), "{}", axiom.id);
         }
 
-        assert_eq!(rust_quality_axiom_count, 99);
+        assert_eq!(rust_quality_axiom_count, 102);
     }
 
     #[test]
@@ -798,6 +798,62 @@ mod tests {
         assert!(
             result.contains("Aliasing"),
             "Aliasing missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_axioms_batch_3_present() {
+        let result = handle_axioms(
+            "extern C panic catch_unwind FFI boundary unwind UB generic extern reference across FFI",
+        )
+        .unwrap();
+        assert!(
+            result.contains("FFI Boundary"),
+            "FFI Boundary missing in focused query"
+        );
+
+        let result =
+            handle_axioms("repr(C) FFI safe layout stable Option NonNull c_int c_uchar FFI types")
+                .unwrap();
+        assert!(
+            result.contains("FFI Layout"),
+            "FFI Layout missing in focused query"
+        );
+
+        let result = handle_axioms(
+            "CStr from_ptr CString into_raw FFI string ownership c_char buffer ptr len pair",
+        )
+        .unwrap();
+        assert!(
+            result.contains("FFI Strings"),
+            "FFI Strings missing in focused query"
+        );
+    }
+
+    #[test]
+    fn test_unsafe_demo_query_returns_new_axioms() {
+        let result = handle_axioms(
+            "unsafe SAFETY comment unsafe fn smallest unsafe MaybeUninit UnsafeCell aliasing extern C panic repr(C) CStr buffer ownership FFI",
+        )
+        .unwrap();
+        let new_categories = [
+            "Unsafe Block Discipline",
+            "Unsafe Fn Contract",
+            "Unsafe Block Scope",
+            "MaybeUninit",
+            "UnsafeCell",
+            "Aliasing",
+            "FFI Boundary",
+            "FFI Layout",
+            "FFI Strings",
+        ];
+        let surfaced = new_categories
+            .iter()
+            .filter(|cat| result.contains(*cat))
+            .count();
+        assert!(
+            surfaced >= 3,
+            "expected at least 3 new unsafe/FFI categories in demo query, got {surfaced}"
         );
     }
 }
