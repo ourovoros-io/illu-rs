@@ -29,7 +29,7 @@ Phase 4 introduces a structured place to encode that knowledge: ADR-style decisi
 - Schema: `id`, `title`, `status` (enum), `date` (ISO-8601), `context`, `decision`, `alternatives_considered[]`, `consequences`, optional `related_axioms[]` and `related_files[]`.
 - Server-startup load alongside `project_style::init`, sharing the same `repo_root` plumbing.
 - Test fixture: 3 decisions under `tests/fixtures/illu_style_sample/.illu/style/decisions/` exercising different statuses and at least one `related_axioms` cross-reference.
-- 8 tests: validity (5) + per-batch focused query (1) + demo query (1) + integration with the live tool surface (1).
+- 9 tests: validity (6, including a date-format-validation test added during implementation) + per-batch focused query (1) + demo query (1) + integration with the live tool surface (1).
 
 **Explicit non-goals:**
 - No universal corpus of decisions in `assets/` — design records are inherently project-specific.
@@ -179,7 +179,7 @@ If no matches: `## Decisions\n\nNo decisions matched the query.\n` or, if the di
 
 ## Tests
 
-8 tests in `decisions::tests`:
+9 tests in `decisions::tests`:
 
 1. `test_decisions_parses_empty_dir` — absent or empty directory → `Vec::new()`, no error.
 2. `test_decisions_parses_fixture` — fixture loads to 3 decisions with expected statuses.

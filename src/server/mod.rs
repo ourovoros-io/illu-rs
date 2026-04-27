@@ -269,7 +269,7 @@ impl IlluServer {
             }
             None => {
                 tracing::debug!(
-                    "database has no repo root; skipping .illu/style/project.json load"
+                    "database has no repo root; skipping .illu/style/project.json and .illu/style/decisions/ loads"
                 );
             }
         }
