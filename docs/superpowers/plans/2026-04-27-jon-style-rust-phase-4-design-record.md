@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task.
 
-**Goal:** Add `.illu/style/decisions/` as a project-local corpus of ADR-style design records. New module + new MCP tool + 8 tests + 3-decision fixture.
+**Goal:** Add `.illu/style/decisions/` as a project-local corpus of ADR-style design records. New module + new MCP tool + 9 tests + 3-decision fixture.
 
 **Architecture:** New module `src/server/tools/decisions.rs` mirrors the parse-once-cache pattern of `axioms.rs` and `project_style.rs`. `Decision`s are loaded once at server startup from `{repo}/.illu/style/decisions/*.json` (multi-file, one decision per file). Absent directory → empty default → Phase-3 behavior unchanged. New `mcp__illu__decisions` tool scores queries against title/context/decision/consequences/alternatives.
 
@@ -92,7 +92,7 @@ Create `0002-mutex-per-row-scheme.json`:
     { "option": "DashMap", "why_rejected": "External dependency we can avoid for a 64-shard scheme that's <100 LOC." }
   ],
   "consequences": "Cache implementation is a custom 64-shard map; readers see uncontended access for ~98% of requests in production. Sharding is fixed at compile time. This decision was later superseded by switching to a fully lock-free structure when the contention shifted to the write path.",
-  "related_axioms": ["rust_quality_73_interior_mutability_decision_tree"],
+  "related_axioms": ["rust_quality_73_interior_mutability_selection"],
   "related_files": ["src/cache/sharded.rs"]
 }
 ```
@@ -112,7 +112,7 @@ Create `0003-experimental-async-runtime.json`:
     { "option": "async-std", "why_rejected": "Project is in maintenance mode; not a viable migration target." }
   ],
   "consequences": "If accepted: the runtime swap touches every spawn site (~40 call sites) plus tokio::sync usage (which would migrate to async-channel or similar). If rejected: we document why and revisit if memory pressure changes.",
-  "related_axioms": ["rust_quality_74_mutexguard_across_await"],
+  "related_axioms": ["rust_quality_74_mutex_guard_await"],
   "related_files": []
 }
 ```
@@ -120,7 +120,7 @@ Create `0003-experimental-async-runtime.json`:
 - [ ] **Step 2: Verify each `related_axioms[].id` exists in the corpus**
 
 ```bash
-for id in rust_quality_90_enum_dispatch rust_quality_73_interior_mutability_decision_tree rust_quality_74_mutexguard_across_await; do
+for id in rust_quality_90_enum_dispatch rust_quality_73_interior_mutability_selection rust_quality_74_mutex_guard_await; do
   grep -q "\"id\": \"$id\"" assets/rust_quality_axioms.json && echo "OK: $id" || echo "MISSING: $id"
 done
 ```
