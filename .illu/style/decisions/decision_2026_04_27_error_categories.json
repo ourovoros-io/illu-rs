@@ -1,0 +1,36 @@
+{
+  "id": "decision_2026_04_27_error_categories",
+  "title": "Defer typed error variants for new MCP tools to follow-up PR #96",
+  "status": "accepted",
+  "date": "2026-04-27",
+  "context": "PR #95 shipped four new MCP tools (critique, exemplars, project_style, decisions) that all returned IlluError::Other(String) for parse failures (14 call sites total). Axiom rust_quality_60_error_categories (Error Category Structure) flags this as the documented anti-pattern: callers cannot programmatically distinguish failure categories without parsing Display strings, and tests cannot use Error Path Specificity (axiom rust_quality_66_test_failure_variant) to assert which category fired. Tests in those modules used matches!(err, IlluError::Other(s) if s.contains(\"...\")) which would silently pass after a refactor that flipped one failure cause into another.",
+  "decision": "Ship PR #95 as-is and address the IlluError::Other saturation in follow-up PR #96. The follow-up introduces per-module typed error enums (ProjectStyleError, DecisionError, CritiqueInputError, ExemplarManifestError) wrapped by new IlluError variants via #[from], and tightens tests to use matches!(err, IlluError::ProjectStyle(ProjectStyleError::DuplicateLocalId(s)) if s == \"project_dup\") form. parse and parse_decision become module-local-error-typed (private fns) so internal callers and tests destructure the precise category without going through the IlluError wrapper; conversion to IlluError happens at the module boundary in load_from_path / load_from_dir / handle_critique / exemplars cache fn.",
+  "alternatives_considered": [
+    {
+      "option": "Block PR #95 until typed errors are in place",
+      "why_rejected": "PR #95 is 88 commits across 5 phases (46 new axioms, 9 exemplars, 4 new MCP tools, max_tokens budget mode). Adding the error refactor would balloon scope and delay every user-visible feature. The error structure is a refactor that does not change behavior; it can land safely as a follow-up."
+    },
+    {
+      "option": "Keep IlluError::Other(String) permanently",
+      "why_rejected": "Surfacing axioms the implementation itself violates undermines the credibility of the corpus. The whole point of the dogfood is to act on what it surfaces. The escape-hatch doc on IlluError::Other already says 'prefer a domain variant when adding new sites'; this commits to that policy for the new tools."
+    },
+    {
+      "option": "Add IlluError::Json variants per-tool directly (no module-local enums)",
+      "why_rejected": "Would inflate IlluError to 30+ variants and couple every tool's failure taxonomy to the crate-wide error type. Per-module enums let each tool own its categories; the IlluError #[from] wrapper is one transparent variant per tool."
+    }
+  ],
+  "consequences": "The four new tools' parse functions now return module-local error types directly (ProjectStyleError, DecisionError) or wrap typed enums into IlluError at their existing boundary (CritiqueInputError, ExemplarManifestError). serde_json::Error and io::Error are preserved in std::error::Error::source() chains rather than being stringified, satisfying the Error Source Chain axiom. Tests upgrade from substring/is_err checks to matches!(err, ProjectStyleError::DuplicateLocalId(_)) form. IlluError::Other(String) remains as the documented escape hatch for one-shot string-error sites elsewhere in the crate (200+ call sites untouched).",
+  "related_axioms": [
+    "rust_quality_60_error_categories",
+    "rust_quality_66_test_failure_variant",
+    "rust_quality_57_error_source_chain",
+    "rust_quality_64_no_box_dyn_error_internal"
+  ],
+  "related_files": [
+    "src/error.rs",
+    "src/server/tools/project_style.rs",
+    "src/server/tools/decisions.rs",
+    "src/server/tools/critique.rs",
+    "src/server/tools/exemplars.rs"
+  ]
+}
