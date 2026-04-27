@@ -805,6 +805,12 @@ struct CrossCallpathParams {
 struct AxiomsParams {
     /// Search term for axioms
     query: String,
+    /// Optional token budget for the response. When set, results are
+    /// truncated in score order so cumulative estimated tokens stay
+    /// within budget. When omitted, behavior is unchanged from prior
+    /// phases (caps at `MAX_AXIOM_RESULTS` results regardless of size).
+    #[serde(default)]
+    max_tokens: Option<u32>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -977,9 +983,16 @@ impl IlluServer {
         &self,
         Parameters(params): Parameters<AxiomsParams>,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!(query = %params.query, "Tool call: axioms");
+        tracing::info!(query = %params.query, max_tokens = ?params.max_tokens, "Tool call: axioms");
         let _guard = crate::status::StatusGuard::new(&format!("axioms ▸ {}", params.query));
-        let result = tools::axioms::handle_axioms(&params.query).map_err(to_mcp_err)?;
+        // Calls `handle_axioms_with_style` directly so the caller-supplied
+        // token budget reaches the budget-walk in axioms.rs. The thin
+        // `handle_axioms` wrapper still threads `None` for use by
+        // `src/api.rs` consumers that have no MCP-side budget concern.
+        let style = crate::server::tools::project_style::project_style();
+        let result =
+            tools::axioms::handle_axioms_with_style(&params.query, style, params.max_tokens)
+                .map_err(to_mcp_err)?;
         Ok(text_result(result))
     }
 
